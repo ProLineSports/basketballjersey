@@ -1473,41 +1473,6 @@ export default function JerseyCustomizer() {
         </div>
       </div>
 
-      {/* SIGN IN OVERLAY */}
-      {showSignIn && (
-        <div onClick={() => setShowSignIn(false)} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.25)", backdropFilter:"blur(2px)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000 }}>
-          <div onClick={e => e.stopPropagation()} style={{ display:"flex", flexDirection:"column", alignItems:"center", position:"relative" }}>
-            <button onClick={() => setShowSignIn(false)} style={{ position:"absolute", top:-12, right:-12, zIndex:10, background:"rgba(0,0,0,0.5)", border:"1px solid rgba(255,255,255,0.2)", borderRadius:"50%", width:28, height:28, cursor:"pointer", color:"#fff", fontSize:14, display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
-            <SignIn
-              routing="hash"
-              afterSignInUrl="/?upgrade=true"
-              afterSignUpUrl="/?upgrade=true"
-              appearance={{
-                variables: {
-                  colorPrimary: "#c8d900",
-                  colorPrimaryText: "#000000",
-                  colorBackground: "#ffffff",
-                  colorInputBackground: "#f9f9f9",
-                  colorInputText: "#111111",
-                  colorText: "#111111",
-                  colorTextSecondary: "#555555",
-                  borderRadius: "8px",
-                  fontFamily: "Barlow, sans-serif",
-                },
-                elements: {
-                  footerActionLink: { color: "#7c8f00" },
-                  formButtonPrimary: { backgroundColor: "#efff00", color: "#000" },
-                },
-              }}
-            />
-            <div style={{ marginTop:12, background:"rgba(239,255,0,0.1)", border:"1px solid rgba(239,255,0,0.25)", borderRadius:8, padding:"10px 16px", textAlign:"center", maxWidth:360, width:"100%" }}>
-              <span style={{ fontSize:12, color:"#efff00", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:700, letterSpacing:"0.04em" }}>🎉 NEW USERS GET 3 FREE EXPORTS</span>
-              <div style={{ fontSize:11, color:"#9ca3af", marginTop:3 }}>No credit card required to get started</div>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* UPGRADE MODAL */}
       {showUpgrade && (
         <div onClick={()=>setShowUpgrade(false)} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.78)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000 }}>
