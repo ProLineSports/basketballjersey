@@ -1,6 +1,6 @@
 'use client';
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { useUser, useClerk, UserButton, SignIn } from "@clerk/nextjs";
+import { useUser, useClerk, UserButton } from "@clerk/nextjs";
 
 const CREDITS_INITIAL = 3;
 
@@ -543,7 +543,6 @@ export default function JerseyCustomizer() {
   // ── AUTH + CREDITS (Clerk + Supabase) ──
   const { user, isLoaded, isSignedIn } = useUser();
   const { openSignIn } = useClerk();
-  const [showSignIn, setShowSignIn]     = useState(false);
   const [credits, setCredits]           = useState(0);
   const [paidCredits, setPaidCredits]   = useState(0);
   const [isUnlimited, setIsUnlimited]   = useState(false);
@@ -634,11 +633,6 @@ export default function JerseyCustomizer() {
       })
       .catch(err => { console.error('Credits fetch error:', err); setCreditsLoaded(true); });
   }, [isLoaded, isSignedIn]);
-
-  // Auto-close sign-in modal when user successfully signs in
-  useEffect(() => {
-    if (isSignedIn && showSignIn) setShowSignIn(false);
-  }, [isSignedIn]);
 
   // Auto-open upgrade modal if redirected after sign-in via GET CREDITS
   useEffect(() => {
@@ -794,7 +788,7 @@ export default function JerseyCustomizer() {
   }, []);
 
   const handleExport = async () => {
-    if (!isSignedIn) { setShowSignIn(true); return; }
+    if (!isSignedIn) { openSignIn({ afterSignInUrl:"/?upgrade=true", afterSignUpUrl:"/?upgrade=true" }); return; }
     if (!isUnlimited && credits <= 0) { setShowUpgrade(true); return; }
     setExporting(true);
 
@@ -961,7 +955,7 @@ export default function JerseyCustomizer() {
   };
 
   const handleGetCredits = () => {
-    if (!isSignedIn) { setShowSignIn(true); return; }
+    if (!isSignedIn) { openSignIn({ afterSignInUrl:"/?upgrade=true", afterSignUpUrl:"/?upgrade=true" }); return; }
     setShowUpgrade(true);
   };
 
@@ -1021,7 +1015,7 @@ export default function JerseyCustomizer() {
           <button onClick={handleGetCredits} style={{ background:"linear-gradient(135deg,#efff00,#c8d900)", border:"none", borderRadius:6, padding:"6px 14px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800, fontSize:12, letterSpacing:"0.05em", color:"#000", cursor:"pointer" }}>{isSignedIn ? "GET CREDITS" : "GET STARTED"}</button>
           {isSignedIn
             ? <UserButton afterSignOutUrl="/" appearance={{ elements: { avatarBox: { width:28, height:28 } } }} />
-            : <button onClick={() => setShowSignIn(true)} style={{ background:"rgba(255,255,255,0.08)", border:"1px solid rgba(255,255,255,0.12)", borderRadius:"50%", width:28, height:28, cursor:"pointer", fontSize:12, color:"#e2e8f0", display:"flex", alignItems:"center", justifyContent:"center" }}>👤</button>
+            : <button onClick={() => openSignIn({ afterSignInUrl:"/?upgrade=true" })} style={{ background:"rgba(255,255,255,0.08)", border:"1px solid rgba(255,255,255,0.12)", borderRadius:"50%", width:28, height:28, cursor:"pointer", fontSize:12, color:"#e2e8f0", display:"flex", alignItems:"center", justifyContent:"center" }}>👤</button>
           }
         </div>
       </div>
