@@ -552,6 +552,7 @@ export default function JerseyCustomizer() {
   const [exported, setExported]           = useState(false);
   const [showUpgrade, setShowUpgrade]     = useState(false);
   const [selectedPlan, setSelectedPlan]   = useState(null);
+  const [checkingOut, setCheckingOut]     = useState(false);
   const [brightness, setBrightness]         = useState(0.72);
   const [hideControls, setHideControls]     = useState(false);
   const [bg, setBg] = useState({ enabled: true, color: "#ffffff" });
@@ -956,6 +957,7 @@ export default function JerseyCustomizer() {
 
   const handleGetCredits = () => {
     if (!isSignedIn) { openSignIn({ afterSignInUrl:"/?upgrade=true", afterSignUpUrl:"/?upgrade=true" }); return; }
+    setSelectedPlan(null);
     setShowUpgrade(true);
   };
 
@@ -1484,7 +1486,7 @@ export default function JerseyCustomizer() {
             </div>
 
             {/* Subscription option */}
-            <button onClick={() => setSelectedPlan("NEXT_PUBLIC_STRIPE_PRICE_UNLIMITED")} style={{ width:"100%", background:selectedPlan==="NEXT_PUBLIC_STRIPE_PRICE_UNLIMITED"?"rgba(239,255,0,0.15)":"rgba(239,255,0,0.06)", border:selectedPlan==="NEXT_PUBLIC_STRIPE_PRICE_UNLIMITED"?"2px solid rgba(239,255,0,0.7)":"2px solid rgba(239,255,0,0.35)", borderRadius:10, padding:"14px 16px", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16, position:"relative" }}>
+            <button onClick={() => setSelectedPlan("NEXT_PUBLIC_STRIPE_PRICE_UNLIMITED")} style={{ width:"100%", background:selectedPlan==="NEXT_PUBLIC_STRIPE_PRICE_UNLIMITED"?"rgba(239,255,0,0.2)":"rgba(239,255,0,0.04)", border:selectedPlan==="NEXT_PUBLIC_STRIPE_PRICE_UNLIMITED"?"2px solid #efff00":"1px solid rgba(239,255,0,0.25)", borderRadius:10, padding:"14px 16px", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16, position:"relative" }}>
               <div style={{ position:"absolute", top:-10, left:16, background:"#efff00", color:"#000", fontSize:8, fontWeight:800, padding:"2px 8px", borderRadius:3, fontFamily:"'Barlow Condensed',sans-serif", whiteSpace:"nowrap" }}>MOST POPULAR</div>
               <div style={{ textAlign:"left" }}>
                 <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:16, color:"#efff00", letterSpacing:"0.04em" }}>UNLIMITED MONTHLY</div>
@@ -1519,7 +1521,7 @@ export default function JerseyCustomizer() {
             </div>
 
             <button onClick={async () => {
-              if (!selectedPlan) return;
+              if (!selectedPlan || checkingOut) return;
               const PRICE_IDS = {
                 "NEXT_PUBLIC_STRIPE_PRICE_UNLIMITED":  process.env.NEXT_PUBLIC_STRIPE_PRICE_UNLIMITED,
                 "NEXT_PUBLIC_STRIPE_PRICE_5_CREDITS":  process.env.NEXT_PUBLIC_STRIPE_PRICE_5_CREDITS,
@@ -1527,10 +1529,21 @@ export default function JerseyCustomizer() {
                 "NEXT_PUBLIC_STRIPE_PRICE_50_CREDITS": process.env.NEXT_PUBLIC_STRIPE_PRICE_50_CREDITS,
               };
               const priceId = PRICE_IDS[selectedPlan];
-              const r = await fetch('/api/stripe/checkout', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({priceId})});
-              const d = await r.json();
-              if (d.url) window.location.href = d.url;
-            }} style={{ width:"100%", background:selectedPlan?"linear-gradient(135deg,#efff00,#c8d900)":"rgba(255,255,255,0.08)", border:"none", borderRadius:8, padding:"13px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:14, letterSpacing:"0.06em", color:selectedPlan?"#000":"#6b7280", cursor:selectedPlan?"pointer":"default", marginBottom:8, transition:"all 0.15s ease" }}>CONTINUE TO CHECKOUT →</button>
+              console.log('Checkout:', { selectedPlan, priceId });
+              if (!priceId) { console.error('No price ID found for', selectedPlan); return; }
+              setCheckingOut(true);
+              try {
+                const r = await fetch('/api/stripe/checkout', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({priceId})});
+                const d = await r.json();
+                console.log('Checkout response:', d);
+                if (d.url) window.location.href = d.url;
+                else console.error('No URL in response:', d);
+              } catch(err) {
+                console.error('Checkout error:', err);
+              } finally {
+                setCheckingOut(false);
+              }
+            }} style={{ width:"100%", background:selectedPlan?"linear-gradient(135deg,#efff00,#c8d900)":"rgba(255,255,255,0.08)", border:"none", borderRadius:8, padding:"13px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:14, letterSpacing:"0.06em", color:selectedPlan?"#000":"#6b7280", cursor:selectedPlan?"pointer":"default", marginBottom:8, transition:"all 0.15s ease" }}>{checkingOut ? "LOADING..." : "CONTINUE TO CHECKOUT →"}</button>
             <button onClick={()=>setShowUpgrade(false)} style={{ width:"100%", background:"none", border:"none", fontSize:11, color:"#6b7280", cursor:"pointer", padding:"7px", fontFamily:"'Barlow Condensed',sans-serif" }}>Maybe later</button>
             <div style={{ textAlign:"center", marginTop:10, fontSize:11, color:"#4b5563", lineHeight:1.6 }}>
               Not into credits? Want more control? Purchase the Photoshop template{" "}
