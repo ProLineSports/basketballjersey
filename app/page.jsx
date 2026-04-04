@@ -755,9 +755,21 @@ export default function JerseyCustomizer() {
   useEffect(() => {
     const el = centerRef.current;
     if (!el) return;
-    const onWheel = (e) => { e.preventDefault(); };
+    const onWheel = (e) => { e.preventDefault(); e.stopPropagation(); };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
+  }, []);
+
+  // Prevent all scroll on document when embedded in iframe
+  useEffect(() => {
+    const onWheel = (e) => {
+      const el = centerRef.current;
+      if (el && el.contains(e.target)) {
+        e.preventDefault();
+      }
+    };
+    document.addEventListener('wheel', onWheel, { passive: false });
+    return () => document.removeEventListener('wheel', onWheel);
   }, []);
     e.preventDefault();
     const delta = e.deltaY > 0 ? -0.1 : 0.1;
