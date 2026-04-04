@@ -751,7 +751,14 @@ export default function JerseyCustomizer() {
     };
   }, []);
 
-  const handleWheel = useCallback((e) => {
+  // Prevent page scroll when using wheel to zoom over canvas
+  useEffect(() => {
+    const el = centerRef.current;
+    if (!el) return;
+    const onWheel = (e) => { e.preventDefault(); };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
     e.preventDefault();
     const delta = e.deltaY > 0 ? -0.1 : 0.1;
     setZoom(z => Math.min(4, Math.max(0.5, Math.round((z + delta) * 10) / 10)));
