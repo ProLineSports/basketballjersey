@@ -771,6 +771,8 @@ export default function JerseyCustomizer() {
     document.addEventListener('wheel', onWheel, { passive: false });
     return () => document.removeEventListener('wheel', onWheel);
   }, []);
+
+  const handleWheel = useCallback((e) => {
     e.preventDefault();
     const delta = e.deltaY > 0 ? -0.1 : 0.1;
     setZoom(z => Math.min(4, Math.max(0.5, Math.round((z + delta) * 10) / 10)));
