@@ -18,6 +18,8 @@ const ZONES = [
   { id: 'sideelems',  label: 'Strap Clips',    materials: ['side elements'],                                            defaultColor: '#212121' },
   { id: 'screws',     label: 'Screws',         materials: ['screws metal parts'],                                       defaultColor: '#888888' },
   { id: 'metal',      label: 'Hardware',       materials: ['shiny metal'],                                              defaultColor: '#aaaaaa' },
+  { id: 'visorframe', label: 'Visor Frame',    materials: ['visor support thing'],                                      defaultColor: '#212121' },
+  { id: 'fmclips',    label: 'Facemask Clips', materials: ['Transparent Plastic'],                                      defaultColor: '#212121' },
   { id: 'innerliner', label: 'Inner Liner',    materials: ['wire_087224198'],                                           defaultColor: '#212121' },
 ];
 
@@ -131,7 +133,7 @@ export default function HelmetBuilder() {
     rim.position.set(0, -2, -3);
     scene.add(rim);
     // Sparkle point light — close to helmet for flake catchlights
-    const sparkleLight = new THREE.PointLight(0xffffff, 2.0, 5);
+    const sparkleLight = new THREE.PointLight(0xffffff, 8.0, 8);
     sparkleLight.position.set(1, 1, 1);
     scene.add(sparkleLight);
 
@@ -169,7 +171,6 @@ export default function HelmetBuilder() {
           const color = zone ? colors[zone.id] : '#808080';
 
           const isVisor = name === 'visor';
-          const isVisorFrame = name === 'visor support thing';
           const newMat = new THREE.MeshPhysicalMaterial({
             color: new THREE.Color(isVisor ? '#000000' : color),
             roughness: isVisor ? 0.05 : finishDef.roughness,
@@ -246,12 +247,12 @@ export default function HelmetBuilder() {
 
   // ── VISOR ON/OFF ──────────────────────────────────────────────────────────
   useEffect(() => {
-    // Toggle visor glass + visor frame together
+    // Toggle visor glass only
     if (sceneRef.current) {
       sceneRef.current.traverse(child => {
         if (!child.isMesh) return;
         const mats = Array.isArray(child.material) ? child.material : [child.material];
-        if (mats.some(m => m && (m === materialsRef.current['visor'] || m === materialsRef.current['visor support thing']))) {
+        if (mats.some(m => m && m === materialsRef.current['visor'])) {
           child.visible = visorOn;
         }
       });
