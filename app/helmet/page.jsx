@@ -39,23 +39,20 @@ const CREDITS_INITIAL = 3;
 // intentionally does NOT get an env map anymore — that was the other source of the
 // "everything looks washed out" complaint.
 const SHELL_MATERIAL_NAMES = ['Helmet Main Shell', 'High-Gloss Red Plastic', 'Car paint'];
+const FACEMASK_MATERIAL_NAMES = ['facemask', 'visor support thing'];
 
 // ── ENV MAP ROUTING ─────────────────────────────────────────────────────────
-// Environment reflections are now scoped to exactly the two finishes that need them.
-// Gloss/Matte/Satin get envMap=null so their base color reads true instead of being
-// lightened by reflected sky. Car Paint uses the soft studio gradient (for clearcoat
-// highlights); Chrome uses a real photographic environment (loaded separately below)
-// so it reflects something recognizable instead of a flat gradient smear.
-function applyShellEnvMap(materialsMap, scene, finishId) {
-  const isChrome   = finishId === 'chrome';
-  const isCarPaint = finishId === 'carpaint';
-  const envTex = isChrome
+// Environment reflections are scoped to exactly the finishes that need them, and the
+// intensity is tuned per-finish so Car Paint doesn't blow out toward white while
+// Chrome still reads as a proper mirror.
+function applyEnvMapToMaterials(materialNames, materialsMap, scene, useChrome, useCarPaint) {
+  const envTex = useChrome
     ? (scene.userData.chromeEnvTexture || scene.userData.envTexture || null)
-    : isCarPaint
+    : useCarPaint
       ? (scene.userData.envTexture || null)
       : null;
-  const intensity = isChrome ? 1.6 : isCarPaint ? 0.55 : 0;
-  SHELL_MATERIAL_NAMES.forEach(name => {
+  const intensity = useChrome ? 1.6 : useCarPaint ? 0.4 : 0;
+  materialNames.forEach(name => {
     const mat = materialsMap[name];
     if (!mat) return;
     mat.envMap = envTex;
@@ -63,26 +60,39 @@ function applyShellEnvMap(materialsMap, scene, finishId) {
     mat.needsUpdate = true;
   });
 }
+function applyShellEnvMap(materialsMap, scene, finishId) {
+  applyEnvMapToMaterials(SHELL_MATERIAL_NAMES, materialsMap, scene, finishId === 'chrome', finishId === 'carpaint');
+}
+function applyFacemaskEnvMap(materialsMap, scene, facemaskFinishId) {
+  applyEnvMapToMaterials(FACEMASK_MATERIAL_NAMES, materialsMap, scene, facemaskFinishId === 'chrome', false);
+}
 
 // ── CAR PAINT GLITTER FLAKE TEXTURE ─────────────────────────────────────────
-// Generates a tileable grayscale canvas used as BOTH roughnessMap and metalnessMap.
-// Base value = dull painted base (higher roughness, low metalness). Bright flecks =
-// near-mirror metal points that catch light as the helmet turns. `intensity` (0–1,
-// driven by the Glitter slider) controls flake density.
+// Generates a tileable texture used as BOTH roughnessMap (reads the G channel) and
+// metalnessMap (reads the B channel), so the base coat and the flecks are controlled
+// independently instead of both riding the same gray value:
+//   Base coat  → fairly rough, mostly non-metallic → blurs/dims the env reflection,
+//                which is what was making the whole shell read too light.
+//   Flecks     → near-zero roughness, near-full metalness → sharp bright glints only
+//                where a flake actually is.
+// `intensity` (0–1, from the Glitter slider) controls flake density.
 function createFlakeTexture(intensity) {
   const size = 256;
   const canvas = document.createElement('canvas');
   canvas.width = size; canvas.height = size;
   const ctx = canvas.getContext('2d');
-  ctx.fillStyle = 'rgb(92,92,92)';
+  const baseRough = 178; // G channel ≈ 0.70 roughness — dull enough to not mirror the sky
+  const baseMetal = 38;  // B channel ≈ 0.15 metalness — mostly paint, not metal
+  ctx.fillStyle = `rgb(${baseRough},${baseRough},${baseMetal})`;
   ctx.fillRect(0, 0, size, size);
   const flakeCount = Math.round(intensity * 420); // 0 → no flakes, 1 → dense
   for (let i = 0; i < flakeCount; i++) {
     const x = Math.random() * size;
     const y = Math.random() * size;
     const r = 0.4 + Math.random() * 1.0;
-    const b = Math.round(225 + Math.random() * 30);
-    ctx.fillStyle = `rgb(${b},${b},${b})`;
+    const flakeRough = Math.round(4 + Math.random() * 14);    // ≈0.02–0.07 — near mirror
+    const flakeMetal = Math.round(235 + Math.random() * 20);  // ≈0.92–1.0 — near full metal
+    ctx.fillStyle = `rgb(${flakeRough},${flakeRough},${flakeMetal})`;
     ctx.beginPath();
     ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.fill();
@@ -149,6 +159,8 @@ export default function HelmetBuilder() {
   const [facemaskFinish, setFacemaskFinish] = useState('gloss'); // gloss | matte
   const finishRef = useRef(finish);
   useEffect(() => { finishRef.current = finish; }, [finish]);
+  const facemaskFinishRef = useRef(facemaskFinish);
+  useEffect(() => { facemaskFinishRef.current = facemaskFinish; }, [facemaskFinish]);
 
   // ── AUTH + CREDITS (Clerk + Supabase) — mirrors /jersey ──
   const [credits, setCredits]             = useState(0);
@@ -218,9 +230,9 @@ export default function HelmetBuilder() {
     gradientCanvas.width = 64; gradientCanvas.height = 32;
     const gCtx = gradientCanvas.getContext('2d');
     const grad = gCtx.createLinearGradient(0, 0, 0, 32);
-    grad.addColorStop(0, '#ffffff');
-    grad.addColorStop(0.4, '#aaccff');
-    grad.addColorStop(1, '#334466');
+    grad.addColorStop(0, '#eef2f7');
+    grad.addColorStop(0.4, '#8fa3bd');
+    grad.addColorStop(1, '#232c3d');
     gCtx.fillStyle = grad;
     gCtx.fillRect(0, 0, 64, 32);
     const envTex = new THREE.CanvasTexture(gradientCanvas);
@@ -248,6 +260,7 @@ export default function HelmetBuilder() {
         chromePmrem.dispose();
         // Refresh in case Chrome is already the active finish and materials already exist
         applyShellEnvMap(materialsRef.current, scene, finishRef.current);
+        applyFacemaskEnvMap(materialsRef.current, scene, facemaskFinishRef.current);
       },
       undefined,
       () => console.warn('No /chrome-reflection.jpg found — Chrome will fall back to the gradient env map until you add one.')
@@ -380,9 +393,10 @@ export default function HelmetBuilder() {
       });
 
       scene.add(model);
-      // Now that all shell materials exist, route env maps per the current finish
+      // Now that all shell/facemask materials exist, route env maps per current finish
       // (scoped to car paint / chrome only — see applyShellEnvMap above).
       applyShellEnvMap(materialsRef.current, scene, finishRef.current);
+      applyFacemaskEnvMap(materialsRef.current, scene, facemaskFinishRef.current);
       setLoaded(true);
     }, undefined, (err) => console.error('GLB load error:', err));
 
@@ -450,14 +464,23 @@ export default function HelmetBuilder() {
 
   // ── UPDATE FACEMASK FINISH ─────────────────────────────────────────────────
   useEffect(() => {
-    ['facemask', 'visor support thing'].forEach(matName => {
+    FACEMASK_MATERIAL_NAMES.forEach(matName => {
       const mat = materialsRef.current[matName];
       if (mat) {
-        mat.roughness = facemaskFinish === 'matte' ? 0.9 : 0.1;
-        mat.clearcoat = facemaskFinish === 'matte' ? 0.0 : 0.8;
+        if (facemaskFinish === 'chrome') {
+          mat.roughness = 0.0;
+          mat.metalness = 1.0;
+          mat.clearcoat = 0.0;
+          mat.clearcoatRoughness = 0.0;
+        } else {
+          mat.roughness = facemaskFinish === 'matte' ? 0.9 : 0.1;
+          mat.metalness = 0.1; // reset back down in case it was chrome (metalness=1) before
+          mat.clearcoat = facemaskFinish === 'matte' ? 0.0 : 0.8;
+        }
         mat.needsUpdate = true;
       }
     });
+    if (sceneRef.current) applyFacemaskEnvMap(materialsRef.current, sceneRef.current, facemaskFinish);
   }, [facemaskFinish]);
 
   // ── UPDATE FINISH ────────────────────────────────────────────────────────────
@@ -705,7 +728,7 @@ export default function HelmetBuilder() {
                 <div style={{ height:1, background:'rgba(255,255,255,0.06)', margin:'14px 0' }} />
                 <SectionLabel>Facemask Finish</SectionLabel>
                 <div style={{ display:'flex', gap:6 }}>
-                  {['gloss','matte'].map(f => (
+                  {['gloss','matte','chrome'].map(f => (
                     <button key={f} onClick={() => setFacemaskFinish(f)} style={{ flex:1, background:facemaskFinish===f?'rgba(239,255,0,0.1)':'rgba(255,255,255,0.04)', border:facemaskFinish===f?'1px solid rgba(239,255,0,0.4)':'1px solid rgba(255,255,255,0.08)', borderRadius:6, padding:'8px 4px', cursor:'pointer', fontSize:10, fontWeight:700, fontFamily:"'Barlow Condensed',sans-serif", color:facemaskFinish===f?'#efff00':'#9ca3af' }}>{f.toUpperCase()}</button>
                   ))}
                 </div>
