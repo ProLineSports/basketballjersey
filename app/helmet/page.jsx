@@ -6,7 +6,6 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { DecalGeometry } from 'three/addons/geometries/DecalGeometry.js';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 // ── MATERIAL ZONES ────────────────────────────────────────────────────────────
 const ZONES = [
@@ -107,23 +106,25 @@ export default function HelmetBuilder() {
     renderer.toneMappingExposure = 1.4;
     renderer.physicallyCorrectLights = true;
 
-    // Generate environment map for metallic/sparkle reflections
+    // Build environment map manually using PMREMGenerator + a simple scene
     const pmremGenerator = new THREE.PMREMGenerator(renderer);
     pmremGenerator.compileEquirectangularShader();
-    // Create a simple colored environment
-    const envScene = new THREE.Scene();
-    envScene.background = new THREE.Color('#1f1c1e');
-    // Add gradient lights to env scene for a studio look
-    const envTop    = new THREE.DirectionalLight(0xffffff, 3);
-    const envBottom = new THREE.DirectionalLight(0x8888ff, 1);
-    const envSide   = new THREE.DirectionalLight(0xffffee, 2);
-    envTop.position.set(0, 1, 0);
-    envBottom.position.set(0, -1, 0);
-    envSide.position.set(1, 0, 0);
-    envScene.add(envTop, envBottom, envSide, new THREE.AmbientLight(0xffffff, 1));
-    const envRT = pmremGenerator.fromScene(new THREE.RoomEnvironment(), 0.04);
+    // Create a gradient environment using a simple colored background
+    const gradientCanvas = document.createElement('canvas');
+    gradientCanvas.width = 64; gradientCanvas.height = 32;
+    const gCtx = gradientCanvas.getContext('2d');
+    const grad = gCtx.createLinearGradient(0, 0, 0, 32);
+    grad.addColorStop(0, '#ffffff');
+    grad.addColorStop(0.4, '#aaccff');
+    grad.addColorStop(1, '#334466');
+    gCtx.fillStyle = grad;
+    gCtx.fillRect(0, 0, 64, 32);
+    const envTex = new THREE.CanvasTexture(gradientCanvas);
+    envTex.mapping = THREE.EquirectangularReflectionMapping;
+    const envRT = pmremGenerator.fromEquirectangular(envTex);
     scene.environment = envRT.texture;
-    scene.environmentIntensity = 1.5;
+    scene.environmentIntensity = 2.0;
+    envTex.dispose();
     pmremGenerator.dispose();
     el.appendChild(renderer.domElement);
     rendererRef.current = renderer;
