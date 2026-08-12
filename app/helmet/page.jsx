@@ -27,6 +27,44 @@ const ZONES = [
   { id: 'straps',            label: 'Straps',                    parts: ['Straps'],                            defaultColor: '#eaeaea' },
 ];
 
+// Three.js sanitizes glTF node names when it loads them (for example, spaces can
+// become underscores). Compare part names through a stable key so the UI can keep
+// using the clean Blender/GLB names above while still matching the runtime objects.
+const partKey = (name = '') => name.toLowerCase().replace(/[^a-z0-9]/g, '');
+// Build part references from the loaded scene hierarchy AFTER materials have been
+// replaced. This is intentionally hierarchy-based instead of assuming the named GLB
+// node itself is always a THREE.Mesh. GLTFLoader may represent a named part as a Group
+// with one or more Mesh descendants, so indexing only child.isMesh names can miss parts.
+function indexLoadedParts(model, partsMap, objectsMap) {
+  const sceneObjects = [];
+  model.traverse(obj => sceneObjects.push(obj));
+
+  for (const zone of ZONES) {
+    for (const partName of zone.parts) {
+      const key = partKey(partName);
+      const roots = sceneObjects.filter(obj => partKey(obj.name) === key);
+      const materials = [];
+
+      roots.forEach(root => {
+        root.traverse(obj => {
+          if (!obj.isMesh || !obj.material) return;
+          const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+          mats.forEach(mat => {
+            if (mat && !materials.includes(mat)) materials.push(mat);
+          });
+        });
+      });
+
+      objectsMap[key] = roots;
+      partsMap[key] = materials;
+
+      if (roots.length === 0) {
+        console.warn(`[HelmetBuilder] Could not find GLB part: ${partName}`);
+      }
+    }
+  }
+}
+
 const FINISHES = [
   { id: 'gloss',    label: 'Gloss',     roughness: 0.05, metalness: 0.1,  clearcoat: 1.0, clearcoatRoughness: 0.05, iridescence: 0.0 },
   { id: 'matte',    label: 'Matte',     roughness: 0.9,  metalness: 0.0,  clearcoat: 0.0, clearcoatRoughness: 0.0,  iridescence: 0.0 },
@@ -192,7 +230,8 @@ export default function HelmetBuilder() {
   const rendererRef = useRef(null);
   const controlsRef = useRef(null);
   const materialsRef = useRef({}); // materialName → THREE.Material[] (finish/env routing)
-  const partsRef     = useRef({}); // exact GLB part/node name → THREE.Material[] (color routing)
+  const partsRef     = useRef({}); // normalized GLB part key → THREE.Material[] (color routing)
+  const partObjectsRef = useRef({}); // normalized GLB part key → THREE.Object3D[] (visibility routing)
   const frameRef    = useRef(null);
 
   const [activeTab, setActiveTab]     = useState('colors');
@@ -414,13 +453,11 @@ export default function HelmetBuilder() {
         mats.forEach(mat => {
           if (!mat) return;
           const name = mat.name;
-          const partName = child.name;
-          // Color zones are keyed to exact exported GLB part/node names, not material names.
-          // This lets parts with a shared source material remain independently addressable.
-          const zone = ZONES.find(z => z.parts.includes(partName));
-          const color = zone ? colors[zone.id] : '#808080';
+          // Use the source material color only as a temporary value. Exact UI zone colors
+          // are applied after the entire loaded hierarchy is indexed by GLB part name below.
+          const color = mat.color ? `#${mat.color.getHexString()}` : '#808080';
 
-          const isVisor = partName === 'Visor' || name === 'visor';
+          const isVisor = name === 'visor';
           const newMat = new THREE.MeshPhysicalMaterial({
             color: new THREE.Color(color),
             roughness: isVisor ? 0.08 : finishDef.roughness,
@@ -450,9 +487,8 @@ export default function HelmetBuilder() {
           if (!materialsRef.current[name]) materialsRef.current[name] = [];
           materialsRef.current[name].push(newMat);
 
-          // Also index the cloned material by exact GLB part/node name for color controls.
-          if (!partsRef.current[partName]) partsRef.current[partName] = [];
-          partsRef.current[partName].push(newMat);
+          // Part/color references are indexed in one pass after this traversal. Doing
+          // that from the final hierarchy catches both named Mesh nodes and named Group nodes.
 
           // Replace
           if (Array.isArray(child.material)) {
@@ -463,6 +499,13 @@ export default function HelmetBuilder() {
           }
         });
       });
+
+      // Rebuild part references from the FINAL loaded hierarchy. This is the key routing
+      // step for every color control, including parts whose Blender object name differs
+      // from its material name (clips, pads, chin guards, metal parts, etc.).
+      partsRef.current = {};
+      partObjectsRef.current = {};
+      indexLoadedParts(model, partsRef.current, partObjectsRef.current);
 
       scene.add(model);
       // Now that all shell/facemask materials exist, route env maps per current finish
@@ -507,11 +550,14 @@ export default function HelmetBuilder() {
   useEffect(() => {
     ZONES.forEach(zone => {
       zone.parts.forEach(partName => {
-        const mats = partsRef.current[partName];
-        if (mats) mats.forEach(mat => mat.color.set(colors[zone.id]));
+        const mats = partsRef.current[partKey(partName)];
+        if (mats) mats.forEach(mat => {
+          mat.color.set(colors[zone.id]);
+          mat.needsUpdate = true;
+        });
       });
     });
-  }, [colors]);
+  }, [colors, loaded]);
 
   // ── SHADOW SURFACE ON/OFF ────────────────────────────────────────────────────
   // Was previously just UI state with nothing reading it — floor/wall never actually
@@ -526,18 +572,17 @@ export default function HelmetBuilder() {
 
   // ── VISOR ON/OFF ──────────────────────────────────────────────────────────
   useEffect(() => {
-    // Toggle the exact Visor + Visor Clips GLB parts together.
-    if (sceneRef.current) {
-      sceneRef.current.traverse(child => {
-        if (!child.isMesh) return;
-        if (child.name === 'Visor' || child.name === 'Visor Clips') child.visible = visorOn;
-      });
-    }
-  }, [visorOn]);
+    // Toggle the exact GLB part roots. If either part is represented as a Group,
+    // hiding the root also hides all of its mesh descendants.
+    ['Visor', 'Visor Clips'].forEach(partName => {
+      const roots = partObjectsRef.current[partKey(partName)] || [];
+      roots.forEach(root => { root.visible = visorOn; });
+    });
+  }, [visorOn, loaded]);
 
   // Clear any baked texture from visor (removes Oakley logo)
   useEffect(() => {
-    (partsRef.current['Visor'] || []).forEach(mat => {
+    (partsRef.current[partKey('Visor')] || []).forEach(mat => {
       if (mat.map) { mat.map = null; mat.needsUpdate = true; }
     });
   }, [loaded]);
