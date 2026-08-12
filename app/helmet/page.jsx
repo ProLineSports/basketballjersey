@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { DecalGeometry } from 'three/addons/geometries/DecalGeometry.js';
-import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 // ── MATERIAL ZONES ────────────────────────────────────────────────────────────
 const ZONES = [
@@ -18,7 +18,7 @@ const ZONES = [
   { id: 'sideelems',  label: 'Strap Clips',    materials: ['side elements'],                                            defaultColor: '#212121' },
   { id: 'screws',     label: 'Screws',         materials: ['screws metal parts'],                                       defaultColor: '#888888' },
   { id: 'metal',      label: 'Hardware',       materials: ['shiny metal'],                                              defaultColor: '#aaaaaa' },
-  { id: 'visorframe', label: 'Visor Frame',    materials: ['visor support thing'],                                      defaultColor: '#212121' },
+  { id: 'visorframe', label: 'Visor Clips',    materials: ['visor support thing'],                                      defaultColor: '#212121' },
   { id: 'fmclips',    label: 'Facemask Clips', materials: ['Transparent Plastic'],                                      defaultColor: '#212121' },
   { id: 'innerliner', label: 'Inner Liner',    materials: ['wire_087224198'],                                           defaultColor: '#212121' },
 ];
@@ -105,6 +105,25 @@ export default function HelmetBuilder() {
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.4;
     renderer.physicallyCorrectLights = true;
+
+    // Generate environment map for metallic/sparkle reflections
+    const pmremGenerator = new THREE.PMREMGenerator(renderer);
+    pmremGenerator.compileEquirectangularShader();
+    // Create a simple colored environment
+    const envScene = new THREE.Scene();
+    envScene.background = new THREE.Color('#1f1c1e');
+    // Add gradient lights to env scene for a studio look
+    const envTop    = new THREE.DirectionalLight(0xffffff, 3);
+    const envBottom = new THREE.DirectionalLight(0x8888ff, 1);
+    const envSide   = new THREE.DirectionalLight(0xffffee, 2);
+    envTop.position.set(0, 1, 0);
+    envBottom.position.set(0, -1, 0);
+    envSide.position.set(1, 0, 0);
+    envScene.add(envTop, envBottom, envSide, new THREE.AmbientLight(0xffffff, 1));
+    const envRT = pmremGenerator.fromScene(new THREE.RoomEnvironment(), 0.04);
+    scene.environment = envRT.texture;
+    scene.environmentIntensity = 1.5;
+    pmremGenerator.dispose();
     el.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
@@ -247,12 +266,15 @@ export default function HelmetBuilder() {
 
   // ── VISOR ON/OFF ──────────────────────────────────────────────────────────
   useEffect(() => {
-    // Toggle visor glass only
+    // Toggle visor glass + visor clips together, preserve clip color
     if (sceneRef.current) {
       sceneRef.current.traverse(child => {
         if (!child.isMesh) return;
         const mats = Array.isArray(child.material) ? child.material : [child.material];
-        if (mats.some(m => m && m === materialsRef.current['visor'])) {
+        if (mats.some(m => m && (
+          m === materialsRef.current['visor'] ||
+          m === materialsRef.current['visor support thing']
+        ))) {
           child.visible = visorOn;
         }
       });
@@ -369,7 +391,7 @@ export default function HelmetBuilder() {
                 <div style={{ height:1, background:'rgba(255,255,255,0.06)', margin:'14px 0' }} />
                 <SectionLabel>Visor</SectionLabel>
                 <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:8 }}>
-                  <span style={{ fontSize:11, color:'#9ca3af' }}>Visor + Frame</span>
+                  <span style={{ fontSize:11, color:'#9ca3af' }}>Visor + Clips</span>
                   <button onClick={() => setVisorOn(v => !v)} style={{ background:visorOn?'rgba(239,255,0,0.15)':'rgba(255,255,255,0.06)', border:visorOn?'1px solid rgba(239,255,0,0.5)':'1px solid rgba(255,255,255,0.12)', borderRadius:20, padding:'3px 12px', cursor:'pointer', fontSize:9, fontWeight:700, fontFamily:"'Barlow Condensed',sans-serif", color:visorOn?'#efff00':'#6b7280', letterSpacing:'0.06em' }}>{visorOn?'ON':'OFF'}</button>
                 </div>
               </div>
