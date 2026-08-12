@@ -27,26 +27,31 @@ const FINISHES = [
 ];
 
 // ── COLOR SWATCH ──────────────────────────────────────────────────────────────
+function SectionLabel({ children }) {
+  return <div style={{ fontSize:9, fontWeight:700, color:"#6b7280", letterSpacing:"0.1em", fontFamily:"'Barlow Condensed',sans-serif", marginBottom:10, marginTop:4 }}>{children}</div>;
+}
+
 function ColorSwatch({ color, onChange, label }) {
-  const [hex, setHex] = useState(color.toUpperCase());
-  const [open, setOpen] = useState(false);
-  useEffect(() => setHex(color.toUpperCase()), [color]);
+  const [hex, setHex] = React.useState(color.toUpperCase());
+  const [open, setOpen] = React.useState(false);
+  React.useEffect(() => setHex(color.toUpperCase()), [color]);
   const onHexChange = (e) => {
     const v = e.target.value;
     setHex(v);
     if (/^#[0-9a-fA-F]{6}$/.test(v)) onChange(v);
   };
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, position: 'relative' }}>
-      <div onClick={() => setOpen(o => !o)} style={{ width: 28, height: 28, borderRadius: 6, background: color, border: '2px solid rgba(255,255,255,0.15)', cursor: 'pointer', flexShrink: 0 }} />
+    <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8, position:"relative" }}>
+      <div onClick={() => setOpen(o => !o)} style={{ width:28, height:28, borderRadius:6, background:color, border:"2px solid rgba(255,255,255,0.15)", cursor:"pointer", flexShrink:0, boxShadow:"inset 0 0 0 1px rgba(0,0,0,0.2)" }} />
       {open && (
-        <div style={{ position: 'absolute', left: 0, top: 34, zIndex: 100, background: '#161314', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, padding: 10 }}>
-          <input type="color" value={color} onChange={e => { onChange(e.target.value); setHex(e.target.value.toUpperCase()); }} style={{ width: 120, height: 80, border: 'none', borderRadius: 4, cursor: 'pointer', display: 'block', marginBottom: 6 }} />
-          <button onClick={() => setOpen(false)} style={{ width: '100%', background: '#efff00', border: 'none', borderRadius: 4, padding: '4px 0', cursor: 'pointer', fontSize: 10, fontWeight: 700, fontFamily: "'Barlow Condensed', sans-serif" }}>DONE</button>
+        <div style={{ position:"absolute", left:0, top:34, zIndex:200, background:"#161314", border:"1px solid rgba(255,255,255,0.12)", borderRadius:8, padding:10, boxShadow:"0 8px 32px rgba(0,0,0,0.5)" }}>
+          <input type="color" value={color} onChange={e => { onChange(e.target.value); setHex(e.target.value.toUpperCase()); }} style={{ width:140, height:100, border:"none", borderRadius:4, cursor:"pointer", display:"block", marginBottom:6 }} />
+          <button onClick={() => setOpen(false)} style={{ width:"100%", background:"#efff00", border:"none", borderRadius:4, padding:"5px 0", cursor:"pointer", fontSize:10, fontWeight:700, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:"0.05em" }}>DONE</button>
         </div>
       )}
-      <span style={{ fontSize: 11, color: '#9ca3af', flex: 1 }}>{label}</span>
-      <input type="text" value={hex} onChange={onHexChange} maxLength={7} spellCheck={false} style={{ width: 70, fontSize: 11, fontFamily: 'monospace', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 4, padding: '3px 6px', color: '#e2e8f0', textAlign: 'center', outline: 'none' }} />
+      <span style={{ fontSize:11, color:"#9ca3af", flex:1 }}>{label}</span>
+      <input type="text" value={hex} onChange={onHexChange} maxLength={7} spellCheck={false}
+        style={{ width:70, fontSize:11, fontFamily:"monospace", background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.15)", borderRadius:4, padding:"3px 6px", color:"#e2e8f0", textAlign:"center", outline:"none" }} />
     </div>
   );
 }
@@ -71,6 +76,8 @@ export default function HelmetBuilder() {
   const [loaded, setLoaded]           = useState(false);
   const [hideControls, setHideControls] = useState(false);
   const [showProductMenu, setShowProductMenu] = useState(false);
+  const [visorLogoOn, setVisorLogoOn]         = useState(false);
+  const [visorLogoColor, setVisorLogoColor]   = useState('#ffffff');
   const [visorTint, setVisorTint]         = useState('#000000');
   const [visorOpacity, setVisorOpacity]   = useState(0.25);
   const [facemaskFinish, setFacemaskFinish] = useState('gloss'); // gloss | matte
@@ -167,8 +174,8 @@ export default function HelmetBuilder() {
             thickness: isVisor ? 0.5 : 0,
           });
 
-          // Keep visor texture
-          if (mat.map) newMat.map = mat.map;
+          // Store original texture for toggle
+          if (mat.map) { newMat.userData.originalMap = mat.map; newMat.map = null; } // hidden by default
 
           // Store reference
           materialsRef.current[name] = newMat;
@@ -231,6 +238,21 @@ export default function HelmetBuilder() {
       mat.needsUpdate = true;
     }
   }, [visorTint, visorOpacity]);
+
+  // ── VISOR LOGO TOGGLE + COLOR ─────────────────────────────────────────────
+  useEffect(() => {
+    const mat = materialsRef.current['visor'];
+    if (!mat) return;
+    if (visorLogoOn && mat.userData.originalMap) {
+      mat.map = mat.userData.originalMap;
+      // Tint the logo by blending color
+      mat.color.set(visorLogoColor);
+    } else {
+      mat.map = null;
+      mat.color.set(visorTint);
+    }
+    mat.needsUpdate = true;
+  }, [visorLogoOn, visorLogoColor, visorTint]);
 
   // ── UPDATE FACEMASK FINISH ─────────────────────────────────────────────────
   useEffect(() => {
@@ -327,13 +349,13 @@ export default function HelmetBuilder() {
             {/* COLORS */}
             {activeTab === 'colors' && (
               <div>
-                <div style={{ fontSize: 9, fontWeight: 700, color: '#6b7280', letterSpacing: '0.1em', fontFamily: "'Barlow Condensed', sans-serif", marginBottom: 12 }}>ZONE COLORS</div>
+                <SectionLabel>Zone Colors</SectionLabel>
                 {ZONES.map(zone => (
                   <ColorSwatch key={zone.id} color={colors[zone.id]} onChange={v => setColor(zone.id, v)} label={zone.label} />
                 ))}
 
-                <div style={{ height: 1, background: 'rgba(255,255,255,0.06)', margin: '14px 0' }} />
-                <div style={{ fontSize: 9, fontWeight: 700, color: '#6b7280', letterSpacing: '0.1em', fontFamily: "'Barlow Condensed', sans-serif", marginBottom: 12 }}>VISOR</div>
+                <div style={{ height:1, background:'rgba(255,255,255,0.06)', margin:'14px 0' }} />
+                <SectionLabel>Visor</SectionLabel>
                 <ColorSwatch color={visorTint} onChange={setVisorTint} label="Tint Color" />
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
                   <span style={{ fontSize: 10, color: '#9ca3af', minWidth: 52 }}>Opacity</span>
@@ -341,8 +363,8 @@ export default function HelmetBuilder() {
                   <span style={{ fontSize: 11, color: '#efff00', fontFamily: "'Barlow Condensed', sans-serif", minWidth: 32, textAlign: 'right' }}>{Math.round(visorOpacity * 100)}%</span>
                 </div>
 
-                <div style={{ height: 1, background: 'rgba(255,255,255,0.06)', margin: '4px 0 14px' }} />
-                <div style={{ fontSize: 9, fontWeight: 700, color: '#6b7280', letterSpacing: '0.1em', fontFamily: "'Barlow Condensed', sans-serif", marginBottom: 12 }}>FACEMASK FINISH</div>
+                <div style={{ height:1, background:'rgba(255,255,255,0.06)', margin:'4px 0 14px' }} />
+                <SectionLabel>Facemask Finish</SectionLabel>
                 <div style={{ display: 'flex', gap: 6 }}>
                   {['gloss', 'matte'].map(f => (
                     <button key={f} onClick={() => setFacemaskFinish(f)} style={{ flex: 1, background: facemaskFinish === f ? 'rgba(239,255,0,0.1)' : 'rgba(255,255,255,0.04)', border: facemaskFinish === f ? '1px solid rgba(239,255,0,0.4)' : '1px solid rgba(255,255,255,0.08)', borderRadius: 6, padding: '8px 4px', cursor: 'pointer', fontSize: 10, fontWeight: 700, fontFamily: "'Barlow Condensed', sans-serif", color: facemaskFinish === f ? '#efff00' : '#9ca3af' }}>{f.toUpperCase()}</button>
@@ -354,7 +376,7 @@ export default function HelmetBuilder() {
             {/* FINISH */}
             {activeTab === 'finish' && (
               <div>
-                <div style={{ fontSize: 9, fontWeight: 700, color: '#6b7280', letterSpacing: '0.1em', fontFamily: "'Barlow Condensed', sans-serif", marginBottom: 12 }}>SHELL FINISH</div>
+                <SectionLabel>Shell Finish</SectionLabel>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {FINISHES.map(f => (
                     <button key={f.id} onClick={() => setFinish(f.id)} style={{ background: finish === f.id ? 'rgba(239,255,0,0.1)' : 'rgba(255,255,255,0.04)', border: finish === f.id ? '1px solid rgba(239,255,0,0.4)' : '1px solid rgba(255,255,255,0.08)', borderRadius: 8, padding: '10px 14px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -374,7 +396,7 @@ export default function HelmetBuilder() {
             {/* DECALS */}
             {activeTab === 'decals' && (
               <div>
-                <div style={{ fontSize: 9, fontWeight: 700, color: '#6b7280', letterSpacing: '0.1em', fontFamily: "'Barlow Condensed', sans-serif", marginBottom: 12 }}>DECALS</div>
+                <SectionLabel>Decals</SectionLabel>
                 <div style={{ background: 'rgba(239,255,0,0.05)', border: '1px dashed rgba(239,255,0,0.2)', borderRadius: 8, padding: 16, textAlign: 'center', color: '#6b7280', fontSize: 11, lineHeight: 1.6 }}>
                   🚧 Coming soon<br />
                   Click-to-place decals that wrap to the helmet surface using Three.js DecalGeometry.
