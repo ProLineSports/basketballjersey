@@ -7,19 +7,24 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { DecalGeometry } from 'three/addons/geometries/DecalGeometry.js';
 
-// ── MATERIAL ZONES ────────────────────────────────────────────────────────────
+// ── PART / COLOR ZONES ───────────────────────────────────────────────────────
+// `parts` uses the exact mesh/node names exported in SpeedFlex.glb.
+// Shell, Side Screws, and Top Screws intentionally share one color control.
 const ZONES = [
-  { id: 'shell',      label: 'Main Shell',    materials: ['Helmet Main Shell', 'High-Gloss Red Plastic', 'Car paint'], defaultColor: '#1a3a6b' },
-  { id: 'facemask',   label: 'Facemask',      materials: ['facemask'],                                                  defaultColor: '#c8102e' },
-  { id: 'bumpers',    label: 'Bumpers',        materials: ['Bumpers'],                                                  defaultColor: '#ffffff' },
-  { id: 'chinguard',  label: 'Chin Guard',     materials: ['chin guard inner', 'chin guard outer'],                    defaultColor: '#eaeaea' },
-  { id: 'straps',     label: 'Straps',         materials: ['straps'],                                                   defaultColor: '#eaeaea' },
-  { id: 'sideelems',  label: 'Strap Clips',    materials: ['side elements'],                                            defaultColor: '#212121' },
-  { id: 'screws',     label: 'Metal Parts',    materials: ['screws metal parts'],                                       defaultColor: '#888888' },
-  { id: 'metal',      label: 'Hardware',       materials: ['shiny metal'],                                              defaultColor: '#aaaaaa' },
-  { id: 'visorframe', label: 'Visor Clips',    materials: ['visor support thing'],                                      defaultColor: '#212121' },
-  { id: 'fmclips',    label: 'Facemask Clips', materials: ['Transparent Plastic'],                                      defaultColor: '#212121' },
-  { id: 'innerliner', label: 'Inner Liner',    materials: ['wire_087224198'],                                           defaultColor: '#212121' },
+  { id: 'shell',             label: 'Shell',                    parts: ['Shell', 'Side Screws', 'Top Screws'], defaultColor: '#1a3a6b' },
+  { id: 'bumpers',           label: 'Bumpers',                  parts: ['Bumpers'],                           defaultColor: '#ffffff' },
+  { id: 'facemask',          label: 'Facemask',                 parts: ['Facemask'],                          defaultColor: '#c8102e' },
+  { id: 'facemaskclips',     label: 'Facemask Clips',           parts: ['Facemask Clips'],                    defaultColor: '#212121' },
+  { id: 'facemaskhardware',  label: 'Facemask Clips Hardware',  parts: ['Facemask Clips Hardware'],           defaultColor: '#aaaaaa' },
+  { id: 'innerpads',         label: 'Inner Pads',                parts: ['Inner Pads'],                        defaultColor: '#212121' },
+  { id: 'visor',             label: 'Visor',                     parts: ['Visor'],                             defaultColor: '#000000' },
+  { id: 'visorclips',        label: 'Visor Clips',               parts: ['Visor Clips'],                       defaultColor: '#212121' },
+  { id: 'chinguardinner',    label: 'Chin Guard - Inner',        parts: ['Chin Guard - Inner'],                defaultColor: '#eaeaea' },
+  { id: 'chinguardouter',    label: 'Chin Guard - Outer',        parts: ['Chin Guard - Outer'],                defaultColor: '#eaeaea' },
+  { id: 'metalparts',        label: 'Metal Parts',               parts: ['Metal Parts'],                       defaultColor: '#888888' },
+  { id: 'strapclipslower',   label: 'Strap Clips - Lower',       parts: ['Strap Clips - Lower'],               defaultColor: '#212121' },
+  { id: 'strapclipsupper',   label: 'Strap Clips - Upper',       parts: ['Strap Clips - Upper'],               defaultColor: '#212121' },
+  { id: 'straps',            label: 'Straps',                    parts: ['Straps'],                            defaultColor: '#eaeaea' },
 ];
 
 const FINISHES = [
@@ -38,8 +43,8 @@ const CREDITS_INITIAL = 3;
 // environment map / glitter map) is allowed to touch. Hardware (screws, shiny metal)
 // intentionally does NOT get an env map anymore — that was the other source of the
 // "everything looks washed out" complaint.
-const SHELL_MATERIAL_NAMES = ['Helmet Main Shell', 'High-Gloss Red Plastic', 'Car paint'];
-const FACEMASK_MATERIAL_NAMES = ['facemask', 'visor support thing'];
+const SHELL_MATERIAL_NAMES = ['Helmet Main Shell'];
+const FACEMASK_MATERIAL_NAMES = ['facemask'];
 
 // ── ENV MAP ROUTING ─────────────────────────────────────────────────────────
 // Environment reflections are scoped to exactly the finishes that need them, and the
@@ -186,7 +191,8 @@ export default function HelmetBuilder() {
   const cameraRef   = useRef(null);
   const rendererRef = useRef(null);
   const controlsRef = useRef(null);
-  const materialsRef = useRef({}); // materialName → THREE.Material
+  const materialsRef = useRef({}); // materialName → THREE.Material[] (finish/env routing)
+  const partsRef     = useRef({}); // exact GLB part/node name → THREE.Material[] (color routing)
   const frameRef    = useRef(null);
 
   const [activeTab, setActiveTab]     = useState('colors');
@@ -408,13 +414,15 @@ export default function HelmetBuilder() {
         mats.forEach(mat => {
           if (!mat) return;
           const name = mat.name;
-          // Find zone this material belongs to
-          const zone = ZONES.find(z => z.materials.includes(name));
+          const partName = child.name;
+          // Color zones are keyed to exact exported GLB part/node names, not material names.
+          // This lets parts with a shared source material remain independently addressable.
+          const zone = ZONES.find(z => z.parts.includes(partName));
           const color = zone ? colors[zone.id] : '#808080';
 
-          const isVisor = name === 'visor';
+          const isVisor = partName === 'Visor' || name === 'visor';
           const newMat = new THREE.MeshPhysicalMaterial({
-            color: new THREE.Color(isVisor ? '#000000' : color),
+            color: new THREE.Color(color),
             roughness: isVisor ? 0.08 : finishDef.roughness,
             metalness: isVisor ? 0.3 : finishDef.metalness,
             clearcoat: isVisor ? 1.0 : (finishDef.clearcoat || 0),
@@ -436,13 +444,15 @@ export default function HelmetBuilder() {
           // Store original texture for toggle
           if (mat.map) { newMat.userData.originalMap = mat.map; newMat.map = null; }
 
-          // Store reference — as an ARRAY, not a single overwrite. Multiple meshes can
-          // legitimately share one material name on purpose (e.g. strap clip hardware
-          // sharing "side elements" with the rest of the strap clips); a plain object
-          // assignment here would silently drop every mesh but the last one loaded,
-          // leaving the others permanently disconnected from color/finish updates.
+          // Store material references as arrays because multiple GLB parts can intentionally
+          // share one material name (for example Shell, Side Screws, and Top Screws).
+          // Finish/env updates still route by material name, while color updates route by part name.
           if (!materialsRef.current[name]) materialsRef.current[name] = [];
           materialsRef.current[name].push(newMat);
+
+          // Also index the cloned material by exact GLB part/node name for color controls.
+          if (!partsRef.current[partName]) partsRef.current[partName] = [];
+          partsRef.current[partName].push(newMat);
 
           // Replace
           if (Array.isArray(child.material)) {
@@ -496,8 +506,8 @@ export default function HelmetBuilder() {
   // ── UPDATE COLORS ────────────────────────────────────────────────────────────
   useEffect(() => {
     ZONES.forEach(zone => {
-      zone.materials.forEach(matName => {
-        const mats = materialsRef.current[matName];
+      zone.parts.forEach(partName => {
+        const mats = partsRef.current[partName];
         if (mats) mats.forEach(mat => mat.color.set(colors[zone.id]));
       });
     });
@@ -516,23 +526,18 @@ export default function HelmetBuilder() {
 
   // ── VISOR ON/OFF ──────────────────────────────────────────────────────────
   useEffect(() => {
-    // Toggle visor glass + visor clips together, preserve clip color
+    // Toggle the exact Visor + Visor Clips GLB parts together.
     if (sceneRef.current) {
-      const visorMats = materialsRef.current['visor'] || [];
-      const clipMats = materialsRef.current['visor support thing'] || [];
       sceneRef.current.traverse(child => {
         if (!child.isMesh) return;
-        const mats = Array.isArray(child.material) ? child.material : [child.material];
-        if (mats.some(m => m && (visorMats.includes(m) || clipMats.includes(m)))) {
-          child.visible = visorOn;
-        }
+        if (child.name === 'Visor' || child.name === 'Visor Clips') child.visible = visorOn;
       });
     }
   }, [visorOn]);
 
   // Clear any baked texture from visor (removes Oakley logo)
   useEffect(() => {
-    (materialsRef.current['visor'] || []).forEach(mat => {
+    (partsRef.current['Visor'] || []).forEach(mat => {
       if (mat.map) { mat.map = null; mat.needsUpdate = true; }
     });
   }, [loaded]);
@@ -774,7 +779,7 @@ export default function HelmetBuilder() {
             {/* COLORS */}
             {activeTab === 'colors' && (
               <div>
-                <SectionLabel>Zone Colors</SectionLabel>
+                <SectionLabel>Part Colors</SectionLabel>
                 {ZONES.map(zone => (
                   <ColorSwatch key={zone.id} color={colors[zone.id]} onChange={v => setColor(zone.id, v)} label={zone.label} />
                 ))}
