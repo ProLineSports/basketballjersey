@@ -15,15 +15,15 @@ const ZONES = [
   { id: 'bumpers',    label: 'Bumpers',        materials: ['Bumpers'],                                                  defaultColor: '#ffffff' },
   { id: 'chinstrap',  label: 'Chin Guard',     materials: ['chin guard inner', 'chin guard outer', 'straps'],          defaultColor: '#212121' },
   { id: 'sideelems',  label: 'Side Elements',  materials: ['side elements'],                                            defaultColor: '#212121' },
+  { id: 'clips',      label: 'Facemask Clips', materials: ['Transparent Plastic'],                                      defaultColor: '#333333' },
   { id: 'innerliner', label: 'Inner Liner',    materials: ['wire_087224198'],                                           defaultColor: '#212121' },
 ];
 
 const FINISHES = [
-  { id: 'gloss',    label: 'Gloss',    roughness: 0.05, metalness: 0.1,  clearcoat: 1.0, clearcoatRoughness: 0.05 },
-  { id: 'matte',    label: 'Matte',    roughness: 0.9,  metalness: 0.0,  clearcoat: 0.0, clearcoatRoughness: 0.0  },
-  { id: 'satin',    label: 'Satin',    roughness: 0.4,  metalness: 0.05, clearcoat: 0.3, clearcoatRoughness: 0.2  },
-  { id: 'carpaint', label: 'Car Paint', roughness: 0.2,  metalness: 0.1,  clearcoat: 1.0, clearcoatRoughness: 0.0, iridescence: 0.5 },
-  { id: 'chrome',   label: 'Chrome',   roughness: 0.0,  metalness: 1.0,  clearcoat: 0.0, clearcoatRoughness: 0.0  },
+  { id: 'gloss',    label: 'Gloss',     roughness: 0.05, metalness: 0.1,  clearcoat: 1.0, clearcoatRoughness: 0.05, iridescence: 0.0 },
+  { id: 'matte',    label: 'Matte',     roughness: 0.9,  metalness: 0.0,  clearcoat: 0.0, clearcoatRoughness: 0.0,  iridescence: 0.0 },
+  { id: 'satin',    label: 'Satin',     roughness: 0.4,  metalness: 0.05, clearcoat: 0.3, clearcoatRoughness: 0.2,  iridescence: 0.0 },
+  { id: 'carpaint', label: 'Car Paint', roughness: 0.15, metalness: 0.2,  clearcoat: 1.0, clearcoatRoughness: 0.02, iridescence: 1.0, iridescenceIOR: 1.8, iridescenceThicknessRange: [100, 400] },
 ];
 
 // ── COLOR SWATCH ──────────────────────────────────────────────────────────────
@@ -70,6 +70,10 @@ export default function HelmetBuilder() {
   const [finish, setFinish]           = useState('gloss');
   const [loaded, setLoaded]           = useState(false);
   const [hideControls, setHideControls] = useState(false);
+  const [showProductMenu, setShowProductMenu] = useState(false);
+  const [visorTint, setVisorTint]         = useState('#000000');
+  const [visorOpacity, setVisorOpacity]   = useState(0.25);
+  const [facemaskFinish, setFacemaskFinish] = useState('gloss'); // gloss | matte
 
   // ── THREE.JS SETUP ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -146,17 +150,21 @@ export default function HelmetBuilder() {
           const zone = ZONES.find(z => z.materials.includes(name));
           const color = zone ? colors[zone.id] : '#808080';
 
+          const isVisor = name === 'visor';
+          const isTransparent = name === 'Transparent Plastic';
           const newMat = new THREE.MeshPhysicalMaterial({
-            color: new THREE.Color(color),
-            roughness: finishDef.roughness,
-            metalness: finishDef.metalness,
-            clearcoat: finishDef.clearcoat || 0,
-            clearcoatRoughness: finishDef.clearcoatRoughness || 0,
+            color: new THREE.Color(isVisor ? '#000000' : color),
+            roughness: isVisor ? 0.0 : finishDef.roughness,
+            metalness: isVisor ? 0.0 : finishDef.metalness,
+            clearcoat: isVisor ? 1.0 : (finishDef.clearcoat || 0),
+            clearcoatRoughness: isVisor ? 0.0 : (finishDef.clearcoatRoughness || 0),
             iridescence: finishDef.iridescence || 0,
-            // Keep transparency for visor/transparent parts
-            transparent: mat.transparent,
-            opacity: mat.opacity,
-            side: mat.side,
+            iridescenceIOR: finishDef.iridescenceIOR || 1.5,
+            transparent: isVisor || isTransparent,
+            opacity: isVisor ? 0.25 : (isTransparent ? 0.7 : 1.0),
+            side: isVisor ? THREE.DoubleSide : (mat.side || THREE.FrontSide),
+            transmission: isVisor ? 0.9 : 0,
+            thickness: isVisor ? 0.5 : 0,
           });
 
           // Keep visor texture
@@ -214,19 +222,44 @@ export default function HelmetBuilder() {
     });
   }, [colors]);
 
+  // ── UPDATE VISOR TINT ──────────────────────────────────────────────────────
+  useEffect(() => {
+    const mat = materialsRef.current['visor'];
+    if (mat) {
+      mat.color.set(visorTint);
+      mat.opacity = visorOpacity;
+      mat.needsUpdate = true;
+    }
+  }, [visorTint, visorOpacity]);
+
+  // ── UPDATE FACEMASK FINISH ─────────────────────────────────────────────────
+  useEffect(() => {
+    ['facemask', 'visor support thing'].forEach(matName => {
+      const mat = materialsRef.current[matName];
+      if (mat) {
+        mat.roughness = facemaskFinish === 'matte' ? 0.9 : 0.1;
+        mat.clearcoat = facemaskFinish === 'matte' ? 0.0 : 0.8;
+        mat.needsUpdate = true;
+      }
+    });
+  }, [facemaskFinish]);
+
   // ── UPDATE FINISH ────────────────────────────────────────────────────────────
   useEffect(() => {
     const finishDef = FINISHES.find(f => f.id === finish);
     if (!finishDef) return;
-    Object.values(materialsRef.current).forEach(mat => {
-      if (mat.isMesh === undefined) { // it's a material
-        mat.roughness            = finishDef.roughness;
-        mat.metalness            = finishDef.metalness;
-        mat.clearcoat            = finishDef.clearcoat || 0;
-        mat.clearcoatRoughness   = finishDef.clearcoatRoughness || 0;
-        mat.iridescence          = finishDef.iridescence || 0;
-        mat.needsUpdate          = true;
-      }
+    const skipMats = ['visor', 'facemask', 'visor support thing', 'shiny metal'];
+    Object.entries(materialsRef.current).forEach(([name, mat]) => {
+      if (skipMats.includes(name)) return; // preserve special materials
+      mat.roughness                  = finishDef.roughness;
+      mat.metalness                  = finishDef.metalness;
+      mat.clearcoat                  = finishDef.clearcoat || 0;
+      mat.clearcoatRoughness         = finishDef.clearcoatRoughness || 0;
+      mat.iridescence                = finishDef.iridescence || 0;
+      mat.iridescenceIOR             = finishDef.iridescenceIOR || 1.5;
+      if (finishDef.iridescenceThicknessRange)
+        mat.iridescenceThicknessRange = finishDef.iridescenceThicknessRange;
+      mat.needsUpdate                = true;
     });
   }, [finish]);
 
@@ -244,8 +277,26 @@ export default function HelmetBuilder() {
           <button onClick={() => router.push('/')} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center' }}>
             <img src="/ProLine-PFP-New.jpg" alt="ProLine" style={{ width: 26, height: 26, borderRadius: 6, objectFit: 'cover' }} />
           </button>
-          <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 900, fontSize: 16, letterSpacing: '0.06em' }}>HELMET BUILDER</span>
-          <span style={{ background: 'rgba(239,255,0,0.12)', color: '#efff00', fontSize: 9, fontWeight: 700, padding: '2px 7px', borderRadius: 4, letterSpacing: '0.08em', border: '1px solid rgba(239,255,0,0.25)', fontFamily: "'Barlow Condensed', sans-serif" }}>BETA</span>
+          <div style={{ position: 'relative' }}>
+            <button onClick={() => setShowProductMenu(m => !m)} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, padding: 0 }}>
+              <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 900, fontSize: 16, letterSpacing: '0.06em', color: '#e2e8f0' }}>HELMET BUILDER</span>
+              <span style={{ background: 'rgba(239,255,0,0.12)', color: '#efff00', fontSize: 9, fontWeight: 700, padding: '2px 7px', borderRadius: 4, letterSpacing: '0.08em', border: '1px solid rgba(239,255,0,0.25)', fontFamily: "'Barlow Condensed', sans-serif" }}>BETA</span>
+              <span style={{ color: '#6b7280', fontSize: 10 }}>▾</span>
+            </button>
+            {showProductMenu && (
+              <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: 8, background: '#161314', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, overflow: 'hidden', zIndex: 100, minWidth: 180 }}>
+                <button onClick={() => router.push('/jersey')} style={{ width: '100%', background: 'none', border: 'none', padding: '10px 14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
+                  <span style={{ fontSize: 14 }}>🏀</span>
+                  <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 13, color: '#e2e8f0' }}>JERSEY BUILDER</span>
+                </button>
+                <button onClick={() => { setShowProductMenu(false); }} style={{ width: '100%', background: 'rgba(239,255,0,0.06)', border: 'none', padding: '10px 14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 14 }}>🏈</span>
+                  <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 13, color: '#efff00' }}>HELMET BUILDER</span>
+                  <span style={{ background: 'rgba(239,255,0,0.12)', color: '#efff00', fontSize: 8, fontWeight: 700, padding: '1px 5px', borderRadius: 3, border: '1px solid rgba(239,255,0,0.25)', fontFamily: "'Barlow Condensed', sans-serif" }}>BETA</span>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           {isLoaded && (isSignedIn
@@ -280,6 +331,23 @@ export default function HelmetBuilder() {
                 {ZONES.map(zone => (
                   <ColorSwatch key={zone.id} color={colors[zone.id]} onChange={v => setColor(zone.id, v)} label={zone.label} />
                 ))}
+
+                <div style={{ height: 1, background: 'rgba(255,255,255,0.06)', margin: '14px 0' }} />
+                <div style={{ fontSize: 9, fontWeight: 700, color: '#6b7280', letterSpacing: '0.1em', fontFamily: "'Barlow Condensed', sans-serif", marginBottom: 12 }}>VISOR</div>
+                <ColorSwatch color={visorTint} onChange={setVisorTint} label="Tint Color" />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+                  <span style={{ fontSize: 10, color: '#9ca3af', minWidth: 52 }}>Opacity</span>
+                  <input type="range" min="5" max="80" value={Math.round(visorOpacity * 100)} onChange={e => setVisorOpacity(parseInt(e.target.value) / 100)} style={{ flex: 1 }} />
+                  <span style={{ fontSize: 11, color: '#efff00', fontFamily: "'Barlow Condensed', sans-serif", minWidth: 32, textAlign: 'right' }}>{Math.round(visorOpacity * 100)}%</span>
+                </div>
+
+                <div style={{ height: 1, background: 'rgba(255,255,255,0.06)', margin: '4px 0 14px' }} />
+                <div style={{ fontSize: 9, fontWeight: 700, color: '#6b7280', letterSpacing: '0.1em', fontFamily: "'Barlow Condensed', sans-serif", marginBottom: 12 }}>FACEMASK FINISH</div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {['gloss', 'matte'].map(f => (
+                    <button key={f} onClick={() => setFacemaskFinish(f)} style={{ flex: 1, background: facemaskFinish === f ? 'rgba(239,255,0,0.1)' : 'rgba(255,255,255,0.04)', border: facemaskFinish === f ? '1px solid rgba(239,255,0,0.4)' : '1px solid rgba(255,255,255,0.08)', borderRadius: 6, padding: '8px 4px', cursor: 'pointer', fontSize: 10, fontWeight: 700, fontFamily: "'Barlow Condensed', sans-serif", color: facemaskFinish === f ? '#efff00' : '#9ca3af' }}>{f.toUpperCase()}</button>
+                  ))}
+                </div>
               </div>
             )}
 

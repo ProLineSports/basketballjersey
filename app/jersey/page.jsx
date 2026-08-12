@@ -544,6 +544,7 @@ export default function JerseyCustomizer() {
   // ── AUTH + CREDITS (Clerk + Supabase) ──
   const router = useRouter();
   const { user, isLoaded, isSignedIn } = useUser();
+  const [showProductMenu, setShowProductMenu] = useState(false);
   const { openSignIn } = useClerk();
   const [credits, setCredits]           = useState(0);
   const [paidCredits, setPaidCredits]   = useState(0);
