@@ -14,7 +14,9 @@ const ZONES = [
   { id: 'facemask',   label: 'Facemask',      materials: ['facemask', 'visor support thing'],                          defaultColor: '#c8102e' },
   { id: 'bumpers',    label: 'Bumpers',        materials: ['Bumpers'],                                                  defaultColor: '#ffffff' },
   { id: 'chinstrap',  label: 'Chin Guard',     materials: ['chin guard inner', 'chin guard outer', 'straps'],          defaultColor: '#212121' },
-  { id: 'sideelems',  label: 'Side Elements',  materials: ['side elements'],                                            defaultColor: '#212121' },
+  { id: 'sideelems',  label: 'Strap Clips',    materials: ['side elements'],                                            defaultColor: '#212121' },
+  { id: 'screws',     label: 'Screws',         materials: ['screws metal parts'],                                       defaultColor: '#888888' },
+  { id: 'metal',      label: 'Hardware',       materials: ['shiny metal'],                                              defaultColor: '#aaaaaa' },
   { id: 'clips',      label: 'Facemask Clips', materials: ['Transparent Plastic'],                                      defaultColor: '#333333' },
   { id: 'innerliner', label: 'Inner Liner',    materials: ['wire_087224198'],                                           defaultColor: '#212121' },
 ];
@@ -31,22 +33,47 @@ function SectionLabel({ children }) {
   return <div style={{ fontSize:9, fontWeight:700, color:"#6b7280", letterSpacing:"0.1em", fontFamily:"'Barlow Condensed',sans-serif", marginBottom:10, marginTop:4 }}>{children}</div>;
 }
 
+// Track globally open swatch so only one is open at a time
+let globalSwatchClose = null;
+
 function ColorSwatch({ color, onChange, label }) {
   const [hex, setHex] = React.useState(color.toUpperCase());
   const [open, setOpen] = React.useState(false);
+  const ref = React.useRef(null);
   React.useEffect(() => setHex(color.toUpperCase()), [color]);
+
   const onHexChange = (e) => {
     const v = e.target.value;
     setHex(v);
     if (/^#[0-9a-fA-F]{6}$/.test(v)) onChange(v);
   };
+
+  const openPicker = () => {
+    // Close any other open picker
+    if (globalSwatchClose && globalSwatchClose !== closePicker) globalSwatchClose();
+    globalSwatchClose = closePicker;
+    setOpen(true);
+  };
+
+  const closePicker = () => {
+    setOpen(false);
+    if (globalSwatchClose === closePicker) globalSwatchClose = null;
+  };
+
+  // Click outside to close
+  React.useEffect(() => {
+    if (!open) return;
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) closePicker(); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
   return (
-    <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8, position:"relative" }}>
-      <div onClick={() => setOpen(o => !o)} style={{ width:28, height:28, borderRadius:6, background:color, border:"2px solid rgba(255,255,255,0.15)", cursor:"pointer", flexShrink:0, boxShadow:"inset 0 0 0 1px rgba(0,0,0,0.2)" }} />
+    <div ref={ref} style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8, position:"relative" }}>
+      <div onClick={open ? closePicker : openPicker} style={{ width:28, height:28, borderRadius:6, background:color, border:"2px solid rgba(255,255,255,0.15)", cursor:"pointer", flexShrink:0 }} />
       {open && (
         <div style={{ position:"absolute", left:0, top:34, zIndex:200, background:"#161314", border:"1px solid rgba(255,255,255,0.12)", borderRadius:8, padding:10, boxShadow:"0 8px 32px rgba(0,0,0,0.5)" }}>
-          <input type="color" value={color} onChange={e => { onChange(e.target.value); setHex(e.target.value.toUpperCase()); }} style={{ width:140, height:100, border:"none", borderRadius:4, cursor:"pointer", display:"block", marginBottom:6 }} />
-          <button onClick={() => setOpen(false)} style={{ width:"100%", background:"#efff00", border:"none", borderRadius:4, padding:"5px 0", cursor:"pointer", fontSize:10, fontWeight:700, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:"0.05em" }}>DONE</button>
+          <input type="color" value={color} onChange={e => { onChange(e.target.value); setHex(e.target.value.toUpperCase()); }} style={{ width:140, height:100, border:"none", borderRadius:4, cursor:"pointer", display:"block" }} />
         </div>
       )}
       <span style={{ fontSize:11, color:"#9ca3af", flex:1 }}>{label}</span>
@@ -135,6 +162,13 @@ export default function HelmetBuilder() {
     const loader = new GLTFLoader();
     loader.load('/SpeedFlex.glb', (gltf) => {
       const model = gltf.scene;
+
+      // Smooth shading on all meshes to fix angular geometry
+      model.traverse(child => {
+        if (child.isMesh && child.geometry) {
+          child.geometry.computeVertexNormals();
+        }
+      });
 
       // Center and scale model
       const box = new THREE.Box3().setFromObject(model);
@@ -360,16 +394,10 @@ export default function HelmetBuilder() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
                   <span style={{ fontSize: 10, color: '#9ca3af', minWidth: 52 }}>Opacity</span>
                   <input type="range" min="5" max="80" value={Math.round(visorOpacity * 100)} onChange={e => setVisorOpacity(parseInt(e.target.value) / 100)} style={{ flex: 1 }} />
-                  <span style={{ fontSize: 11, color: '#efff00', fontFamily: "'Barlow Condensed', sans-serif", minWidth: 32, textAlign: 'right' }}>{Math.round(visorOpacity * 100)}%</span>
+                  <span style={{ fontSize: 11, color: '#efff00', fontFamily: "'Barlow Condensed', sans-serif", minWidth: 28, textAlign: 'right', marginRight: 4 }}>{Math.round(visorOpacity * 100)}%</span>
                 </div>
 
-                <div style={{ height:1, background:'rgba(255,255,255,0.06)', margin:'4px 0 14px' }} />
-                <SectionLabel>Facemask Finish</SectionLabel>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  {['gloss', 'matte'].map(f => (
-                    <button key={f} onClick={() => setFacemaskFinish(f)} style={{ flex: 1, background: facemaskFinish === f ? 'rgba(239,255,0,0.1)' : 'rgba(255,255,255,0.04)', border: facemaskFinish === f ? '1px solid rgba(239,255,0,0.4)' : '1px solid rgba(255,255,255,0.08)', borderRadius: 6, padding: '8px 4px', cursor: 'pointer', fontSize: 10, fontWeight: 700, fontFamily: "'Barlow Condensed', sans-serif", color: facemaskFinish === f ? '#efff00' : '#9ca3af' }}>{f.toUpperCase()}</button>
-                  ))}
-                </div>
+
               </div>
             )}
 
@@ -390,6 +418,13 @@ export default function HelmetBuilder() {
                 <div style={{ marginTop: 14, fontSize: 10, color: '#4b5563', lineHeight: 1.6 }}>
                   Finish applies to the main shell and all colorable zones. Visor and metal hardware retain their own material properties.
                 </div>
+                <div style={{ height:1, background:'rgba(255,255,255,0.06)', margin:'14px 0' }} />
+                <SectionLabel>Facemask Finish</SectionLabel>
+                <div style={{ display:'flex', gap:6 }}>
+                  {['gloss','matte'].map(f => (
+                    <button key={f} onClick={() => setFacemaskFinish(f)} style={{ flex:1, background:facemaskFinish===f?'rgba(239,255,0,0.1)':'rgba(255,255,255,0.04)', border:facemaskFinish===f?'1px solid rgba(239,255,0,0.4)':'1px solid rgba(255,255,255,0.08)', borderRadius:6, padding:'8px 4px', cursor:'pointer', fontSize:10, fontWeight:700, fontFamily:"'Barlow Condensed',sans-serif", color:facemaskFinish===f?'#efff00':'#9ca3af' }}>{f.toUpperCase()}</button>
+                  ))}
+                </div>
               </div>
             )}
 
@@ -407,7 +442,7 @@ export default function HelmetBuilder() {
 
           {/* Hide controls toggle */}
           <div style={{ padding: '10px 14px', borderTop: '1px solid rgba(255,255,255,0.07)', flexShrink: 0 }}>
-            <button onClick={() => setHideControls(h => !h)} style={{ width: '100%', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 6, padding: '8px', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 11, color: '#6b7280', cursor: 'pointer', letterSpacing: '0.05em' }}>
+            <button onClick={() => setHideControls(true)} style={{ width: '100%', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 6, padding: '8px', fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 11, color: '#6b7280', cursor: 'pointer', letterSpacing: '0.05em' }}>
               HIDE CONTROLS
             </button>
           </div>
@@ -438,6 +473,13 @@ export default function HelmetBuilder() {
           <button onClick={() => router.push('/')} style={{ position: 'absolute', top: 16, left: 16, background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 11, fontWeight: 700, color: '#9ca3af', fontFamily: "'Barlow Condensed', sans-serif", display: 'flex', alignItems: 'center', gap: 6 }}>
             ← ALL BUILDERS
           </button>
+
+          {/* Show controls button — visible when hidden */}
+          {hideControls && (
+            <button onClick={() => setHideControls(false)} style={{ position: 'absolute', top: 16, right: 16, background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 11, fontWeight: 700, color: '#9ca3af', fontFamily: "'Barlow Condensed', sans-serif" }}>
+              SHOW CONTROLS
+            </button>
+          )}
         </div>
       </div>
     </div>

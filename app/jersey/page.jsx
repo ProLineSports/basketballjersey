@@ -1026,8 +1026,26 @@ export default function JerseyCustomizer() {
       <div style={{ background:"#161314", borderBottom:"1px solid rgba(255,255,255,0.07)", padding:"0 16px", display:"flex", alignItems:"center", justifyContent:"space-between", height:48, flexShrink:0 }}>
         <div style={{ display:"flex", alignItems:"center", gap:9 }}>
           <button onClick={() => router.push("/")} style={{ background:"none", border:"none", cursor:"pointer", padding:0 }}><img src="/ProLine-PFP-New.jpg" alt="ProLine" style={{ width:26, height:26, borderRadius:6, objectFit:"cover", display:"block" }} /></button>
-          <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800, fontSize:15, letterSpacing:"0.06em", color:"#fff" }}>JERSEY BUILDER</span>
-          <span style={{ background:"rgba(239,255,0,0.12)", color:"#efff00", fontSize:9, fontWeight:700, padding:"2px 7px", borderRadius:4, letterSpacing:"0.08em", border:"1px solid rgba(239,255,0,0.25)", fontFamily:"'Barlow Condensed',sans-serif" }}>BETA</span>
+          <div style={{ position:"relative" }}>
+            <button onClick={() => setShowProductMenu(m => !m)} style={{ background:"none", border:"none", cursor:"pointer", display:"flex", alignItems:"center", gap:8, padding:0 }}>
+              <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:16, letterSpacing:"0.06em", color:"#e2e8f0" }}>JERSEY BUILDER</span>
+              <span style={{ background:"rgba(239,255,0,0.12)", color:"#efff00", fontSize:9, fontWeight:700, padding:"2px 7px", borderRadius:4, letterSpacing:"0.08em", border:"1px solid rgba(239,255,0,0.25)", fontFamily:"'Barlow Condensed',sans-serif" }}>BETA</span>
+              <span style={{ color:"#6b7280", fontSize:10 }}>▾</span>
+            </button>
+            {showProductMenu && (
+              <div style={{ position:"absolute", top:"100%", left:0, marginTop:8, background:"#161314", border:"1px solid rgba(255,255,255,0.1)", borderRadius:8, overflow:"hidden", zIndex:100, minWidth:200 }}>
+                <button onClick={() => setShowProductMenu(false)} style={{ width:"100%", background:"rgba(239,255,0,0.06)", border:"none", borderBottom:"1px solid rgba(255,255,255,0.07)", padding:"10px 14px", cursor:"pointer", display:"flex", alignItems:"center", gap:8 }}>
+                  <span style={{ fontSize:14 }}>🏀</span>
+                  <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:700, fontSize:13, color:"#efff00" }}>JERSEY BUILDER</span>
+                  <span style={{ background:"rgba(239,255,0,0.12)", color:"#efff00", fontSize:8, fontWeight:700, padding:"1px 5px", borderRadius:3, border:"1px solid rgba(239,255,0,0.25)", fontFamily:"'Barlow Condensed',sans-serif" }}>BETA</span>
+                </button>
+                <button onClick={() => router.push('/helmet')} style={{ width:"100%", background:"none", border:"none", padding:"10px 14px", cursor:"pointer", display:"flex", alignItems:"center", gap:8 }}>
+                  <span style={{ fontSize:14 }}>🏈</span>
+                  <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:700, fontSize:13, color:"#e2e8f0" }}>HELMET BUILDER</span>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
         <div style={{ display:"flex", alignItems:"center", gap:12 }}>
           {isSignedIn && (
