@@ -26,9 +26,73 @@ const FINISHES = [
   { id: 'gloss',    label: 'Gloss',     roughness: 0.05, metalness: 0.1,  clearcoat: 1.0, clearcoatRoughness: 0.05, iridescence: 0.0 },
   { id: 'matte',    label: 'Matte',     roughness: 0.9,  metalness: 0.0,  clearcoat: 0.0, clearcoatRoughness: 0.0,  iridescence: 0.0 },
   { id: 'satin',    label: 'Satin',     roughness: 0.4,  metalness: 0.05, clearcoat: 0.3, clearcoatRoughness: 0.2,  iridescence: 0.0 },
-  { id: 'carpaint', label: 'Car Paint', roughness: 0.15, metalness: 0.2,  clearcoat: 1.0, clearcoatRoughness: 0.02, iridescence: 1.0, iridescenceIOR: 1.8, iridescenceThicknessRange: [100, 400] },
+  // iridescence dialed way down from 1.0 — full-strength iridescence produced a rainbow oil-slick
+  // look that read as "broken" rather than sparkly metallic paint. 0.35 gives a subtle pearlescent shift.
+  { id: 'carpaint', label: 'Car Paint', roughness: 0.15, metalness: 0.2,  clearcoat: 1.0, clearcoatRoughness: 0.02, iridescence: 0.35, iridescenceIOR: 1.8, iridescenceThicknessRange: [100, 300] },
   { id: 'chrome',   label: 'Chrome',    roughness: 0.0,  metalness: 1.0,  clearcoat: 0.0, clearcoatRoughness: 0.0,  iridescence: 0.0 },
 ];
+
+const CREDITS_INITIAL = 3;
+
+// Materials that make up the shell — the only materials the Finish selector (and its
+// environment map / glitter map) is allowed to touch. Hardware (screws, shiny metal)
+// intentionally does NOT get an env map anymore — that was the other source of the
+// "everything looks washed out" complaint.
+const SHELL_MATERIAL_NAMES = ['Helmet Main Shell', 'High-Gloss Red Plastic', 'Car paint'];
+
+// ── ENV MAP ROUTING ─────────────────────────────────────────────────────────
+// Environment reflections are now scoped to exactly the two finishes that need them.
+// Gloss/Matte/Satin get envMap=null so their base color reads true instead of being
+// lightened by reflected sky. Car Paint uses the soft studio gradient (for clearcoat
+// highlights); Chrome uses a real photographic environment (loaded separately below)
+// so it reflects something recognizable instead of a flat gradient smear.
+function applyShellEnvMap(materialsMap, scene, finishId) {
+  const isChrome   = finishId === 'chrome';
+  const isCarPaint = finishId === 'carpaint';
+  const envTex = isChrome
+    ? (scene.userData.chromeEnvTexture || scene.userData.envTexture || null)
+    : isCarPaint
+      ? (scene.userData.envTexture || null)
+      : null;
+  const intensity = isChrome ? 1.6 : isCarPaint ? 0.55 : 0;
+  SHELL_MATERIAL_NAMES.forEach(name => {
+    const mat = materialsMap[name];
+    if (!mat) return;
+    mat.envMap = envTex;
+    mat.envMapIntensity = intensity;
+    mat.needsUpdate = true;
+  });
+}
+
+// ── CAR PAINT GLITTER FLAKE TEXTURE ─────────────────────────────────────────
+// Generates a tileable grayscale canvas used as BOTH roughnessMap and metalnessMap.
+// Base value = dull painted base (higher roughness, low metalness). Bright flecks =
+// near-mirror metal points that catch light as the helmet turns. `intensity` (0–1,
+// driven by the Glitter slider) controls flake density.
+function createFlakeTexture(intensity) {
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = 'rgb(92,92,92)';
+  ctx.fillRect(0, 0, size, size);
+  const flakeCount = Math.round(intensity * 420); // 0 → no flakes, 1 → dense
+  for (let i = 0; i < flakeCount; i++) {
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const r = 0.4 + Math.random() * 1.0;
+    const b = Math.round(225 + Math.random() * 30);
+    ctx.fillStyle = `rgb(${b},${b},${b})`;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(16, 16);
+  tex.needsUpdate = true;
+  return tex;
+}
 
 // ── COLOR SWATCH ──────────────────────────────────────────────────────────────
 function SectionLabel({ children }) {
@@ -83,6 +147,43 @@ export default function HelmetBuilder() {
   const [visorOn, setVisorOn]               = useState(true);
   const [glitter, setGlitter]               = useState(0.3);
   const [facemaskFinish, setFacemaskFinish] = useState('gloss'); // gloss | matte
+  const finishRef = useRef(finish);
+  useEffect(() => { finishRef.current = finish; }, [finish]);
+
+  // ── AUTH + CREDITS (Clerk + Supabase) — mirrors /jersey ──
+  const [credits, setCredits]             = useState(0);
+  const [paidCredits, setPaidCredits]     = useState(0);
+  const [isUnlimited, setIsUnlimited]     = useState(false);
+  const [hasWatermark, setHasWatermark]   = useState(true);
+  const [creditsLoaded, setCreditsLoaded] = useState(false);
+  const [showUpgrade, setShowUpgrade]     = useState(false);
+  const [selectedPlan, setSelectedPlan]   = useState(null);
+  const [checkingOut, setCheckingOut]     = useState(false);
+
+  useEffect(() => {
+    if (!isLoaded) return;
+    if (!isSignedIn) { setCredits(0); setCreditsLoaded(true); return; }
+    fetch('/api/user/credits')
+      .then(r => r.json())
+      .then(data => {
+        setCredits(data.totalCredits || 0);
+        setPaidCredits(data.paidCredits || 0);
+        setIsUnlimited(data.isUnlimited || false);
+        setHasWatermark(data.hasWatermark !== false);
+        setCreditsLoaded(true);
+      })
+      .catch(err => { console.error('Credits fetch error:', err); setCreditsLoaded(true); });
+  }, [isLoaded, isSignedIn]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('upgrade') === 'true' && isSignedIn) {
+        setShowUpgrade(true);
+        window.history.replaceState({}, '', '/helmet');
+      }
+    }
+  }, [isSignedIn]);
 
   // ── THREE.JS SETUP ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -129,6 +230,29 @@ export default function HelmetBuilder() {
     scene.userData.envTexture = envRT.texture;
     envTex.dispose();
     pmremGenerator.dispose();
+
+    // Chrome reflection — a real photo reads as chrome far better than a flat gradient,
+    // the same trick as reflecting a stadium/skyline photo onto chrome in Photoshop.
+    // Drop the reflection image at public/chrome-reflection.jpg.
+    const chromeLoader = new THREE.TextureLoader();
+    chromeLoader.load(
+      '/chrome-reflection.jpg',
+      (tex) => {
+        tex.mapping = THREE.EquirectangularReflectionMapping;
+        tex.colorSpace = THREE.SRGBColorSpace;
+        const chromePmrem = new THREE.PMREMGenerator(renderer);
+        chromePmrem.compileEquirectangularShader();
+        const chromeRT = chromePmrem.fromEquirectangular(tex);
+        scene.userData.chromeEnvTexture = chromeRT.texture;
+        tex.dispose();
+        chromePmrem.dispose();
+        // Refresh in case Chrome is already the active finish and materials already exist
+        applyShellEnvMap(materialsRef.current, scene, finishRef.current);
+      },
+      undefined,
+      () => console.warn('No /chrome-reflection.jpg found — Chrome will fall back to the gradient env map until you add one.')
+    );
+
     el.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
@@ -239,12 +363,6 @@ export default function HelmetBuilder() {
             thickness: isVisor ? 0.5 : 0,
           });
 
-          // Apply env map only to shell/metallic materials
-          const shellMaterialNames = ['Helmet Main Shell','High-Gloss Red Plastic','Car paint','shiny metal','screws metal parts'];
-          if (shellMaterialNames.includes(name) && scene.userData.envTexture) {
-            newMat.envMap = scene.userData.envTexture;
-            newMat.envMapIntensity = 1.2;
-          }
           // Store original texture for toggle
           if (mat.map) { newMat.userData.originalMap = mat.map; newMat.map = null; }
 
@@ -262,6 +380,9 @@ export default function HelmetBuilder() {
       });
 
       scene.add(model);
+      // Now that all shell materials exist, route env maps per the current finish
+      // (scoped to car paint / chrome only — see applyShellEnvMap above).
+      applyShellEnvMap(materialsRef.current, scene, finishRef.current);
       setLoaded(true);
     }, undefined, (err) => console.error('GLB load error:', err));
 
@@ -344,9 +465,8 @@ export default function HelmetBuilder() {
     const finishDef = FINISHES.find(f => f.id === finish);
     if (!finishDef) return;
     // Only apply finish to shell materials
-    const shellMats = ['Helmet Main Shell', 'High-Gloss Red Plastic', 'Car paint'];
     Object.entries(materialsRef.current).forEach(([name, mat]) => {
-      if (!shellMats.includes(name)) return; // only apply to shell
+      if (!SHELL_MATERIAL_NAMES.includes(name)) return; // only apply to shell
       mat.roughness                  = finishDef.roughness;
       mat.metalness                  = finishDef.metalness;
       mat.clearcoat                  = finishDef.clearcoat || 0;
@@ -357,25 +477,112 @@ export default function HelmetBuilder() {
         mat.iridescenceThicknessRange = finishDef.iridescenceThicknessRange;
       mat.needsUpdate                = true;
     });
+    // Route (or clear) the environment map for the newly selected finish
+    if (sceneRef.current) applyShellEnvMap(materialsRef.current, sceneRef.current, finish);
   }, [finish]);
+
+  // ── CAR PAINT GLITTER FLAKES ─────────────────────────────────────────────────
+  // Builds the roughness/metalness flake map fresh whenever the slider moves or the
+  // Car Paint finish is (re)selected; clears it for every other finish so flakes don't
+  // bleed into Gloss/Matte/Satin/Chrome.
+  useEffect(() => {
+    if (!loaded) return;
+    SHELL_MATERIAL_NAMES.forEach(name => {
+      const mat = materialsRef.current[name];
+      if (!mat) return;
+      if (finish !== 'carpaint') {
+        if (mat.roughnessMap) { mat.roughnessMap.dispose(); mat.roughnessMap = null; }
+        if (mat.metalnessMap) { mat.metalnessMap.dispose(); mat.metalnessMap = null; }
+        const finishDef = FINISHES.find(f => f.id === finish);
+        if (finishDef) { mat.roughness = finishDef.roughness; mat.metalness = finishDef.metalness; }
+        mat.needsUpdate = true;
+        return;
+      }
+      const flakeTex = createFlakeTexture(glitter);
+      if (mat.roughnessMap) mat.roughnessMap.dispose();
+      if (mat.metalnessMap) mat.metalnessMap.dispose();
+      mat.roughnessMap = flakeTex;
+      mat.metalnessMap = flakeTex;
+      // Map fully drives per-pixel values now, so the base scalar is just a multiplier of 1
+      mat.roughness = 1.0;
+      mat.metalness = 1.0;
+      mat.needsUpdate = true;
+    });
+  }, [glitter, finish, loaded]);
 
   const setColor = useCallback((zoneId, val) => setColors(c => ({ ...c, [zoneId]: val })), []);
 
-  const handleExport = useCallback(() => {
+  const handleExport = useCallback(async () => {
     if (!rendererRef.current) return;
+    if (!isSignedIn) { openSignIn({ afterSignInUrl: '/helmet?upgrade=true', afterSignUpUrl: '/helmet?upgrade=true' }); return; }
+    if (!isUnlimited && credits <= 0) { setShowUpgrade(true); return; }
     setExporting(true);
-    setTimeout(() => {
-      rendererRef.current.render(sceneRef.current, cameraRef.current);
-      const dataURL = rendererRef.current.domElement.toDataURL('image/png');
-      const a = document.createElement('a');
-      a.href = dataURL;
-      a.download = 'proline-helmet.png';
-      a.click();
+
+    // Validate + deduct credit server-side — same endpoint /jersey uses (shared credit pool)
+    const exportRes = await fetch('/api/user/export', { method: 'POST' });
+    const exportData = await exportRes.json();
+    if (!exportData.allowed) {
       setExporting(false);
-      setExported(true);
-      setTimeout(() => setExported(false), 2500);
-    }, 100);
-  }, []);
+      setShowUpgrade(true);
+      return;
+    }
+    const useWatermark = exportData.hasWatermark;
+    setCredits(isUnlimited ? 999 : (exportData.freeCredits || 0) + (exportData.paidCredits || 0));
+    setPaidCredits(exportData.paidCredits || 0);
+    setHasWatermark(exportData.hasWatermark);
+
+    await new Promise(r => setTimeout(r, 100));
+    rendererRef.current.render(sceneRef.current, cameraRef.current);
+    const rawDataURL = rendererRef.current.domElement.toDataURL('image/png');
+
+    // Tile the watermark onto the captured frame for free (unpaid) exports
+    let finalDataURL = rawDataURL;
+    if (useWatermark) {
+      finalDataURL = await new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          const off = document.createElement('canvas');
+          off.width = img.width; off.height = img.height;
+          const ctx = off.getContext('2d');
+          ctx.drawImage(img, 0, 0);
+          const wm = new Image();
+          wm.onload = () => {
+            ctx.save();
+            ctx.globalAlpha = 0.02;
+            const wmSize = Math.round(off.width * 0.16);
+            const cols = Math.ceil(off.width / wmSize) + 1;
+            const rows = Math.ceil(off.height / wmSize) + 1;
+            for (let row = 0; row < rows; row++) {
+              const xOffset = (row % 2 === 0) ? 0 : wmSize / 2;
+              for (let col = 0; col < cols; col++) {
+                ctx.drawImage(wm, col * wmSize - xOffset, row * wmSize, wmSize, wmSize);
+              }
+            }
+            ctx.restore();
+            resolve(off.toDataURL('image/png'));
+          };
+          wm.onerror = () => resolve(off.toDataURL('image/png'));
+          wm.src = '/ProLine-PFP-New.jpg';
+        };
+        img.onerror = () => resolve(rawDataURL);
+        img.src = rawDataURL;
+      });
+    }
+
+    const a = document.createElement('a');
+    a.href = finalDataURL;
+    a.download = 'proline-helmet.png';
+    a.click();
+    setExporting(false);
+    setExported(true);
+    setTimeout(() => setExported(false), 2500);
+  }, [isSignedIn, isUnlimited, credits, openSignIn]);
+
+  const handleGetCredits = () => {
+    if (!isSignedIn) { openSignIn({ afterSignInUrl: '/helmet?upgrade=true', afterSignUpUrl: '/helmet?upgrade=true' }); return; }
+    setSelectedPlan(null);
+    setShowUpgrade(true);
+  };
 
   const TABS = ['colors', 'finish', 'decals'];
   const TAB_LABELS = { colors: 'Colors', finish: 'Finish', decals: 'Decals' };
@@ -411,15 +618,23 @@ export default function HelmetBuilder() {
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {isSignedIn && (
+            <div style={{ display:'flex', alignItems:'center', gap:7, background:'rgba(255,255,255,0.05)', padding:'5px 11px', borderRadius:7, border:'1px solid rgba(255,255,255,0.08)' }}>
+              <div style={{ width:7, height:7, borderRadius:'50%', background:credits>0?'#10b981':'#ef4444' }} />
+              <span style={{ fontSize:11, color:'#9ca3af' }}>Credits:</span>
+              <span style={{ fontSize:14, fontWeight:700, color:credits>0?'#f3f4f6':'#ef4444', fontFamily:"'Barlow Condensed',sans-serif" }}>{isUnlimited ? '∞' : credits}</span>
+            </div>
+          )}
+          <button onClick={handleGetCredits} style={{ background:'linear-gradient(135deg,#efff00,#c8d900)', border:'none', borderRadius:6, padding:'6px 14px', fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800, fontSize:12, letterSpacing:'0.05em', color:'#000', cursor:'pointer' }}>{isSignedIn ? 'GET CREDITS' : 'GET STARTED'}</button>
           {isLoaded && (isSignedIn
             ? <UserButton afterSignOutUrl="/" appearance={{ elements: { avatarBox: { width: 28, height: 28 } } }} />
-            : <button onClick={() => openSignIn()} style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 20, padding: '4px 12px', cursor: 'pointer', fontSize: 11, fontWeight: 700, color: '#e2e8f0', fontFamily: "'Barlow Condensed', sans-serif" }}>SIGN IN</button>
+            : <button onClick={() => openSignIn({ afterSignInUrl:'/helmet?upgrade=true' })} style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 20, padding: '4px 12px', cursor: 'pointer', fontSize: 11, fontWeight: 700, color: '#e2e8f0', fontFamily: "'Barlow Condensed', sans-serif" }}>SIGN IN</button>
           )}
         </div>
       </div>
 
-      {/* MAIN LAYOUT */}
-      <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '240px 1fr', overflow: 'hidden', minHeight: 0 }}>
+      {/* MAIN LAYOUT — same 3-column grid as /jersey: left tool panel · viewport · right summary panel */}
+      <div style={{ flex: 1, display: 'grid', gridTemplateColumns: 'min(272px,22vw) 1fr min(252px,20vw)', overflow: 'hidden', minHeight: 0 }}>
 
         {/* LEFT PANEL */}
         <div style={{ background: '#161314', borderRight: '1px solid rgba(255,255,255,0.07)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -526,26 +741,146 @@ export default function HelmetBuilder() {
             </div>
           )}
 
-          {/* Viewport hint + export */}
+          {/* Viewport hint — export now lives in the right panel, matching /jersey */}
           {loaded && (
-            <>
-              <div style={{ position:'absolute', bottom:16, left:'50%', transform:'translateX(-50%)', fontSize:10, color:'#374151', letterSpacing:'0.1em', fontFamily:"'Barlow Condensed',sans-serif", pointerEvents:'none', whiteSpace:'nowrap' }}>
-                DRAG TO ROTATE · SCROLL TO ZOOM · RIGHT-CLICK TO PAN
-              </div>
-              <button onClick={handleExport} disabled={exporting} style={{ position:'absolute', bottom:12, right:16, background:exported?'rgba(16,185,129,0.9)':'linear-gradient(135deg,#efff00,#c8d900)', border:'none', borderRadius:8, padding:'10px 20px', fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:13, letterSpacing:'0.06em', color:'#000', cursor:'pointer', display:'flex', alignItems:'center', gap:8 }}>
-                {exported ? '✓ EXPORTED' : exporting ? 'EXPORTING...' : '↓ EXPORT PNG'}
-              </button>
-            </>
+            <div style={{ position:'absolute', bottom:16, left:'50%', transform:'translateX(-50%)', fontSize:10, color:'#374151', letterSpacing:'0.1em', fontFamily:"'Barlow Condensed',sans-serif", pointerEvents:'none', whiteSpace:'nowrap' }}>
+              DRAG TO ROTATE · SCROLL TO ZOOM · RIGHT-CLICK TO PAN
+            </div>
           )}
 
           {/* Back button */}
           <button onClick={() => router.push('/')} style={{ position: 'absolute', top: 16, left: 16, background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 11, fontWeight: 700, color: '#9ca3af', fontFamily: "'Barlow Condensed', sans-serif", display: 'flex', alignItems: 'center', gap: 6 }}>
             ← ALL BUILDERS
           </button>
+        </div>
 
+        {/* RIGHT PANEL — mirrors /jersey: current colors → active finish → tips → credits meter → export */}
+        <div style={{ background:'#161314', borderLeft:'1px solid rgba(255,255,255,0.07)', display:'flex', flexDirection:'column', overflow:'hidden' }}>
+          <div style={{ padding:'12px 14px', borderBottom:'1px solid rgba(255,255,255,0.07)', flexShrink:0 }}>
+            <SectionLabel>Current Colors</SectionLabel>
+            <div style={{ display:'flex', gap:5, flexWrap:'wrap' }}>
+              {ZONES.map(zone => (
+                <div key={zone.id} style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:3 }}>
+                  <div style={{ width:24, height:24, borderRadius:5, background:colors[zone.id], border:'1px solid rgba(255,255,255,0.12)' }} title={zone.label} />
+                  <span style={{ fontSize:7, color:'#6b7280', fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.03em', textTransform:'uppercase', maxWidth:30, textAlign:'center', lineHeight:1.1 }}>{zone.label.split(' ')[0]}</span>
+                </div>
+              ))}
+            </div>
+          </div>
 
+          <div style={{ padding:'10px 14px', borderBottom:'1px solid rgba(255,255,255,0.07)', flexShrink:0 }}>
+            <SectionLabel>Active Finish</SectionLabel>
+            <div style={{ background:'rgba(239,255,0,0.07)', border:'1px solid rgba(239,255,0,0.2)', borderRadius:7, padding:'9px 12px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+              <span style={{ fontSize:13, fontWeight:700, fontFamily:"'Barlow Condensed',sans-serif", color:'#efff00', letterSpacing:'0.05em' }}>{FINISHES.find(f => f.id === finish)?.label.toUpperCase()}</span>
+              <button onClick={() => setActiveTab('finish')} style={{ background:'none', border:'1px solid rgba(239,255,0,0.25)', borderRadius:4, padding:'3px 8px', cursor:'pointer', fontSize:9, fontWeight:700, color:'#efff00', fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.06em' }}>CHANGE</button>
+            </div>
+          </div>
+
+          <div style={{ padding:'14px 16px', overflowY:'auto', flex:1, minHeight:0 }}>
+            <SectionLabel>Tips</SectionLabel>
+            {[
+              { icon:'◈', text:'Click any swatch or type a hex code to change colors' },
+              { icon:'◎', text:'Car Paint + Chrome are the only finishes with reflections — Gloss/Matte/Satin use true flat color' },
+              { icon:'✦', text:'Glitter flakes only show up on the Car Paint finish' },
+              { icon:'◉', text:'Drag to rotate the helmet and check the finish from multiple angles' },
+              { icon:'★', text:'Exports include watermark — upgrade to remove it' },
+            ].map((tip,i) => (
+              <div key={i} style={{ display:'flex', gap:9, marginBottom:10, alignItems:'flex-start' }}>
+                <span style={{ color:'#efff00', fontSize:12, lineHeight:1.5, flexShrink:0 }}>{tip.icon}</span>
+                <span style={{ fontSize:11, color:'#4b5563', lineHeight:1.5 }}>{tip.text}</span>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ padding:'12px 14px', borderTop:'1px solid rgba(255,255,255,0.07)', flexShrink:0 }}>
+            <div style={{ background:'rgba(239,255,0,0.05)', border:'1px solid rgba(239,255,0,0.14)', borderRadius:9, padding:'10px 12px', marginBottom:10 }}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:5 }}>
+                <span style={{ fontSize:11, color:'#9ca3af' }}>Credits remaining</span>
+                <span style={{ fontSize:20, fontWeight:900, color:credits>0?'#efff00':'#ef4444', fontFamily:"'Barlow Condensed',sans-serif" }}>{isUnlimited ? '∞' : credits}</span>
+              </div>
+              <div style={{ height:3, background:'rgba(255,255,255,0.06)', borderRadius:2 }}>
+                <div style={{ height:'100%', width:isUnlimited ? '100%' : `${Math.min(100,(credits/CREDITS_INITIAL)*100)}%`, background:isUnlimited?'#10b981':'#efff00', borderRadius:2, transition:'width 0.4s ease' }} />
+              </div>
+              <div style={{ fontSize:9, color:'#6b7280', marginTop:4 }}>{isUnlimited ? 'Unlimited watermark-free exports' : 'FREE EXPORTS INCLUDE PROLINE WATERMARK'}</div>
+            </div>
+            <button onClick={handleExport} disabled={exporting || !loaded} style={{ width:'100%', background:credits>0?(exporting?'rgba(239,255,0,0.45)':'linear-gradient(135deg,#efff00,#c8d900)'):'rgba(239,68,68,0.12)', border:credits>0?'none':'1px solid rgba(239,68,68,0.3)', borderRadius:8, padding:'13px', fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:14, letterSpacing:'0.08em', color:credits>0?'#000':'#ef4444', cursor:'pointer', animation:exporting?'pulse 0.9s infinite':'none' }}>
+              {exported ? '✓ DOWNLOADED!' : exporting ? 'EXPORTING...' : credits>0 ? '↓ EXPORT PNG' : 'NO CREDITS — UPGRADE'}
+            </button>
+            {credits<=1 && credits>0 && (
+              <button onClick={handleGetCredits} style={{ width:'100%', marginTop:7, background:'none', border:'1px solid rgba(255,255,255,0.09)', borderRadius:8, padding:'9px', fontFamily:"'Barlow Condensed',sans-serif", fontWeight:700, fontSize:11, color:'#6b7280', cursor:'pointer', letterSpacing:'0.05em' }}>UPGRADE → REMOVE WATERMARK</button>
+            )}
+          </div>
         </div>
       </div>
+
+      {/* UPGRADE MODAL — identical flow to /jersey (same Stripe products, same shared credit pool) */}
+      {showUpgrade && (
+        <div onClick={() => setShowUpgrade(false)} style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.78)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background:'#161314', borderRadius:16, border:'1px solid rgba(255,255,255,0.1)', padding:'30px', width:460, maxWidth:'90vw' }}>
+            <div style={{ textAlign:'center', marginBottom:20 }}>
+              <div style={{ fontSize:26, marginBottom:8 }}>⚡</div>
+              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:24, letterSpacing:'0.05em', marginBottom:6 }}>UPGRADE YOUR PLAN</div>
+              <div style={{ fontSize:12, color:'#9ca3af', lineHeight:1.6 }}>Remove the ProLine watermark and get more exports.</div>
+            </div>
+
+            <button onClick={() => setSelectedPlan('NEXT_PUBLIC_STRIPE_PRICE_UNLIMITED')} style={{ width:'100%', background:selectedPlan==='NEXT_PUBLIC_STRIPE_PRICE_UNLIMITED'?'rgba(239,255,0,0.2)':'rgba(239,255,0,0.04)', border:selectedPlan==='NEXT_PUBLIC_STRIPE_PRICE_UNLIMITED'?'2px solid #efff00':'1px solid rgba(239,255,0,0.25)', borderRadius:10, padding:'14px 16px', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:16, position:'relative' }}>
+              <div style={{ position:'absolute', top:-10, left:16, background:'#efff00', color:'#000', fontSize:8, fontWeight:800, padding:'2px 8px', borderRadius:3, fontFamily:"'Barlow Condensed',sans-serif", whiteSpace:'nowrap' }}>MOST POPULAR</div>
+              <div style={{ textAlign:'left' }}>
+                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:16, color:'#efff00', letterSpacing:'0.04em' }}>UNLIMITED MONTHLY</div>
+                <div style={{ fontSize:10, color:'#9ca3af', marginTop:2 }}>Unlimited watermark-free exports · cancel anytime</div>
+              </div>
+              <div style={{ textAlign:'right', flexShrink:0, marginLeft:12 }}>
+                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:22, color:'#fff' }}>$4.99</div>
+                <div style={{ fontSize:9, color:'#6b7280' }}>per month</div>
+              </div>
+            </button>
+
+            <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:16 }}>
+              <div style={{ flex:1, height:1, background:'rgba(255,255,255,0.07)' }} />
+              <span style={{ fontSize:10, color:'#4b5563', fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.08em' }}>OR BUY CREDITS</span>
+              <div style={{ flex:1, height:1, background:'rgba(255,255,255,0.07)' }} />
+            </div>
+
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:9, marginBottom:10 }}>
+              {[{credits:5,price:'$4.99',per:'$1.00 ea',priceKey:'NEXT_PUBLIC_STRIPE_PRICE_5_CREDITS'},{credits:15,price:'$9.99',per:'$0.67 ea',priceKey:'NEXT_PUBLIC_STRIPE_PRICE_15_CREDITS'},{credits:50,price:'$24.99',per:'$0.50 ea',priceKey:'NEXT_PUBLIC_STRIPE_PRICE_50_CREDITS'}].map(plan => (
+                <button key={plan.credits} onClick={() => setSelectedPlan(plan.priceKey)} style={{ background:selectedPlan===plan.priceKey?'rgba(239,255,0,0.1)':'rgba(255,255,255,0.04)', border:selectedPlan===plan.priceKey?'1px solid rgba(239,255,0,0.5)':'1px solid rgba(255,255,255,0.08)', borderRadius:10, padding:'13px 6px', cursor:'pointer', display:'flex', flexDirection:'column', alignItems:'center', gap:3, position:'relative' }}>
+                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:28, color:'#e2e8f0' }}>{plan.credits}</div>
+                  <div style={{ fontSize:9, color:'#9ca3af' }}>credits</div>
+                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800, fontSize:17, color:'#fff', marginTop:3 }}>{plan.price}</div>
+                  <div style={{ fontSize:9, color:'#6b7280' }}>{plan.per}</div>
+                </button>
+              ))}
+            </div>
+            <div style={{ fontSize:10, color:'#10b981', textAlign:'center', marginBottom:16, display:'flex', alignItems:'center', justifyContent:'center', gap:5 }}>
+              <span>✓</span> Purchased credits are always watermark-free · free credits include watermark
+            </div>
+
+            <button onClick={async () => {
+              if (!selectedPlan || checkingOut) return;
+              const PRICE_IDS = {
+                NEXT_PUBLIC_STRIPE_PRICE_UNLIMITED:  process.env.NEXT_PUBLIC_STRIPE_PRICE_UNLIMITED,
+                NEXT_PUBLIC_STRIPE_PRICE_5_CREDITS:  process.env.NEXT_PUBLIC_STRIPE_PRICE_5_CREDITS,
+                NEXT_PUBLIC_STRIPE_PRICE_15_CREDITS: process.env.NEXT_PUBLIC_STRIPE_PRICE_15_CREDITS,
+                NEXT_PUBLIC_STRIPE_PRICE_50_CREDITS: process.env.NEXT_PUBLIC_STRIPE_PRICE_50_CREDITS,
+              };
+              const priceId = PRICE_IDS[selectedPlan];
+              if (!priceId) { console.error('No price ID found for', selectedPlan); return; }
+              setCheckingOut(true);
+              try {
+                const r = await fetch('/api/stripe/checkout', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ priceId }) });
+                const d = await r.json();
+                if (d.url) window.location.href = d.url;
+                else console.error('No URL in response:', d);
+              } catch(err) {
+                console.error('Checkout error:', err);
+              } finally {
+                setCheckingOut(false);
+              }
+            }} style={{ width:'100%', background:selectedPlan?'linear-gradient(135deg,#efff00,#c8d900)':'rgba(255,255,255,0.08)', border:'none', borderRadius:8, padding:'13px', fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:14, letterSpacing:'0.06em', color:selectedPlan?'#000':'#6b7280', cursor:selectedPlan?'pointer':'default', marginBottom:8 }}>{checkingOut ? 'LOADING...' : 'CONTINUE TO CHECKOUT →'}</button>
+            <button onClick={() => setShowUpgrade(false)} style={{ width:'100%', background:'none', border:'none', fontSize:11, color:'#6b7280', cursor:'pointer', padding:'7px', fontFamily:"'Barlow Condensed',sans-serif" }}>Maybe later</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
