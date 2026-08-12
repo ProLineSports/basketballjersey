@@ -51,7 +51,7 @@ function applyEnvMapToMaterials(materialNames, materialsMap, scene, useChrome, u
     : useCarPaint
       ? (scene.userData.envTexture || null)
       : null;
-  const intensity = useChrome ? 1.6 : useCarPaint ? 0.4 : 0;
+  const intensity = useChrome ? 1.6 : useCarPaint ? 0.85 : 0;
   materialNames.forEach(name => {
     const mat = materialsMap[name];
     if (!mat) return;
@@ -68,31 +68,38 @@ function applyFacemaskEnvMap(materialsMap, scene, facemaskFinishId) {
 }
 
 // ── CAR PAINT GLITTER FLAKE TEXTURE ─────────────────────────────────────────
-// Generates a tileable texture used as BOTH roughnessMap (reads the G channel) and
-// metalnessMap (reads the B channel), so the base coat and the flecks are controlled
-// independently instead of both riding the same gray value:
-//   Base coat  → fairly rough, mostly non-metallic → blurs/dims the env reflection,
-//                which is what was making the whole shell read too light.
-//   Flecks     → near-zero roughness, near-full metalness → sharp bright glints only
-//                where a flake actually is.
+// Packs the standard glTF "ORM" layout — R = Ambient Occlusion, G = Roughness, B =
+// Metalness — into one tileable canvas, used as aoMap + roughnessMap + metalnessMap
+// simultaneously. This is the actual fix for the whitewash: roughness/metalness alone
+// only shape SPECULAR reflections, but three.js also adds environment-driven INDIRECT
+// DIFFUSE light on top of the base color everywhere the material isn't fully metallic —
+// that ambient wash was what was tinting the base color even between flakes. The AO
+// channel is the one thing that blocks indirect/env-driven light specifically (direct
+// key/fill/rim lights are untouched by it), so:
+//   Base coat → AO≈0.14 (env contribution nearly zeroed → true base color shows through
+//               under the regular scene lights), rough, non-metallic.
+//   Flecks    → AO≈1.0 (full env exposure), near-zero roughness, near-full metalness
+//               → sharp bright glints only exactly where a flake is.
 // `intensity` (0–1, from the Glitter slider) controls flake density.
 function createFlakeTexture(intensity) {
   const size = 256;
   const canvas = document.createElement('canvas');
   canvas.width = size; canvas.height = size;
   const ctx = canvas.getContext('2d');
-  const baseRough = 178; // G channel ≈ 0.70 roughness — dull enough to not mirror the sky
-  const baseMetal = 38;  // B channel ≈ 0.15 metalness — mostly paint, not metal
-  ctx.fillStyle = `rgb(${baseRough},${baseRough},${baseMetal})`;
+  const baseAO     = 35;  // R channel ≈ 0.14 — blocks almost all env/indirect light
+  const baseRough  = 178; // G channel ≈ 0.70 roughness
+  const baseMetal  = 25;  // B channel ≈ 0.10 metalness — mostly true paint color
+  ctx.fillStyle = `rgb(${baseAO},${baseRough},${baseMetal})`;
   ctx.fillRect(0, 0, size, size);
   const flakeCount = Math.round(intensity * 420); // 0 → no flakes, 1 → dense
   for (let i = 0; i < flakeCount; i++) {
     const x = Math.random() * size;
     const y = Math.random() * size;
     const r = 0.4 + Math.random() * 1.0;
-    const flakeRough = Math.round(4 + Math.random() * 14);    // ≈0.02–0.07 — near mirror
-    const flakeMetal = Math.round(235 + Math.random() * 20);  // ≈0.92–1.0 — near full metal
-    ctx.fillStyle = `rgb(${flakeRough},${flakeRough},${flakeMetal})`;
+    const flakeAO     = Math.round(235 + Math.random() * 20); // ≈0.92–1.0 — fully lit by env
+    const flakeRough  = Math.round(4 + Math.random() * 14);   // ≈0.02–0.07 — near mirror
+    const flakeMetal  = Math.round(235 + Math.random() * 20); // ≈0.92–1.0 — near full metal
+    ctx.fillStyle = `rgb(${flakeAO},${flakeRough},${flakeMetal})`;
     ctx.beginPath();
     ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.fill();
@@ -152,6 +159,9 @@ export default function HelmetBuilder() {
   const [loaded, setLoaded]           = useState(false);
   const [showProductMenu, setShowProductMenu] = useState(false);
   const [showShadows, setShowShadows]         = useState(true);
+  const [sparkleRotating, setSparkleRotating] = useState(true);
+  const sparkleRotatingRef = useRef(sparkleRotating);
+  useEffect(() => { sparkleRotatingRef.current = sparkleRotating; }, [sparkleRotating]);
   const [exporting, setExporting]             = useState(false);
   const [exported, setExported]               = useState(false);
   const [visorOn, setVisorOn]               = useState(true);
@@ -336,6 +346,11 @@ export default function HelmetBuilder() {
           child.geometry.computeVertexNormals();
           child.castShadow = true;
           child.receiveShadow = true;
+          // aoMap (used below to mask the car paint flake glints) requires a second UV
+          // channel — most GLBs only ship one, so alias it if uv2 is missing.
+          if (!child.geometry.attributes.uv2 && child.geometry.attributes.uv) {
+            child.geometry.setAttribute('uv2', child.geometry.attributes.uv);
+          }
         }
       });
 
@@ -405,9 +420,11 @@ export default function HelmetBuilder() {
     const animate = () => {
       frameRef.current = requestAnimationFrame(animate);
       controls.update();
-      t += 0.01;
-      // Slowly orbit sparkle light for dynamic catchlights
-      sparkleLight.position.set(Math.sin(t) * 2, 1.5 + Math.sin(t * 0.7) * 0.5, Math.cos(t) * 2);
+      // Slowly orbit sparkle light for dynamic catchlights — pauses in place when toggled off
+      if (sparkleRotatingRef.current) {
+        t += 0.01;
+        sparkleLight.position.set(Math.sin(t) * 2, 1.5 + Math.sin(t * 0.7) * 0.5, Math.cos(t) * 2);
+      }
       renderer.render(scene, camera);
     };
     animate();
@@ -505,27 +522,30 @@ export default function HelmetBuilder() {
   }, [finish]);
 
   // ── CAR PAINT GLITTER FLAKES ─────────────────────────────────────────────────
-  // Builds the roughness/metalness flake map fresh whenever the slider moves or the
-  // Car Paint finish is (re)selected; clears it for every other finish so flakes don't
-  // bleed into Gloss/Matte/Satin/Chrome.
+  // Builds the ORM (AO/roughness/metalness) flake map fresh whenever the slider moves
+  // or Car Paint is (re)selected; clears it for every other finish so flakes — and the
+  // AO masking that keeps the base color accurate — don't bleed into other finishes.
   useEffect(() => {
     if (!loaded) return;
     SHELL_MATERIAL_NAMES.forEach(name => {
       const mat = materialsRef.current[name];
       if (!mat) return;
       if (finish !== 'carpaint') {
-        if (mat.roughnessMap) { mat.roughnessMap.dispose(); mat.roughnessMap = null; }
-        if (mat.metalnessMap) { mat.metalnessMap.dispose(); mat.metalnessMap = null; }
+        if (mat.roughnessMap) { mat.roughnessMap.dispose(); }
+        mat.roughnessMap = null;
+        mat.metalnessMap = null;
+        mat.aoMap = null;
         const finishDef = FINISHES.find(f => f.id === finish);
         if (finishDef) { mat.roughness = finishDef.roughness; mat.metalness = finishDef.metalness; }
         mat.needsUpdate = true;
         return;
       }
-      const flakeTex = createFlakeTexture(glitter);
       if (mat.roughnessMap) mat.roughnessMap.dispose();
-      if (mat.metalnessMap) mat.metalnessMap.dispose();
+      const flakeTex = createFlakeTexture(glitter);
       mat.roughnessMap = flakeTex;
       mat.metalnessMap = flakeTex;
+      mat.aoMap = flakeTex;
+      mat.aoMapIntensity = 1.0;
       // Map fully drives per-pixel values now, so the base scalar is just a multiplier of 1
       mat.roughness = 1.0;
       mat.metalness = 1.0;
@@ -687,6 +707,10 @@ export default function HelmetBuilder() {
                 <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:14 }}>
                   <span style={{ fontSize:11, color:'#9ca3af' }}>Shadow Surface</span>
                   <button onClick={() => setShowShadows(s => !s)} style={{ background:showShadows?'rgba(239,255,0,0.15)':'rgba(255,255,255,0.06)', border:showShadows?'1px solid rgba(239,255,0,0.5)':'1px solid rgba(255,255,255,0.12)', borderRadius:20, padding:'3px 12px', cursor:'pointer', fontSize:9, fontWeight:700, fontFamily:"'Barlow Condensed',sans-serif", color:showShadows?'#efff00':'#6b7280', letterSpacing:'0.06em' }}>{showShadows?'ON':'OFF'}</button>
+                </div>
+                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:14 }}>
+                  <span style={{ fontSize:11, color:'#9ca3af' }}>Rotating Light</span>
+                  <button onClick={() => setSparkleRotating(s => !s)} style={{ background:sparkleRotating?'rgba(239,255,0,0.15)':'rgba(255,255,255,0.06)', border:sparkleRotating?'1px solid rgba(239,255,0,0.5)':'1px solid rgba(255,255,255,0.12)', borderRadius:20, padding:'3px 12px', cursor:'pointer', fontSize:9, fontWeight:700, fontFamily:"'Barlow Condensed',sans-serif", color:sparkleRotating?'#efff00':'#6b7280', letterSpacing:'0.06em' }}>{sparkleRotating?'ON':'OFF'}</button>
                 </div>
                 <div style={{ height:1, background:'rgba(255,255,255,0.06)', margin:'4px 0 14px' }} />
                 <SectionLabel>Visor</SectionLabel>
