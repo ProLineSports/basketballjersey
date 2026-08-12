@@ -13,8 +13,8 @@ const ZONES = [
   { id: 'shell',      label: 'Main Shell',    materials: ['Helmet Main Shell', 'High-Gloss Red Plastic', 'Car paint'], defaultColor: '#1a3a6b' },
   { id: 'facemask',   label: 'Facemask',      materials: ['facemask', 'visor support thing'],                          defaultColor: '#c8102e' },
   { id: 'bumpers',    label: 'Bumpers',        materials: ['Bumpers'],                                                  defaultColor: '#ffffff' },
-  { id: 'chinguard',  label: 'Chin Guard',     materials: ['chin guard inner', 'chin guard outer'],                    defaultColor: '#212121' },
-  { id: 'straps',     label: 'Straps',         materials: ['straps'],                                                   defaultColor: '#212121' },
+  { id: 'chinguard',  label: 'Chin Guard',     materials: ['chin guard inner', 'chin guard outer'],                    defaultColor: '#eaeaea' },
+  { id: 'straps',     label: 'Straps',         materials: ['straps'],                                                   defaultColor: '#eaeaea' },
   { id: 'sideelems',  label: 'Strap Clips',    materials: ['side elements'],                                            defaultColor: '#212121' },
   { id: 'screws',     label: 'Screws',         materials: ['screws metal parts'],                                       defaultColor: '#888888' },
   { id: 'metal',      label: 'Hardware',       materials: ['shiny metal'],                                              defaultColor: '#aaaaaa' },
@@ -76,11 +76,10 @@ export default function HelmetBuilder() {
   const [finish, setFinish]           = useState('gloss');
   const [loaded, setLoaded]           = useState(false);
   const [showProductMenu, setShowProductMenu] = useState(false);
-  const [visorLogoOn, setVisorLogoOn]         = useState(false);
+  const [visorOn, setVisorOn]               = useState(true);
+  const [visorLogoOn, setVisorLogoOn]       = useState(false);
+  const [visorLogoColor, setVisorLogoColor] = useState('#ffffff');
   const [glitter, setGlitter]               = useState(0.3);
-  const [visorLogoColor, setVisorLogoColor]   = useState('#ffffff');
-  const [visorTint, setVisorTint]         = useState('#000000');
-  const [visorOpacity, setVisorOpacity]   = useState(0.25);
   const [facemaskFinish, setFacemaskFinish] = useState('gloss'); // gloss | matte
 
   // ── THREE.JS SETUP ──────────────────────────────────────────────────────────
@@ -95,7 +94,7 @@ export default function HelmetBuilder() {
 
     // Camera
     const camera = new THREE.PerspectiveCamera(45, el.clientWidth / el.clientHeight, 0.1, 100);
-    camera.position.set(1.8, 0.2, 1.8); // side profile angle
+    camera.position.set(3.2, 0.1, 0.0); // pure side profile, facemask facing right
     cameraRef.current = camera;
 
     // Renderer
@@ -117,7 +116,7 @@ export default function HelmetBuilder() {
     controls.maxDistance = 5.0;
     controls.target.set(0, 0.05, 0);
     controls.minDistance = 1.5;
-    controls.maxDistance = 6.0;
+    controls.maxDistance = 8.0;
     controlsRef.current = controls;
 
     // Lighting
@@ -170,18 +169,19 @@ export default function HelmetBuilder() {
           const isVisor = name === 'visor';
           const isTransparent = name === 'Transparent Plastic';
           const newMat = new THREE.MeshPhysicalMaterial({
-            color: new THREE.Color(isVisor ? '#000000' : color),
+            color: new THREE.Color(isVisor ? '#111111' : color),
             roughness: isVisor ? 0.0 : finishDef.roughness,
-            metalness: isVisor ? 0.0 : finishDef.metalness,
+            metalness: isVisor ? 0.1 : finishDef.metalness,
             clearcoat: isVisor ? 1.0 : (finishDef.clearcoat || 0),
             clearcoatRoughness: isVisor ? 0.0 : (finishDef.clearcoatRoughness || 0),
             iridescence: finishDef.iridescence || 0,
             iridescenceIOR: finishDef.iridescenceIOR || 1.5,
-            transparent: isVisor || isTransparent,
-            opacity: isVisor ? 0.25 : (isTransparent ? 0.7 : 1.0),
-            side: isVisor ? THREE.DoubleSide : (mat.side || THREE.FrontSide),
-            transmission: isVisor ? 0.9 : 0,
-            thickness: isVisor ? 0.5 : 0,
+            transparent: true,
+            opacity: isVisor ? 0.35 : (isTransparent ? 0.8 : 1.0),
+            side: THREE.DoubleSide,
+            transmission: isVisor ? 0.85 : 0,
+            thickness: isVisor ? 0.3 : 0,
+            depthWrite: !isVisor,
           });
 
           // Store original texture for toggle
@@ -239,15 +239,24 @@ export default function HelmetBuilder() {
     });
   }, [colors]);
 
-  // ── UPDATE VISOR TINT ──────────────────────────────────────────────────────
+  // ── VISOR ON/OFF ──────────────────────────────────────────────────────────
   useEffect(() => {
-    const mat = materialsRef.current['visor'];
-    if (mat) {
-      mat.color.set(visorTint);
-      mat.opacity = visorOpacity;
-      mat.needsUpdate = true;
+    // Toggle visor + clips visibility
+    ['visor', 'Transparent Plastic'].forEach(name => {
+      const mat = materialsRef.current[name];
+      if (mat) { mat.visible = visorOn; mat.needsUpdate = true; }
+    });
+    // Also find meshes and toggle visibility
+    if (sceneRef.current) {
+      sceneRef.current.traverse(child => {
+        if (!child.isMesh) return;
+        const mats = Array.isArray(child.material) ? child.material : [child.material];
+        if (mats.some(m => m && (m === materialsRef.current['visor'] || m === materialsRef.current['Transparent Plastic']))) {
+          child.visible = visorOn;
+        }
+      });
     }
-  }, [visorTint, visorOpacity]);
+  }, [visorOn]);
 
   // ── VISOR LOGO TOGGLE + COLOR ─────────────────────────────────────────────
   useEffect(() => {
@@ -255,14 +264,13 @@ export default function HelmetBuilder() {
     if (!mat) return;
     if (visorLogoOn && mat.userData.originalMap) {
       mat.map = mat.userData.originalMap;
-      // Tint the logo by blending color
       mat.color.set(visorLogoColor);
     } else {
       mat.map = null;
-      mat.color.set(visorTint);
+      mat.color.set('#111111');
     }
     mat.needsUpdate = true;
-  }, [visorLogoOn, visorLogoColor, visorTint]);
+  }, [visorLogoOn, visorLogoColor]);
 
   // ── UPDATE FACEMASK FINISH ─────────────────────────────────────────────────
   useEffect(() => {
@@ -367,17 +375,19 @@ export default function HelmetBuilder() {
 
                 <div style={{ height:1, background:'rgba(255,255,255,0.06)', margin:'14px 0' }} />
                 <SectionLabel>Visor</SectionLabel>
-                <ColorSwatch color={visorTint} onChange={setVisorTint} label="Tint Color" />
-                <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
-                  <span style={{ fontSize:10, color:'#9ca3af', minWidth:48 }}>Opacity</span>
-                  <input type="range" min="5" max="80" value={Math.round(visorOpacity*100)} onChange={e => setVisorOpacity(parseInt(e.target.value)/100)} style={{ flex:1 }} />
-                  <span style={{ fontSize:11, color:'#efff00', fontFamily:"'Barlow Condensed',sans-serif", width:34, textAlign:'right' }}>{Math.round(visorOpacity*100)}%</span>
+                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:8 }}>
+                  <span style={{ fontSize:11, color:'#9ca3af' }}>Visor + Clips</span>
+                  <button onClick={() => setVisorOn(v => !v)} style={{ background:visorOn?'rgba(239,255,0,0.15)':'rgba(255,255,255,0.06)', border:visorOn?'1px solid rgba(239,255,0,0.5)':'1px solid rgba(255,255,255,0.12)', borderRadius:20, padding:'3px 12px', cursor:'pointer', fontSize:9, fontWeight:700, fontFamily:"'Barlow Condensed',sans-serif", color:visorOn?'#efff00':'#6b7280', letterSpacing:'0.06em' }}>{visorOn?'ON':'OFF'}</button>
                 </div>
-                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:6 }}>
-                  <span style={{ fontSize:11, color:'#9ca3af' }}>Oakley Logo</span>
-                  <button onClick={() => setVisorLogoOn(v => !v)} style={{ background:visorLogoOn?'rgba(239,255,0,0.15)':'rgba(255,255,255,0.06)', border:visorLogoOn?'1px solid rgba(239,255,0,0.5)':'1px solid rgba(255,255,255,0.12)', borderRadius:20, padding:'3px 12px', cursor:'pointer', fontSize:9, fontWeight:700, fontFamily:"'Barlow Condensed',sans-serif", color:visorLogoOn?'#efff00':'#6b7280', letterSpacing:'0.06em' }}>{visorLogoOn?'ON':'OFF'}</button>
-                </div>
-                {visorLogoOn && <ColorSwatch color={visorLogoColor} onChange={setVisorLogoColor} label="Logo Color" />}
+                {visorOn && (
+                  <>
+                    <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:6 }}>
+                      <span style={{ fontSize:11, color:'#9ca3af' }}>Oakley Logo</span>
+                      <button onClick={() => setVisorLogoOn(v => !v)} style={{ background:visorLogoOn?'rgba(239,255,0,0.15)':'rgba(255,255,255,0.06)', border:visorLogoOn?'1px solid rgba(239,255,0,0.5)':'1px solid rgba(255,255,255,0.12)', borderRadius:20, padding:'3px 12px', cursor:'pointer', fontSize:9, fontWeight:700, fontFamily:"'Barlow Condensed',sans-serif", color:visorLogoOn?'#efff00':'#6b7280', letterSpacing:'0.06em' }}>{visorLogoOn?'ON':'OFF'}</button>
+                    </div>
+                    {visorLogoOn && <ColorSwatch color={visorLogoColor} onChange={setVisorLogoColor} label="Logo Color" />}
+                  </>
+                )}
               </div>
             )}
 
