@@ -15,7 +15,7 @@ const ZONES = [
   { id: 'chinguard',  label: 'Chin Guard',     materials: ['chin guard inner', 'chin guard outer'],                    defaultColor: '#eaeaea' },
   { id: 'straps',     label: 'Straps',         materials: ['straps'],                                                   defaultColor: '#eaeaea' },
   { id: 'sideelems',  label: 'Strap Clips',    materials: ['side elements'],                                            defaultColor: '#212121' },
-  { id: 'screws',     label: 'Screws',         materials: ['screws metal parts'],                                       defaultColor: '#888888' },
+  { id: 'screws',     label: 'Metal Parts',    materials: ['screws metal parts'],                                       defaultColor: '#888888' },
   { id: 'metal',      label: 'Hardware',       materials: ['shiny metal'],                                              defaultColor: '#aaaaaa' },
   { id: 'visorframe', label: 'Visor Clips',    materials: ['visor support thing'],                                      defaultColor: '#212121' },
   { id: 'fmclips',    label: 'Facemask Clips', materials: ['Transparent Plastic'],                                      defaultColor: '#212121' },
@@ -53,11 +53,13 @@ function applyEnvMapToMaterials(materialNames, materialsMap, scene, useChrome, u
       : null;
   const intensity = useChrome ? 1.6 : useCarPaint ? 0.85 : 0;
   materialNames.forEach(name => {
-    const mat = materialsMap[name];
-    if (!mat) return;
-    mat.envMap = envTex;
-    mat.envMapIntensity = intensity;
-    mat.needsUpdate = true;
+    const mats = materialsMap[name]; // array — a name can be shared by multiple meshes on purpose
+    if (!mats) return;
+    mats.forEach(mat => {
+      mat.envMap = envTex;
+      mat.envMapIntensity = intensity;
+      mat.needsUpdate = true;
+    });
   });
 }
 function applyShellEnvMap(materialsMap, scene, finishId) {
@@ -434,8 +436,13 @@ export default function HelmetBuilder() {
           // Store original texture for toggle
           if (mat.map) { newMat.userData.originalMap = mat.map; newMat.map = null; }
 
-          // Store reference
-          materialsRef.current[name] = newMat;
+          // Store reference — as an ARRAY, not a single overwrite. Multiple meshes can
+          // legitimately share one material name on purpose (e.g. strap clip hardware
+          // sharing "side elements" with the rest of the strap clips); a plain object
+          // assignment here would silently drop every mesh but the last one loaded,
+          // leaving the others permanently disconnected from color/finish updates.
+          if (!materialsRef.current[name]) materialsRef.current[name] = [];
+          materialsRef.current[name].push(newMat);
 
           // Replace
           if (Array.isArray(child.material)) {
@@ -490,8 +497,8 @@ export default function HelmetBuilder() {
   useEffect(() => {
     ZONES.forEach(zone => {
       zone.materials.forEach(matName => {
-        const mat = materialsRef.current[matName];
-        if (mat) mat.color.set(colors[zone.id]);
+        const mats = materialsRef.current[matName];
+        if (mats) mats.forEach(mat => mat.color.set(colors[zone.id]));
       });
     });
   }, [colors]);
@@ -511,13 +518,12 @@ export default function HelmetBuilder() {
   useEffect(() => {
     // Toggle visor glass + visor clips together, preserve clip color
     if (sceneRef.current) {
+      const visorMats = materialsRef.current['visor'] || [];
+      const clipMats = materialsRef.current['visor support thing'] || [];
       sceneRef.current.traverse(child => {
         if (!child.isMesh) return;
         const mats = Array.isArray(child.material) ? child.material : [child.material];
-        if (mats.some(m => m && (
-          m === materialsRef.current['visor'] ||
-          m === materialsRef.current['visor support thing']
-        ))) {
+        if (mats.some(m => m && (visorMats.includes(m) || clipMats.includes(m)))) {
           child.visible = visorOn;
         }
       });
@@ -526,15 +532,16 @@ export default function HelmetBuilder() {
 
   // Clear any baked texture from visor (removes Oakley logo)
   useEffect(() => {
-    const mat = materialsRef.current['visor'];
-    if (mat && mat.map) { mat.map = null; mat.needsUpdate = true; }
+    (materialsRef.current['visor'] || []).forEach(mat => {
+      if (mat.map) { mat.map = null; mat.needsUpdate = true; }
+    });
   }, [loaded]);
 
   // ── UPDATE FACEMASK FINISH ─────────────────────────────────────────────────
   useEffect(() => {
     FACEMASK_MATERIAL_NAMES.forEach(matName => {
-      const mat = materialsRef.current[matName];
-      if (mat) {
+      const mats = materialsRef.current[matName];
+      if (mats) mats.forEach(mat => {
         if (facemaskFinish === 'chrome') {
           mat.roughness = 0.0;
           mat.metalness = 1.0;
@@ -546,7 +553,7 @@ export default function HelmetBuilder() {
           mat.clearcoat = facemaskFinish === 'matte' ? 0.0 : 0.8;
         }
         mat.needsUpdate = true;
-      }
+      });
     });
     if (sceneRef.current) applyFacemaskEnvMap(materialsRef.current, sceneRef.current, facemaskFinish);
   }, [facemaskFinish]);
@@ -556,17 +563,19 @@ export default function HelmetBuilder() {
     const finishDef = FINISHES.find(f => f.id === finish);
     if (!finishDef) return;
     // Only apply finish to shell materials
-    Object.entries(materialsRef.current).forEach(([name, mat]) => {
+    Object.entries(materialsRef.current).forEach(([name, mats]) => {
       if (!SHELL_MATERIAL_NAMES.includes(name)) return; // only apply to shell
-      mat.roughness                  = finishDef.roughness;
-      mat.metalness                  = finishDef.metalness;
-      mat.clearcoat                  = finishDef.clearcoat || 0;
-      mat.clearcoatRoughness         = finishDef.clearcoatRoughness || 0;
-      mat.iridescence                = finishDef.iridescence || 0;
-      mat.iridescenceIOR             = finishDef.iridescenceIOR || 1.5;
-      if (finishDef.iridescenceThicknessRange)
-        mat.iridescenceThicknessRange = finishDef.iridescenceThicknessRange;
-      mat.needsUpdate                = true;
+      mats.forEach(mat => {
+        mat.roughness                  = finishDef.roughness;
+        mat.metalness                  = finishDef.metalness;
+        mat.clearcoat                  = finishDef.clearcoat || 0;
+        mat.clearcoatRoughness         = finishDef.clearcoatRoughness || 0;
+        mat.iridescence                = finishDef.iridescence || 0;
+        mat.iridescenceIOR             = finishDef.iridescenceIOR || 1.5;
+        if (finishDef.iridescenceThicknessRange)
+          mat.iridescenceThicknessRange = finishDef.iridescenceThicknessRange;
+        mat.needsUpdate                = true;
+      });
     });
     // Route (or clear) the environment map for the newly selected finish
     if (sceneRef.current) applyShellEnvMap(materialsRef.current, sceneRef.current, finish);
@@ -576,42 +585,48 @@ export default function HelmetBuilder() {
   // Builds the ORM (AO/roughness/metalness) + tinted emissive flake maps fresh whenever
   // the slider or sparkle color changes, or Car Paint is (re)selected; clears both for
   // every other finish so flakes — and the AO masking that keeps the base color
-  // accurate — don't bleed into other finishes.
+  // accurate — don't bleed into other finishes. One texture pair per NAME (not per
+  // individual mesh) so meshes intentionally sharing a material name look identical,
+  // the way one shared material should.
   useEffect(() => {
     if (!loaded) return;
     SHELL_MATERIAL_NAMES.forEach(name => {
-      const mat = materialsRef.current[name];
-      if (!mat) return;
+      const mats = materialsRef.current[name];
+      if (!mats) return;
       if (finish !== 'carpaint') {
-        if (mat.roughnessMap) { mat.roughnessMap.dispose(); }
-        if (mat.emissiveMap) { mat.emissiveMap.dispose(); }
-        mat.roughnessMap = null;
-        mat.metalnessMap = null;
-        mat.aoMap = null;
-        mat.emissiveMap = null;
-        mat.emissive.set(0x000000);
-        mat.emissiveIntensity = 1;
-        const finishDef = FINISHES.find(f => f.id === finish);
-        if (finishDef) { mat.roughness = finishDef.roughness; mat.metalness = finishDef.metalness; }
-        mat.needsUpdate = true;
+        mats.forEach(mat => {
+          if (mat.roughnessMap) { mat.roughnessMap.dispose(); }
+          if (mat.emissiveMap) { mat.emissiveMap.dispose(); }
+          mat.roughnessMap = null;
+          mat.metalnessMap = null;
+          mat.aoMap = null;
+          mat.emissiveMap = null;
+          mat.emissive.set(0x000000);
+          mat.emissiveIntensity = 1;
+          const finishDef = FINISHES.find(f => f.id === finish);
+          if (finishDef) { mat.roughness = finishDef.roughness; mat.metalness = finishDef.metalness; }
+          mat.needsUpdate = true;
+        });
         return;
       }
-      if (mat.roughnessMap) mat.roughnessMap.dispose();
-      if (mat.emissiveMap) mat.emissiveMap.dispose();
       const { ormTex, colorTex } = createFlakeTextures(glitter, glitterColor);
-      mat.roughnessMap = ormTex;
-      mat.metalnessMap = ormTex;
-      mat.aoMap = ormTex;
-      mat.aoMapIntensity = 1.0;
-      // emissive uniform stays white so colorTex's own per-pixel RGB fully drives the
-      // sparkle hue — black everywhere except exactly at the flake positions.
-      mat.emissiveMap = colorTex;
-      mat.emissive.set(0xffffff);
-      mat.emissiveIntensity = 1.0;
-      // Map fully drives per-pixel values now, so the base scalar is just a multiplier of 1
-      mat.roughness = 1.0;
-      mat.metalness = 1.0;
-      mat.needsUpdate = true;
+      mats.forEach(mat => {
+        if (mat.roughnessMap) mat.roughnessMap.dispose();
+        if (mat.emissiveMap) mat.emissiveMap.dispose();
+        mat.roughnessMap = ormTex;
+        mat.metalnessMap = ormTex;
+        mat.aoMap = ormTex;
+        mat.aoMapIntensity = 1.0;
+        // emissive uniform stays white so colorTex's own per-pixel RGB fully drives the
+        // sparkle hue — black everywhere except exactly at the flake positions.
+        mat.emissiveMap = colorTex;
+        mat.emissive.set(0xffffff);
+        mat.emissiveIntensity = 1.0;
+        // Map fully drives per-pixel values now, so the base scalar is just a multiplier of 1
+        mat.roughness = 1.0;
+        mat.metalness = 1.0;
+        mat.needsUpdate = true;
+      });
     });
   }, [glitter, glitterColor, finish, loaded]);
 
