@@ -921,10 +921,24 @@ export default function HelmetBuilder() {
   const sideLogoLeftObjectUrlRef   = useRef(null);
   const sideLogoRightObjectUrlRef  = useRef(null);
   const sideLogoPlacementRef = useRef({
-    left:  { yNorm: 0.60, zNorm: 0.12, scale: 1, rotation: 0 },
-    right: { yNorm: 0.60, zNorm: 0.12, scale: 1, rotation: 0 },
+    // Default main-logo target: high on the side panel and slightly rearward from the
+    // facemask hardware, matching the traditional helmet-logo position.
+    left:  { yNorm: 0.68, zNorm: -0.10, scale: 1, rotation: 0 },
+    right: { yNorm: 0.68, zNorm: -0.10, scale: 1, rotation: 0 },
   });
-  const sideLogoInteractionRef = useRef({ dragging:false, pointerId:null, startX:0, startY:0, startScale:1, startRotation:0 });
+  const selectedSideLogoRef = useRef(null);
+  const sideLogoWorldFrameRef = useRef({ left:null, right:null });
+  const sideLogoInteractionRef = useRef({
+    dragging:false,
+    pointerId:null,
+    side:null,
+    action:null,
+    startScale:1,
+    startRotation:0,
+    startDistance:1,
+    startAngle:0,
+    centerClient:null,
+  });
 
   // Shared shader-uniform objects for Shell stripe decals. The renderer keeps references
   // to these objects across material recompiles (wrap on/off, finish changes, etc.).
@@ -1012,7 +1026,6 @@ export default function HelmetBuilder() {
   const [sideLogoStrokeOpacity, setSideLogoStrokeOpacity] = useState(1);
   const [sideLogoRevision, setSideLogoRevision] = useState(0);
   const [selectedSideLogo, setSelectedSideLogo] = useState(null); // left | right | null
-  const [sideLogoTransformMode, setSideLogoTransformMode] = useState('move'); // move | rotate | scale
 
   const finishRef = useRef(finish);
   useEffect(() => { finishRef.current = finish; }, [finish]);
@@ -1768,6 +1781,7 @@ export default function HelmetBuilder() {
       sideLogoMaterialsRef.current = [];
       sideLogoTexturesRef.current.forEach(tex => tex.dispose?.());
       sideLogoTexturesRef.current = [];
+      sideLogoWorldFrameRef.current = { left:null, right:null };
     };
 
     const resolveImageForSide = (side) => {
@@ -1824,7 +1838,9 @@ export default function HelmetBuilder() {
       if (!pack) return;
 
       const combinedScale = sideLogoScale * placement.scale;
-      const baseHeight = boundsModel.height * 0.20 * combinedScale;
+      // Main helmet logos are intentionally substantial. This is 5x the previous
+      // starting footprint while keeping the UI's 100% size value intuitive.
+      const baseHeight = boundsModel.height * 1.00 * combinedScale;
       const baseWidth = baseHeight * THREE.MathUtils.clamp(pack.aspect, 0.55, 2.6);
       // Keep projector depth shallow enough that it cannot punch through to the far side.
       const projectorDepth = Math.max(boundsModel.width * 0.10, 0.035);
@@ -1912,9 +1928,27 @@ export default function HelmetBuilder() {
       sideLogoMaterialsRef.current.push(shadowMat, mainMat);
       sideLogoTexturesRef.current.push(pack.rimTexture, pack.mainTexture);
 
-      // Selection box is a projected decal too, so it conforms to the shell instead of
-      // floating as a flat screen-space rectangle.
-      if (selectedSideLogo === side) {
+      // Save an approximate rectangle in world space. The visible selection outline
+      // remains projected onto the shell, while these corner points provide familiar
+      // screen-space transform handles for scale and rotate interaction.
+      const frameQuat = helper.quaternion.clone();
+      const frameRight = new THREE.Vector3(1, 0, 0).applyQuaternion(frameQuat).normalize();
+      const frameUp = new THREE.Vector3(0, 1, 0).applyQuaternion(frameQuat).normalize();
+      const frameHalfW = baseWidth * 0.56;
+      const frameHalfH = baseHeight * 0.56;
+      const frameCenter = projectorPosition.clone();
+      sideLogoWorldFrameRef.current[side] = {
+        center: frameCenter,
+        corners: [
+          frameCenter.clone().addScaledVector(frameRight, -frameHalfW).addScaledVector(frameUp,  frameHalfH),
+          frameCenter.clone().addScaledVector(frameRight,  frameHalfW).addScaledVector(frameUp,  frameHalfH),
+          frameCenter.clone().addScaledVector(frameRight, -frameHalfW).addScaledVector(frameUp, -frameHalfH),
+          frameCenter.clone().addScaledVector(frameRight,  frameHalfW).addScaledVector(frameUp, -frameHalfH),
+        ],
+      };
+
+      // Bounding box is shown only while this logo is selected.
+      if (selectedSideLogoRef.current === side) {
         const selectionTex = createSelectionBoxTexture();
         const selectionGeo = new DecalGeometry(
           hit.object,
@@ -1957,6 +1991,7 @@ export default function HelmetBuilder() {
     const canvas = renderer.domElement;
     const pointer = new THREE.Vector2();
     const raycaster = new THREE.Raycaster();
+    const ROTATE_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='M21.8 8.3A9.2 9.2 0 1 0 23 17' fill='none' stroke='%23efff00' stroke-width='2.2' stroke-linecap='round'/%3E%3Cpath d='M18.5 4.2 22.4 8l-5.2 1.4' fill='none' stroke='%23efff00' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") 14 14, grab`;
 
     const updatePointer = (event) => {
       const rect = canvas.getBoundingClientRect();
@@ -1964,6 +1999,44 @@ export default function HelmetBuilder() {
       pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
       raycaster.setFromCamera(pointer, camera);
     };
+
+    const worldToClient = (worldPoint) => {
+      const rect = canvas.getBoundingClientRect();
+      const ndc = worldPoint.clone().project(camera);
+      return {
+        x: rect.left + (ndc.x + 1) * 0.5 * rect.width,
+        y: rect.top + (1 - ndc.y) * 0.5 * rect.height,
+      };
+    };
+
+    const getSelectedFrameClient = () => {
+      const side = selectedSideLogoRef.current;
+      const frame = side ? sideLogoWorldFrameRef.current[side] : null;
+      if (!side || !frame) return null;
+      return {
+        side,
+        center: worldToClient(frame.center),
+        corners: frame.corners.map(worldToClient),
+      };
+    };
+
+    const getCornerInteraction = (event) => {
+      const frame = getSelectedFrameClient();
+      if (!frame) return null;
+      let nearest = null;
+      frame.corners.forEach((corner, index) => {
+        const distance = Math.hypot(event.clientX - corner.x, event.clientY - corner.y);
+        if (!nearest || distance < nearest.distance) nearest = { index, distance };
+      });
+      if (!nearest) return null;
+      if (nearest.distance <= 11) return { action:'scale', frame, cornerIndex:nearest.index };
+      if (nearest.distance <= 30) return { action:'rotate', frame, cornerIndex:nearest.index };
+      return null;
+    };
+
+    const scaleCursorForCorner = (cornerIndex) => (
+      cornerIndex === 0 || cornerIndex === 3 ? 'nwse-resize' : 'nesw-resize'
+    );
 
     const findClickedLogo = (event) => {
       updatePointer(event);
@@ -1984,37 +2057,85 @@ export default function HelmetBuilder() {
       return candidates[0] || null;
     };
 
+    const startInteraction = (event, side, action, frame = null) => {
+      const placement = sideLogoPlacementRef.current[side];
+      const centerClient = frame?.center || getSelectedFrameClient()?.center || { x:event.clientX, y:event.clientY };
+      const dx = event.clientX - centerClient.x;
+      const dy = event.clientY - centerClient.y;
+      sideLogoInteractionRef.current = {
+        dragging:true,
+        pointerId:event.pointerId,
+        side,
+        action,
+        startScale:placement.scale,
+        startRotation:placement.rotation,
+        startDistance:Math.max(8, Math.hypot(dx, dy)),
+        startAngle:Math.atan2(dy, dx),
+        centerClient,
+      };
+      try { canvas.setPointerCapture?.(event.pointerId); } catch (_) {}
+      if (controlsRef.current) controlsRef.current.enabled = false;
+    };
+
+    const selectLogo = (side) => {
+      selectedSideLogoRef.current = side;
+      setSelectedSideLogo(side);
+      rebuild();
+    };
+
+    const deselectLogo = () => {
+      selectedSideLogoRef.current = null;
+      setSelectedSideLogo(null);
+      rebuild();
+      canvas.style.cursor = '';
+    };
+
     const onPointerDown = (event) => {
       if (event.button !== 0) return;
+      const cornerInteraction = getCornerInteraction(event);
+      if (cornerInteraction) {
+        event.preventDefault();
+        event.stopPropagation();
+        startInteraction(event, cornerInteraction.frame.side, cornerInteraction.action, cornerInteraction.frame);
+        return;
+      }
+
       const clickedSide = findClickedLogo(event);
       if (!clickedSide) {
-        if (selectedSideLogo) setSelectedSideLogo(null);
+        if (selectedSideLogoRef.current) deselectLogo();
         return;
       }
 
       event.preventDefault();
-      setSelectedSideLogo(clickedSide);
-      const placement = sideLogoPlacementRef.current[clickedSide];
-      sideLogoInteractionRef.current = {
-        dragging: true,
-        pointerId: event.pointerId,
-        startX: event.clientX,
-        startY: event.clientY,
-        startScale: placement.scale,
-        startRotation: placement.rotation,
-      };
-      canvas.setPointerCapture?.(event.pointerId);
-      if (controlsRef.current) controlsRef.current.enabled = false;
+      event.stopPropagation();
+      if (selectedSideLogoRef.current !== clickedSide) selectLogo(clickedSide);
+      startInteraction(event, clickedSide, 'move');
     };
 
     const onPointerMove = (event) => {
       const interaction = sideLogoInteractionRef.current;
-      const side = selectedSideLogo;
-      if (!interaction.dragging || !side) return;
+      if (!interaction.dragging) {
+        const cornerInteraction = getCornerInteraction(event);
+        if (cornerInteraction?.action === 'scale') {
+          canvas.style.cursor = scaleCursorForCorner(cornerInteraction.cornerIndex);
+          return;
+        }
+        if (cornerInteraction?.action === 'rotate') {
+          canvas.style.cursor = ROTATE_CURSOR;
+          return;
+        }
+        const hoverSide = findClickedLogo(event);
+        canvas.style.cursor = hoverSide ? (hoverSide === selectedSideLogoRef.current ? 'move' : 'pointer') : '';
+        return;
+      }
+
+      const side = interaction.side;
+      if (!side) return;
       event.preventDefault();
+      event.stopPropagation();
       const placement = sideLogoPlacementRef.current[side];
 
-      if (sideLogoTransformMode === 'move') {
+      if (interaction.action === 'move') {
         const hit = projectPointerToShell(event, side);
         if (!hit) return;
         const local = hit.point.clone();
@@ -2029,12 +2150,25 @@ export default function HelmetBuilder() {
           -0.40,
           0.45,
         );
-      } else if (sideLogoTransformMode === 'rotate') {
-        const dx = event.clientX - interaction.startX;
-        placement.rotation = interaction.startRotation + dx * 0.012;
-      } else if (sideLogoTransformMode === 'scale') {
-        const dy = interaction.startY - event.clientY;
-        placement.scale = THREE.MathUtils.clamp(interaction.startScale * Math.exp(dy * 0.006), 0.30, 3.0);
+        canvas.style.cursor = 'move';
+      } else if (interaction.action === 'scale') {
+        const dx = event.clientX - interaction.centerClient.x;
+        const dy = event.clientY - interaction.centerClient.y;
+        const currentDistance = Math.max(8, Math.hypot(dx, dy));
+        placement.scale = THREE.MathUtils.clamp(
+          interaction.startScale * (currentDistance / interaction.startDistance),
+          0.15,
+          4.0,
+        );
+      } else if (interaction.action === 'rotate') {
+        const dx = event.clientX - interaction.centerClient.x;
+        const dy = event.clientY - interaction.centerClient.y;
+        const currentAngle = Math.atan2(dy, dx);
+        let delta = currentAngle - interaction.startAngle;
+        while (delta > Math.PI) delta -= Math.PI * 2;
+        while (delta < -Math.PI) delta += Math.PI * 2;
+        placement.rotation = interaction.startRotation - delta;
+        canvas.style.cursor = ROTATE_CURSOR;
       }
 
       rebuild();
@@ -2043,21 +2177,24 @@ export default function HelmetBuilder() {
     const endInteraction = (event) => {
       if (!sideLogoInteractionRef.current.dragging) return;
       sideLogoInteractionRef.current.dragging = false;
+      sideLogoInteractionRef.current.action = null;
+      sideLogoInteractionRef.current.side = null;
       try { canvas.releasePointerCapture?.(event.pointerId); } catch (_) {}
       if (controlsRef.current) controlsRef.current.enabled = true;
       setSideLogoRevision(v => v + 1);
     };
 
-    canvas.addEventListener('pointerdown', onPointerDown);
+    canvas.addEventListener('pointerdown', onPointerDown, true);
     canvas.addEventListener('pointermove', onPointerMove);
     canvas.addEventListener('pointerup', endInteraction);
     canvas.addEventListener('pointercancel', endInteraction);
 
     return () => {
-      canvas.removeEventListener('pointerdown', onPointerDown);
+      canvas.removeEventListener('pointerdown', onPointerDown, true);
       canvas.removeEventListener('pointermove', onPointerMove);
       canvas.removeEventListener('pointerup', endInteraction);
       canvas.removeEventListener('pointercancel', endInteraction);
+      canvas.style.cursor = '';
       if (controlsRef.current) controlsRef.current.enabled = true;
       cleanupMeshes();
     };
@@ -2078,8 +2215,6 @@ export default function HelmetBuilder() {
     sideLogoStrokeThickness,
     sideLogoStrokeOpacity,
     sideLogoRevision,
-    selectedSideLogo,
-    sideLogoTransformMode,
   ]);
 
   // ── DECAL FINISH ────────────────────────────────────────────────────────────
@@ -2668,8 +2803,11 @@ export default function HelmetBuilder() {
                 <div style={{ height:1, background:'rgba(255,255,255,0.06)', margin:'16px 0 14px' }} />
                 <SectionLabel>Main Side Logos</SectionLabel>
                 <div style={{ background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.04)', borderRadius:10, padding:12 }}>
-                  <div style={{ fontSize:10, color:'#6b7280', lineHeight:1.5, marginBottom:10 }}>
-                    Upload the main side logo decal. It automatically lands on both helmet sides, with the right side mirrored. Click either logo in the 3D view to select it, then drag it directly over the shell. You can also hide either side, rotate either side 180°, or switch to fully independent left/right logo uploads.
+                  <div style={{ fontSize:10, color:'#6b7280', lineHeight:1.5, marginBottom:8 }}>
+                    Upload the main side logo decal. It automatically lands on both helmet sides, with the right side mirrored. You can hide either side, rotate either side 180°, or switch to fully independent left/right logo uploads.
+                  </div>
+                  <div style={{ fontSize:9, color:'#9ca3af', lineHeight:1.45, marginBottom:10, padding:'7px 8px', background:'rgba(239,255,0,0.04)', border:'1px solid rgba(239,255,0,0.12)', borderRadius:6 }}>
+                    In the viewport: click a logo to select it, drag the logo to move it, drag a corner handle to scale, or hover just outside a corner until the rotate cursor appears and drag to rotate.
                   </div>
                   <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, marginBottom:10 }}>
                     <div style={{ fontSize:10, color:'#9ca3af' }}>Independent left / right logos</div>
@@ -2738,7 +2876,7 @@ export default function HelmetBuilder() {
                     ))}
                   </div>
 
-                  <button onClick={() => { sideLogoPlacementRef.current.left = { yNorm:0.60, zNorm:0.12, scale:1, rotation:0 }; sideLogoPlacementRef.current.right = { yNorm:0.60, zNorm:0.12, scale:1, rotation:0 }; setSideLogoRevision(v => v + 1); }} style={{ width:'100%', background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.10)', borderRadius:6, padding:'7px 8px', marginBottom:10, cursor:'pointer', color:'#9ca3af', fontSize:9, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.05em' }}>RESET LOGO POSITIONS</button>
+                  <button onClick={() => { sideLogoPlacementRef.current.left = { yNorm:0.68, zNorm:-0.10, scale:1, rotation:0 }; sideLogoPlacementRef.current.right = { yNorm:0.68, zNorm:-0.10, scale:1, rotation:0 }; setSideLogoRevision(v => v + 1); }} style={{ width:'100%', background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.10)', borderRadius:6, padding:'7px 8px', marginBottom:10, cursor:'pointer', color:'#9ca3af', fontSize:9, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.05em' }}>RESET LOGO POSITIONS</button>
 
                   <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:8 }}>
                     <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Size</span>
@@ -2797,28 +2935,6 @@ export default function HelmetBuilder() {
               <div style={{ textAlign: 'center' }}>
                 <div style={{ fontSize: 32, marginBottom: 12 }}>🏈</div>
                 <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 14, color: '#6b7280', letterSpacing: '0.1em' }}>LOADING HELMET...</div>
-              </div>
-            </div>
-          )}
-
-          {/* Selected side-logo transform controls */}
-          {loaded && selectedSideLogo && (
-            <div style={{ position:'absolute', top:16, right:212, background:'rgba(0,0,0,0.58)', border:'1px solid rgba(239,255,0,0.26)', borderRadius:10, padding:'9px 10px', backdropFilter:'blur(6px)', minWidth:205 }}>
-              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, marginBottom:7 }}>
-                <div style={{ fontSize:9, color:'#efff00', fontWeight:800, letterSpacing:'0.10em', fontFamily:"'Barlow Condensed',sans-serif" }}>{selectedSideLogo.toUpperCase()} LOGO SELECTED</div>
-                <button onClick={() => setSelectedSideLogo(null)} style={{ background:'transparent', border:0, color:'#9ca3af', cursor:'pointer', fontSize:13, lineHeight:1 }}>×</button>
-              </div>
-              <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:5 }}>
-                {[
-                  { id:'move', label:'MOVE' },
-                  { id:'rotate', label:'ROTATE' },
-                  { id:'scale', label:'SCALE' },
-                ].map(mode => (
-                  <button key={mode.id} onClick={() => setSideLogoTransformMode(mode.id)} style={{ background:sideLogoTransformMode===mode.id?'rgba(239,255,0,0.13)':'rgba(255,255,255,0.04)', border:sideLogoTransformMode===mode.id?'1px solid rgba(239,255,0,0.45)':'1px solid rgba(255,255,255,0.10)', borderRadius:6, padding:'6px 5px', cursor:'pointer', color:sideLogoTransformMode===mode.id?'#efff00':'#9ca3af', fontSize:8, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.05em' }}>{mode.label}</button>
-                ))}
-              </div>
-              <div style={{ marginTop:6, fontSize:8, color:'#6b7280', lineHeight:1.35 }}>
-                {sideLogoTransformMode==='move' ? 'Drag the logo over the helmet surface.' : sideLogoTransformMode==='rotate' ? 'Drag left/right to rotate.' : 'Drag up/down to scale.'}
               </div>
             </div>
           )}
