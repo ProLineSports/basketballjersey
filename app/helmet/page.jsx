@@ -330,9 +330,11 @@ function installDecalOverlayShader(material, decalUniforms) {
     shader.uniforms.uHelmetStripeWidthScale = decalUniforms.widthScale;
     shader.uniforms.uHelmetStripeLength = decalUniforms.length;
     shader.uniforms.uHelmetStripeCenterX = decalUniforms.centerX;
+    shader.uniforms.uHelmetStripePreset = decalUniforms.preset;
     shader.uniforms.uHelmetStripeLeftColor = decalUniforms.leftColor;
     shader.uniforms.uHelmetStripeCenterColor = decalUniforms.centerColor;
     shader.uniforms.uHelmetStripeRightColor = decalUniforms.rightColor;
+    shader.uniforms.uHelmetStripePipingColor = decalUniforms.pipingColor;
     shader.uniforms.uHelmetStripeDesignEnabled = decalUniforms.designEnabled;
     shader.uniforms.uHelmetStripeDesignMap = decalUniforms.designMap;
     shader.uniforms.uHelmetWrapEnabled = decalUniforms.wrapEnabled;
@@ -369,9 +371,11 @@ uniform float uHelmetStripeBaseEnabled;
 uniform float uHelmetStripeWidthScale;
 uniform float uHelmetStripeLength;
 uniform float uHelmetStripeCenterX;
+uniform float uHelmetStripePreset;
 uniform vec3 uHelmetStripeLeftColor;
 uniform vec3 uHelmetStripeCenterColor;
 uniform vec3 uHelmetStripeRightColor;
+uniform vec3 uHelmetStripePipingColor;
 uniform float uHelmetStripeDesignEnabled;
 uniform sampler2D uHelmetStripeDesignMap;
 uniform float uHelmetWrapEnabled;
@@ -392,9 +396,37 @@ if (uHelmetWrapEnabled > 0.5) {
 if (uHelmetStripesEnabled > 0.5) {
   float stripeW = 0.020 * uHelmetStripeWidthScale;
   float stripeX = vHelmetModelPosition.x - uHelmetStripeCenterX;
-  float totalHalfWidth = stripeW * 1.5;
+  float absStripeX = abs(stripeX);
   float edgeAA = max(fwidth(stripeX) * 1.5, 0.00030);
-  float widthMask = 1.0 - smoothstep(totalHalfWidth - edgeAA, totalHalfWidth + edgeAA, abs(stripeX));
+
+  float totalHalfWidth = stripeW * 1.5;
+  vec3 stripeColor = uHelmetStripeCenterColor;
+  float widthMask = 0.0;
+
+  if (uHelmetStripePreset < 0.5) {
+    totalHalfWidth = stripeW * 0.5;
+    widthMask = 1.0 - smoothstep(totalHalfWidth - edgeAA, totalHalfWidth + edgeAA, absStripeX);
+    stripeColor = uHelmetStripeCenterColor;
+  } else if (uHelmetStripePreset < 1.5) {
+    totalHalfWidth = stripeW * 1.5;
+    widthMask = 1.0 - smoothstep(totalHalfWidth - edgeAA, totalHalfWidth + edgeAA, absStripeX);
+    stripeColor = (absStripeX > stripeW * 0.5) ? uHelmetStripeLeftColor : uHelmetStripeCenterColor;
+  } else if (uHelmetStripePreset < 2.5) {
+    float outerW = stripeW * 0.75;
+    float centerHalf = stripeW * 0.75;
+    totalHalfWidth = centerHalf + outerW;
+    widthMask = 1.0 - smoothstep(totalHalfWidth - edgeAA, totalHalfWidth + edgeAA, absStripeX);
+    stripeColor = (absStripeX <= centerHalf) ? uHelmetStripeCenterColor : uHelmetStripeLeftColor;
+  } else {
+    float outerW = stripeW * 1.0;
+    float centerHalf = stripeW * 0.5;
+    float pipingW = stripeW * 0.16;
+    totalHalfWidth = centerHalf + pipingW + outerW;
+    widthMask = 1.0 - smoothstep(totalHalfWidth - edgeAA, totalHalfWidth + edgeAA, absStripeX);
+    if (absStripeX <= centerHalf) stripeColor = uHelmetStripeCenterColor;
+    else if (absStripeX <= centerHalf + pipingW) stripeColor = uHelmetStripePipingColor;
+    else stripeColor = uHelmetStripeLeftColor;
+  }
 
   float pathAA = max(fwidth(vHelmetStripePath) * 1.5, 0.0020);
   float lengthMask = 1.0 - smoothstep(
@@ -404,18 +436,11 @@ if (uHelmetStripesEnabled > 0.5) {
   );
   float stripeMask = widthMask * lengthMask;
 
-  vec3 stripeColor = uHelmetStripeCenterColor;
-  if (stripeX < -0.5 * stripeW) stripeColor = uHelmetStripeLeftColor;
-  else if (stripeX > 0.5 * stripeW) stripeColor = uHelmetStripeRightColor;
-
-  // Preset stripes sit above the wrap.
   if (uHelmetStripeBaseEnabled > 0.5) {
     helmetDecal.rgb = mix(helmetDecal.rgb, stripeColor, stripeMask);
     helmetDecal.a = max(helmetDecal.a, stripeMask);
   }
 
-  // Uploaded stripe artwork is the top stripe layer. Transparent PNG areas reveal
-  // the preset stripe or wrap below it; fully opaque pixels completely cover them.
   if (uHelmetStripeDesignEnabled > 0.5) {
     float localU = (stripeX + totalHalfWidth) / max(totalHalfWidth * 2.0, 0.0001);
     float localV = 1.0 - (vHelmetStripePath / max(uHelmetStripeLength, 0.0001));
@@ -915,6 +940,13 @@ const DECAL_FINISHES = [
   { id: 'chrome', label: 'Chrome', roughness: 0.02, metalness: 1.0, clearcoat: 0.0, clearcoatRoughness: 0.0 },
 ];
 
+const STRIPE_PRESET_OPTIONS = [
+  { id: 'single', label: 'Single Stripe' },
+  { id: 'threeEqual', label: '3 Stripe — Equal' },
+  { id: 'threeThickCenter', label: '3 Stripe — Thick Center' },
+  { id: 'fivePiped', label: '5 Stripe — Center + Piping' },
+];
+
 function applyDecalFinishToMaterials(materials, scene, finishId) {
   const def = DECAL_FINISHES.find(f => f.id === finishId) || DECAL_FINISHES[0];
   materials.forEach(mat => {
@@ -1325,9 +1357,11 @@ export default function HelmetBuilder() {
     widthScale:      { value: 1 },
     length:          { value: 1 },
     centerX:         { value: 0 },
+    preset:          { value: 1 },
     leftColor:       { value: new THREE.Color('#efff00') },
     centerColor:     { value: new THREE.Color('#eaeaea') },
     rightColor:      { value: new THREE.Color('#efff00') },
+    pipingColor:     { value: new THREE.Color('#7a2f2f') },
     designEnabled:   { value: 0 },
     designMap:       { value: null },
     wrapEnabled:     { value: 0 },
@@ -1342,9 +1376,11 @@ export default function HelmetBuilder() {
     widthScale:      { value: 1 },
     length:          { value: 1 },
     centerX:         { value: 0 },
+    preset:          { value: 1 },
     leftColor:       { value: new THREE.Color('#ffffff') },
     centerColor:     { value: new THREE.Color('#ffffff') },
     rightColor:      { value: new THREE.Color('#ffffff') },
+    pipingColor:     { value: new THREE.Color('#ffffff') },
     designEnabled:   { value: 0 },
     designMap:       { value: null },
     wrapEnabled:     { value: 0 },
@@ -1387,11 +1423,13 @@ export default function HelmetBuilder() {
   const [wrapRevision, setWrapRevision]     = useState(0);
 
   const [helmetStripesEnabled, setHelmetStripesEnabled] = useState(false);
+  const [helmetStripePreset, setHelmetStripePreset]     = useState('threeEqual');
   const [helmetStripeWidth, setHelmetStripeWidth]       = useState(2);
   const [helmetStripeLength, setHelmetStripeLength]     = useState(1);
-  const [helmetStripeLeftColor, setHelmetStripeLeftColor]     = useState('#efff00');
+  const [helmetStripeSingleColor, setHelmetStripeSingleColor] = useState('#151515');
+  const [helmetStripeOuterColor, setHelmetStripeOuterColor]   = useState('#efff00');
   const [helmetStripeCenterColor, setHelmetStripeCenterColor] = useState('#eaeaea');
-  const [helmetStripeRightColor, setHelmetStripeRightColor]   = useState('#efff00');
+  const [helmetStripePipingColor, setHelmetStripePipingColor] = useState('#7a2f2f');
   const [helmetStripeDesignEnabled, setHelmetStripeDesignEnabled] = useState(false);
   const [helmetStripeDesignPreviewUrl, setHelmetStripeDesignPreviewUrl] = useState(null);
   const [helmetStripeDesignFileName, setHelmetStripeDesignFileName] = useState('');
@@ -2384,7 +2422,7 @@ export default function HelmetBuilder() {
     uniforms.designEnabled.value = 1;
   }, [loaded, helmetStripeDesignEnabled, helmetStripeDesignRevision, helmetStripeDesignScale, helmetStripeDesignRotation, helmetStripeDesignOffsetX, helmetStripeDesignOffsetY, helmetStripeDesignOpacity]);
 
-  // ── STANDARD 3-STRIPE DECAL ─────────────────────────────────────────────────
+  // ── PRESET STRIPE DECAL ─────────────────────────────────────────────────────
   useEffect(() => {
     const uniforms = stripeUniformsRef.current;
     const hasDesign = !!stripeDesignImageRef.current;
@@ -2392,11 +2430,17 @@ export default function HelmetBuilder() {
     uniforms.baseEnabled.value = helmetStripesEnabled ? 1 : 0;
     uniforms.widthScale.value = helmetStripeWidth;
     uniforms.length.value = helmetStripeLength;
-    uniforms.leftColor.value.set(helmetStripeLeftColor);
-    uniforms.centerColor.value.set(helmetStripeCenterColor);
-    uniforms.rightColor.value.set(helmetStripeRightColor);
+    uniforms.preset.value = (
+      helmetStripePreset === 'single' ? 0 :
+      helmetStripePreset === 'threeEqual' ? 1 :
+      helmetStripePreset === 'threeThickCenter' ? 2 : 3
+    );
+    uniforms.leftColor.value.set(helmetStripeOuterColor);
+    uniforms.centerColor.value.set(helmetStripePreset === 'single' ? helmetStripeSingleColor : helmetStripeCenterColor);
+    uniforms.rightColor.value.set(helmetStripeOuterColor);
+    uniforms.pipingColor.value.set(helmetStripePipingColor);
     uniforms.designEnabled.value = helmetStripeDesignEnabled && hasDesign ? 1 : 0;
-  }, [loaded, helmetStripesEnabled, helmetStripeWidth, helmetStripeLength, helmetStripeLeftColor, helmetStripeCenterColor, helmetStripeRightColor, helmetStripeDesignEnabled, helmetStripeDesignRevision]);
+  }, [loaded, helmetStripesEnabled, helmetStripePreset, helmetStripeWidth, helmetStripeLength, helmetStripeSingleColor, helmetStripeOuterColor, helmetStripeCenterColor, helmetStripePipingColor, helmetStripeDesignEnabled, helmetStripeDesignRevision]);
 
   // Hide crown screws while any stripe layer is active. The filled Decal Surface
   // supplies the visible curved stripe across that area, so the screw hardware cannot
@@ -3784,25 +3828,57 @@ export default function HelmetBuilder() {
                 <div style={{ background:'rgba(255,255,255,0.035)', border:'1px solid rgba(255,255,255,0.09)', borderRadius:8, padding:10 }}>
                   <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:10 }}>
                     <div>
-                      <div style={{ fontSize:11, fontWeight:800, color:'#d1d5db', fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.04em' }}>STANDARD 3 STRIPE</div>
+                      <div style={{ fontSize:11, fontWeight:800, color:'#d1d5db', fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.04em' }}>PRESET STRIPE PATTERN</div>
                       <div style={{ fontSize:8, color:'#4b5563', marginTop:2 }}>Front → crown → back</div>
                     </div>
                     <button onClick={() => setHelmetStripesEnabled(v => !v)} style={{ background:helmetStripesEnabled?'rgba(239,255,0,0.12)':'rgba(255,255,255,0.04)', border:helmetStripesEnabled?'1px solid rgba(239,255,0,0.45)':'1px solid rgba(255,255,255,0.12)', borderRadius:20, padding:'4px 10px', cursor:'pointer', fontSize:8, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif", color:helmetStripesEnabled?'#efff00':'#6b7280', letterSpacing:'0.06em' }}>{helmetStripesEnabled?'ON':'OFF'}</button>
                   </div>
 
-                  <div style={{ display:'flex', justifyContent:'center', gap:0, height:24, margin:'10px 0 8px', padding:'5px 0', background:'rgba(0,0,0,0.18)', borderRadius:5 }} aria-label="Three helmet stripes preview">
-                    <div style={{ width:10, height:'100%', background:helmetStripeLeftColor, borderRadius:'2px 0 0 2px' }} />
-                    <div style={{ width:10, height:'100%', background:helmetStripeCenterColor }} />
-                    <div style={{ width:10, height:'100%', background:helmetStripeRightColor, borderRadius:'0 2px 2px 0' }} />
+                  <div style={{ marginTop:10 }}>
+                    <div style={{ fontSize:9, color:'#9ca3af', marginBottom:6 }}>Pattern</div>
+                    <select value={helmetStripePreset} onChange={e => setHelmetStripePreset(e.target.value)} style={{ width:'100%', background:'rgba(0,0,0,0.22)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:6, padding:'8px 10px', color:'#e5e7eb', fontSize:10, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.04em' }}>
+                      {STRIPE_PRESET_OPTIONS.map(option => (
+                        <option key={option.id} value={option.id}>{option.label}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div style={{ display:'flex', justifyContent:'center', alignItems:'center', gap:0, height:24, margin:'10px 0 8px', padding:'5px 0', background:'rgba(0,0,0,0.18)', borderRadius:5 }} aria-label="Helmet stripe preset preview">
+                    {helmetStripePreset === 'single' && (
+                      <div style={{ width:14, height:'100%', background:helmetStripeSingleColor, borderRadius:2 }} />
+                    )}
+                    {helmetStripePreset === 'threeEqual' && (
+                      <>
+                        <div style={{ width:10, height:'100%', background:helmetStripeOuterColor, borderRadius:'2px 0 0 2px' }} />
+                        <div style={{ width:10, height:'100%', background:helmetStripeCenterColor }} />
+                        <div style={{ width:10, height:'100%', background:helmetStripeOuterColor, borderRadius:'0 2px 2px 0' }} />
+                      </>
+                    )}
+                    {helmetStripePreset === 'threeThickCenter' && (
+                      <>
+                        <div style={{ width:8, height:'100%', background:helmetStripeOuterColor, borderRadius:'2px 0 0 2px' }} />
+                        <div style={{ width:16, height:'100%', background:helmetStripeCenterColor }} />
+                        <div style={{ width:8, height:'100%', background:helmetStripeOuterColor, borderRadius:'0 2px 2px 0' }} />
+                      </>
+                    )}
+                    {helmetStripePreset === 'fivePiped' && (
+                      <>
+                        <div style={{ width:12, height:'100%', background:helmetStripeOuterColor, borderRadius:'2px 0 0 2px' }} />
+                        <div style={{ width:3, height:'100%', background:helmetStripePipingColor }} />
+                        <div style={{ width:12, height:'100%', background:helmetStripeCenterColor }} />
+                        <div style={{ width:3, height:'100%', background:helmetStripePipingColor }} />
+                        <div style={{ width:12, height:'100%', background:helmetStripeOuterColor, borderRadius:'0 2px 2px 0' }} />
+                      </>
+                    )}
                   </div>
 
                   <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.5 }}>
-                    This preset uses three equal-width stripes with no gaps. Stripes use a dedicated decal surface above any full wrap and beneath the bumpers, so Shell glitter and Car Paint effects cannot show through. Crown screw hardware is hidden while stripes are active, and the stripe sits beneath the physical bumpers.
+                    Choose a preset stripe layout and adjust its width, length, and colors. Stripes use a dedicated decal surface above any full wrap and beneath the bumpers, so Shell glitter and Car Paint effects cannot show through. Crown screw hardware is hidden while stripes are active.
                   </div>
 
                   <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:10 }}>
                     <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Width</span>
-                    <input type="range" min="70" max="200" value={Math.round(helmetStripeWidth*100)} onChange={e => setHelmetStripeWidth(parseInt(e.target.value)/100)} style={{ flex:1, minWidth:0 }} />
+                    <input type="range" min="70" max="220" value={Math.round(helmetStripeWidth*100)} onChange={e => setHelmetStripeWidth(parseInt(e.target.value)/100)} style={{ flex:1, minWidth:0 }} />
                   </div>
                   <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:8 }}>
                     <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Length</span>
@@ -3811,9 +3887,17 @@ export default function HelmetBuilder() {
 
                   <div style={{ height:1, background:'rgba(255,255,255,0.06)', margin:'12px 0 10px' }} />
                   <SectionLabel>Stripe Colors</SectionLabel>
-                  <ColorSwatch color={helmetStripeLeftColor} onChange={setHelmetStripeLeftColor} label="Left Stripe" />
-                  <ColorSwatch color={helmetStripeCenterColor} onChange={setHelmetStripeCenterColor} label="Center Stripe" />
-                  <ColorSwatch color={helmetStripeRightColor} onChange={setHelmetStripeRightColor} label="Right Stripe" />
+                  {helmetStripePreset === 'single' ? (
+                    <ColorSwatch color={helmetStripeSingleColor} onChange={setHelmetStripeSingleColor} label="Stripe" />
+                  ) : (
+                    <>
+                      <ColorSwatch color={helmetStripeOuterColor} onChange={setHelmetStripeOuterColor} label="Outer Stripes" />
+                      <ColorSwatch color={helmetStripeCenterColor} onChange={setHelmetStripeCenterColor} label="Inner Stripe" />
+                      {helmetStripePreset === 'fivePiped' && (
+                        <ColorSwatch color={helmetStripePipingColor} onChange={setHelmetStripePipingColor} label="Piping" />
+                      )}
+                    </>
+                  )}
 
                   <div style={{ height:1, background:'rgba(255,255,255,0.06)', margin:'12px 0 10px' }} />
                   <SectionLabel>Custom Stripe Design</SectionLabel>
