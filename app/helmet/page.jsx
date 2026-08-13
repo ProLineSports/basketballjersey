@@ -1160,6 +1160,8 @@ export default function HelmetBuilder() {
   useEffect(() => { sparkleRotatingRef.current = sparkleRotating; }, [sparkleRotating]);
   const [exporting, setExporting]             = useState(false);
   const [exported, setExported]               = useState(false);
+  const [viewportBgColor, setViewportBgColor] = useState('#1f1c1e');
+  const [transparentBg, setTransparentBg]     = useState(false);
   const [visorOn, setVisorOn]               = useState(true);
   const [glitter, setGlitter]               = useState(0.3);
   const [glitterColor, setGlitterColor]     = useState('#ffffff');
@@ -1589,7 +1591,7 @@ export default function HelmetBuilder() {
     cameraRef.current = camera;
 
     // Renderer
-    const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+    const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, alpha: true });
     renderer.setPixelRatio(window.devicePixelRatio);
     renderer.setSize(el.clientWidth, el.clientHeight);
     renderer.shadowMap.enabled = true;
@@ -1597,6 +1599,7 @@ export default function HelmetBuilder() {
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.4;
     renderer.physicallyCorrectLights = true;
+    renderer.setClearColor(0x000000, 0);
 
     // Build environment map manually using PMREMGenerator + a simple scene
     const pmremGenerator = new THREE.PMREMGenerator(renderer);
@@ -2954,8 +2957,14 @@ export default function HelmetBuilder() {
     setHasWatermark(exportData.hasWatermark);
 
     await new Promise(r => setTimeout(r, 100));
-    rendererRef.current.render(sceneRef.current, cameraRef.current);
-    const rawDataURL = rendererRef.current.domElement.toDataURL('image/png');
+    const renderer = rendererRef.current;
+    const scene = sceneRef.current;
+    const camera = cameraRef.current;
+    const previousBackground = scene.background;
+    scene.background = transparentBg ? null : new THREE.Color(viewportBgColor);
+    renderer.render(scene, camera);
+    const rawDataURL = renderer.domElement.toDataURL('image/png');
+    scene.background = previousBackground;
 
     // Tile the watermark onto the captured frame for free (unpaid) exports
     let finalDataURL = rawDataURL;
@@ -3560,12 +3569,12 @@ export default function HelmetBuilder() {
         </div>
 
         {/* 3D VIEWPORT */}
-        <div style={{ position: 'relative', overflow: 'hidden', background: '#1f1c1e' }}>
+        <div style={{ position: 'relative', overflow: 'hidden', background: transparentBg ? 'transparent' : viewportBgColor, backgroundImage: transparentBg ? 'linear-gradient(45deg, rgba(255,255,255,0.06) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.06) 75%, rgba(255,255,255,0.06)), linear-gradient(45deg, rgba(255,255,255,0.06) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.06) 75%, rgba(255,255,255,0.06))' : 'none', backgroundSize: transparentBg ? '24px 24px' : 'auto', backgroundPosition: transparentBg ? '0 0, 12px 12px' : '0 0' }}>
           <div ref={mountRef} style={{ width: '100%', height: '100%' }} />
 
           {/* Loading overlay */}
           {!loaded && (
-            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#1f1c1e' }}>
+            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: transparentBg ? 'rgba(22,19,20,0.82)' : viewportBgColor }}>
               <div style={{ textAlign: 'center' }}>
                 <div style={{ fontSize: 32, marginBottom: 12 }}>🏈</div>
                 <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 14, color: '#6b7280', letterSpacing: '0.1em' }}>LOADING HELMET...</div>
@@ -3661,6 +3670,19 @@ export default function HelmetBuilder() {
           </div>
 
           <div style={{ padding:'12px 14px', borderTop:'1px solid rgba(255,255,255,0.07)', flexShrink:0 }}>
+            <SectionLabel>Background</SectionLabel>
+            <div style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:9, padding:'10px 12px', marginBottom:10 }}>
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:10, marginBottom:10 }}>
+                <div>
+                  <div style={{ fontSize:11, color:'#9ca3af', marginBottom:2 }}>Transparent PNG</div>
+                  <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.4 }}>Turn off the background for transparent exports.</div>
+                </div>
+                <button onClick={() => setTransparentBg(v => !v)} style={{ background:transparentBg?'rgba(239,255,0,0.12)':'rgba(255,255,255,0.06)', border:transparentBg?'1px solid rgba(239,255,0,0.40)':'1px solid rgba(255,255,255,0.12)', borderRadius:20, padding:'6px 12px', cursor:'pointer', fontSize:10, fontWeight:800, color:transparentBg?'#efff00':'#9ca3af', fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.08em' }}>{transparentBg ? 'ON' : 'OFF'}</button>
+              </div>
+              <div style={{ opacity: transparentBg ? 0.45 : 1, pointerEvents: transparentBg ? 'none' : 'auto' }}>
+                <ColorSwatch color={viewportBgColor} onChange={setViewportBgColor} label="Viewport Background" />
+              </div>
+            </div>
             <div style={{ background:'rgba(239,255,0,0.05)', border:'1px solid rgba(239,255,0,0.14)', borderRadius:9, padding:'10px 12px', marginBottom:10 }}>
               <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:5 }}>
                 <span style={{ fontSize:11, color:'#9ca3af' }}>Credits remaining</span>
