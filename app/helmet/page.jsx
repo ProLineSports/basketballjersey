@@ -160,7 +160,8 @@ function applyPanoramicShellWrapUV(model, roots) {
     mesh.updateWorldMatrix(true, false);
     const localToModel = new THREE.Matrix4().multiplyMatrices(modelInverse, mesh.matrixWorld);
     const pos = mesh.geometry.attributes.position;
-    const uvValues = new Float32Array(pos.count * 2);
+    const wrapUvValues = new Float32Array(pos.count * 2);
+    const finishUvValues = new Float32Array(pos.count * 2);
     const modelPositionValues = new Float32Array(pos.count * 3);
     const stripePathValues = new Float32Array(pos.count);
 
@@ -204,27 +205,35 @@ function applyPanoramicShellWrapUV(model, roots) {
 
       for (let k = 0; k < 3 && i + k < pos.count; k++) {
         const vi = i + k;
-        uvValues[vi * 2] = u[k];
-        uvValues[vi * 2 + 1] = THREE.MathUtils.clamp(v[k], 0, 1);
+        wrapUvValues[vi * 2] = u[k];
+        wrapUvValues[vi * 2 + 1] = THREE.MathUtils.clamp(v[k], 0, 1);
         stripePathValues[vi] = path[k];
 
         const mp = modelPos[k];
         modelPositionValues[vi * 3] = mp.x;
         modelPositionValues[vi * 3 + 1] = mp.y;
         modelPositionValues[vi * 3 + 2] = mp.z;
+
+        // Finish projection for Shell glitter/metallic effects:
+        // use a common shell-space planar X/Z mapping rather than the cylindrical wrap UV.
+        // The flake/noise textures are isotropic, so this avoids the crown pinch/emanation
+        // artifact while remaining visually continuous across the shell.
+        finishUvValues[vi * 2] = THREE.MathUtils.clamp((mp.x - minX) / width, 0, 1);
+        finishUvValues[vi * 2 + 1] = THREE.MathUtils.clamp((mp.z - minZ) / depth, 0, 1);
       }
     }
 
-    mesh.geometry.setAttribute('uv', new THREE.BufferAttribute(uvValues, 2));
-    // Car-paint AO/roughness/metalness uses uv2 in this page. Keep it aligned with
-    // the generated wrap projection so the finish remains continuous too.
-    mesh.geometry.setAttribute('uv2', new THREE.BufferAttribute(uvValues.slice(), 2));
+    // Keep wrap/decal UVs in a dedicated attribute and reserve uv / uv2 for the shell
+    // finish projection. This makes Car Paint / Satin textures continuous and removes
+    // the visible crown singularity from cylindrical mapping.
+    mesh.geometry.setAttribute('uv', new THREE.BufferAttribute(finishUvValues, 2));
+    mesh.geometry.setAttribute('uv2', new THREE.BufferAttribute(finishUvValues.slice(), 2));
 
     // These attributes let stripe decals be rendered directly on the Shell surface.
     // That guarantees no floating geometry and makes stripes layer above a full wrap.
     mesh.geometry.setAttribute('helmetModelPosition', new THREE.BufferAttribute(modelPositionValues, 3));
     mesh.geometry.setAttribute('helmetStripePath', new THREE.BufferAttribute(stripePathValues, 1));
-    mesh.geometry.setAttribute('helmetWrapUv', new THREE.BufferAttribute(uvValues.slice(), 2));
+    mesh.geometry.setAttribute('helmetWrapUv', new THREE.BufferAttribute(wrapUvValues.slice(), 2));
 
     mesh.geometry.attributes.uv.needsUpdate = true;
     mesh.geometry.attributes.uv2.needsUpdate = true;
@@ -234,6 +243,11 @@ function applyPanoramicShellWrapUV(model, roots) {
   });
 
   return {
+    minX,
+    maxX,
+    minZ,
+    maxZ,
+    width,
     centerX,
     centerZ,
     maxY,
@@ -248,7 +262,7 @@ function applyPanoramicShellWrapUV(model, roots) {
 function applyStripeProjectionAttributes(model, roots, projection, xCompression = 1) {
   if (!model || !roots?.length || !projection) return;
 
-  const { centerX, centerZ, height, depth, stripePivotY, stripeRawMin, stripeRawMax } = projection;
+  const { minX, width, minZ, centerX, centerZ, height, depth, stripePivotY, stripeRawMin, stripeRawMax } = projection;
   const p = new THREE.Vector3();
   const modelInverse = new THREE.Matrix4().copy(model.matrixWorld).invert();
   const seen = new Set();
@@ -262,15 +276,20 @@ function applyStripeProjectionAttributes(model, roots, projection, xCompression 
       const pos = obj.geometry.attributes.position;
       const modelPositionValues = new Float32Array(pos.count * 3);
       const stripePathValues = new Float32Array(pos.count);
+      const finishUvValues = new Float32Array(pos.count * 2);
 
       for (let i = 0; i < pos.count; i++) {
         p.fromBufferAttribute(pos, i).applyMatrix4(localToModel);
         // Optional X compression expands stripe coverage on small crown hardware without
         // changing the stripe width on the Shell itself. Top screws use this to prevent a
         // hairline of the screw edge from peeking out beside the decal.
-        modelPositionValues[i * 3] = centerX + (p.x - centerX) * xCompression;
+        const projectedX = centerX + (p.x - centerX) * xCompression;
+        modelPositionValues[i * 3] = projectedX;
         modelPositionValues[i * 3 + 1] = p.y;
         modelPositionValues[i * 3 + 2] = p.z;
+
+        finishUvValues[i * 2] = THREE.MathUtils.clamp((projectedX - minX) / Math.max(width, 0.000001), 0, 1);
+        finishUvValues[i * 2 + 1] = THREE.MathUtils.clamp((p.z - minZ) / Math.max(depth, 0.000001), 0, 1);
 
         const theta = Math.atan2((p.z - centerZ) / depth, (p.y - stripePivotY) / height);
         const raw = 0.5 - theta / Math.PI;
@@ -281,8 +300,12 @@ function applyStripeProjectionAttributes(model, roots, projection, xCompression 
         );
       }
 
+      obj.geometry.setAttribute('uv', new THREE.BufferAttribute(finishUvValues, 2));
+      obj.geometry.setAttribute('uv2', new THREE.BufferAttribute(finishUvValues.slice(), 2));
       obj.geometry.setAttribute('helmetModelPosition', new THREE.BufferAttribute(modelPositionValues, 3));
       obj.geometry.setAttribute('helmetStripePath', new THREE.BufferAttribute(stripePathValues, 1));
+      obj.geometry.attributes.uv.needsUpdate = true;
+      obj.geometry.attributes.uv2.needsUpdate = true;
       obj.geometry.attributes.helmetModelPosition.needsUpdate = true;
       obj.geometry.attributes.helmetStripePath.needsUpdate = true;
     });
