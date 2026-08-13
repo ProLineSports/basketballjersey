@@ -310,6 +310,7 @@ function installShellStripeOverlay(material, stripeUniforms) {
     shader.uniforms.uHelmetStripeRightColor = stripeUniforms.rightColor;
     shader.uniforms.uHelmetStripeDesignEnabled = stripeUniforms.designEnabled;
     shader.uniforms.uHelmetStripeDesignMap = stripeUniforms.designMap;
+    shader.uniforms.uHelmetWrapOccludesFinish = stripeUniforms.wrapOccludes;
 
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -342,7 +343,9 @@ uniform vec3 uHelmetStripeLeftColor;
 uniform vec3 uHelmetStripeCenterColor;
 uniform vec3 uHelmetStripeRightColor;
 uniform float uHelmetStripeDesignEnabled;
-uniform sampler2D uHelmetStripeDesignMap;`
+uniform sampler2D uHelmetStripeDesignMap;
+uniform float uHelmetWrapOccludesFinish;
+float helmetDecalOcclusion = 0.0;`
       )
       .replace(
         '#include <map_fragment>',
@@ -381,6 +384,7 @@ if (uHelmetStripesEnabled > 0.5) {
   // itself without forcing the preset 3-color stripes underneath.
   if (uHelmetStripeBaseEnabled > 0.5) {
     diffuseColor.rgb = mix(diffuseColor.rgb, stripeColor, stripeMask);
+    helmetDecalOcclusion = max(helmetDecalOcclusion, stripeMask);
   }
 
   if (uHelmetStripeDesignEnabled > 0.5) {
@@ -390,7 +394,9 @@ if (uHelmetStripesEnabled > 0.5) {
     float localV = 1.0 - (vHelmetStripePath / max(uHelmetStripeLength, 0.0001));
     if (localU >= 0.0 && localU <= 1.0 && localV >= 0.0 && localV <= 1.0) {
       vec4 designSample = texture2D(uHelmetStripeDesignMap, vec2(localU, localV));
-      diffuseColor.rgb = mix(diffuseColor.rgb, designSample.rgb, stripeMask * designSample.a);
+      float designMask = stripeMask * designSample.a;
+      diffuseColor.rgb = mix(diffuseColor.rgb, designSample.rgb, designMask);
+      helmetDecalOcclusion = max(helmetDecalOcclusion, designMask);
     }
   }
 
@@ -399,11 +405,36 @@ if (uHelmetStripesEnabled > 0.5) {
   float edgeDistance = abs(abs(stripeX) - totalHalfWidth);
   float bevelBand = (1.0 - smoothstep(0.0, edgeAA * 3.0, edgeDistance)) * stripeMask;
   diffuseColor.rgb *= 1.0 + bevelBand * 0.035;
+}
+
+if (uHelmetWrapOccludesFinish > 0.5) {
+  helmetDecalOcclusion = 1.0;
+}`
+      )
+      .replace(
+        '#include <roughnessmap_fragment>',
+        `#include <roughnessmap_fragment>
+if (helmetDecalOcclusion > 0.001) {
+  roughnessFactor = mix(roughnessFactor, 0.18, helmetDecalOcclusion);
+}`
+      )
+      .replace(
+        '#include <metalnessmap_fragment>',
+        `#include <metalnessmap_fragment>
+if (helmetDecalOcclusion > 0.001) {
+  metalnessFactor = mix(metalnessFactor, 0.0, helmetDecalOcclusion);
+}`
+      )
+      .replace(
+        '#include <emissivemap_fragment>',
+        `#include <emissivemap_fragment>
+if (helmetDecalOcclusion > 0.001) {
+  totalEmissiveRadiance *= (1.0 - helmetDecalOcclusion);
 }`
       );
   };
 
-  material.customProgramCacheKey = () => 'helmet-standard-three-stripe-surface-v4';
+  material.customProgramCacheKey = () => 'helmet-standard-three-stripe-surface-v5';
   material.needsUpdate = true;
 }
 
@@ -605,6 +636,7 @@ export default function HelmetBuilder() {
     rightColor:      { value: new THREE.Color('#efff00') },
     designEnabled:   { value: 0 },
     designMap:       { value: null },
+    wrapOccludes:    { value: 0 },
   });
 
   const [activeTab, setActiveTab]     = useState('colors');
@@ -1300,7 +1332,8 @@ export default function HelmetBuilder() {
     uniforms.centerColor.value.set(helmetStripeCenterColor);
     uniforms.rightColor.value.set(helmetStripeRightColor);
     uniforms.designEnabled.value = helmetStripeDesignEnabled && hasDesign ? 1 : 0;
-  }, [loaded, helmetStripesEnabled, helmetStripeWidth, helmetStripeLength, helmetStripeLeftColor, helmetStripeCenterColor, helmetStripeRightColor, helmetStripeDesignEnabled, helmetStripeDesignRevision]);
+    uniforms.wrapOccludes.value = wrapEnabled ? 1 : 0;
+  }, [loaded, helmetStripesEnabled, helmetStripeWidth, helmetStripeLength, helmetStripeLeftColor, helmetStripeCenterColor, helmetStripeRightColor, helmetStripeDesignEnabled, helmetStripeDesignRevision, wrapEnabled]);
 
   // ── SHADOW SURFACE ON/OFF ────────────────────────────────────────────────────
   // Was previously just UI state with nothing reading it — floor/wall never actually
@@ -1743,7 +1776,7 @@ export default function HelmetBuilder() {
                   </div>
 
                   <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.5 }}>
-                    This preset uses three equal-width stripes with no gaps. Stripes are rendered directly on the shell surface, above any full wrap and beneath the bumpers. Crown screw hardware remains visible.
+                    This preset uses three equal-width stripes with no gaps. Stripes are rendered directly on the shell surface, above any full wrap and beneath the bumpers. Sparkles and underlying finish effects are suppressed beneath decal coverage. Crown screw hardware remains visible.
                   </div>
 
                   <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:10 }}>
