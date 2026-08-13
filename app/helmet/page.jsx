@@ -1296,8 +1296,8 @@ export default function HelmetBuilder() {
   const [bumperLogoRearRotation, setBumperLogoRearRotation] = useState(0);
   const [bumperLogoFrontAcross, setBumperLogoFrontAcross] = useState(0);
   const [bumperLogoRearAcross, setBumperLogoRearAcross] = useState(0);
-  const [bumperLogoFrontVertical, setBumperLogoFrontVertical] = useState(-6);
-  const [bumperLogoRearVertical, setBumperLogoRearVertical] = useState(-8);
+  const [bumperLogoFrontVertical, setBumperLogoFrontVertical] = useState(0);
+  const [bumperLogoRearVertical, setBumperLogoRearVertical] = useState(-15);
   const [bumperLogoRearCurve, setBumperLogoRearCurve] = useState(-135);
   const [bumperLogoRevision, setBumperLogoRevision] = useState(0);
 
@@ -2435,7 +2435,7 @@ export default function HelmetBuilder() {
       });
       mainMat.userData.sideLogoMainMaterial = true;
       installSideLogoSurfaceProjection(mainMat, mainUniforms, `side-logo-main-v2-${side}`);
-      applyDecalFinishToMaterials([mainMat], scene, bumperLogoFinishRef.current);
+      applyDecalFinishToMaterials([mainMat], scene, decalFinishRef.current);
 
       const shadowMeshes = createCarrierSurfaceLogoMeshes(scene, shellMeshes, shadowMat, side, 'Shadow', 39);
       const artworkMeshes = createCarrierSurfaceLogoMeshes(scene, shellMeshes, mainMat, side, 'Artwork', 40);
@@ -2789,12 +2789,11 @@ export default function HelmetBuilder() {
 
     const getBumperHit = (slot, across, vertical) => {
       const isFront = slot === 'front';
-      const xTravel = boundsModel.width * 0.34;
-      const yTravel = boundsModel.height * 0.18;
-      const targetY = boundsModel.centerY + (vertical / 100) * yTravel;
       const localTarget = new THREE.Vector3(
-        boundsModel.centerX + (across / 100) * xTravel,
-        targetY,
+        boundsModel.centerX + (across / 100) * boundsModel.width * 0.30,
+        isFront
+          ? boundsModel.maxY - boundsModel.height * (0.10 - (vertical / 100) * 0.12)
+          : boundsModel.minY + boundsModel.height * (0.10 + (vertical / 100) * 0.12),
         isFront ? boundsModel.maxZ : boundsModel.minZ,
       );
       const targetWorld = model.localToWorld(localTarget.clone());
@@ -2854,7 +2853,10 @@ export default function HelmetBuilder() {
 
       const normalMatrix = new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld);
       const fallback = new THREE.Vector3(0, 0, isFront ? 1 : -1).transformDirection(model.matrixWorld).normalize();
-      const worldNormal = hit.face?.normal?.clone().applyMatrix3(normalMatrix).normalize() || fallback;
+      // Front bumper should start square and unskewed. Rear keeps the local surface
+      // normal because its wrap/curve behavior is already tuned for that geometry.
+      const surfaceNormal = hit.face?.normal?.clone().applyMatrix3(normalMatrix).normalize() || fallback;
+      const worldNormal = isFront ? fallback : surfaceNormal;
       const projectorPosition = hit.point.clone().addScaledVector(worldNormal, 0.00045);
       const helper = new THREE.Object3D();
       helper.position.copy(projectorPosition);
@@ -2936,7 +2938,7 @@ export default function HelmetBuilder() {
     bumperLogoPackCacheRef.current = { front:null, rear:null };
   }, []);
 
-  // ── DECAL FINISH ────────────────────────────────────────────────────────────
+  // ── MAIN DECAL FINISH — wraps + stripes + side logos ─────────────────────────
   useEffect(() => {
     applyDecalFinishToMaterials([
       ...decalOverlayMaterialsRef.current,
@@ -3268,7 +3270,7 @@ export default function HelmetBuilder() {
               <div>
                 <CollapsibleSection title="SHELL FINISH">
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {FINISHES.map(f => (
+                  {DECAL_FINISHES.map(f => (
                     <button key={f.id} onClick={() => setFinish(f.id)} style={{ background: finish === f.id ? 'rgba(239,255,0,0.1)' : 'rgba(255,255,255,0.04)', border: finish === f.id ? '1px solid rgba(239,255,0,0.4)' : '1px solid rgba(255,255,255,0.08)', borderRadius: 8, padding: '10px 14px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span style={{ fontSize: 12, fontWeight: 700, fontFamily: "'Barlow Condensed', sans-serif", color: finish === f.id ? '#efff00' : '#9ca3af', letterSpacing: '0.04em' }}>{f.label.toUpperCase()}</span>
                       <div style={{ width: 24, height: 24, borderRadius: '50%', background: finish === f.id ? '#efff00' : 'rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
