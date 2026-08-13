@@ -387,6 +387,152 @@ if (uHelmetStripesEnabled > 0.5) {
   material.needsUpdate = true;
 }
 
+
+// ── RAISED VINYL BRIDGES OVER TOP SCREWS ────────────────────────────────────
+// The Shell shader puts the stripes perfectly flush to the helmet, but real Top Screw
+// geometry can still protrude through that surface. Build a tiny tangent-aligned vinyl
+// bridge over each crown screw so the decal genuinely has thickness only where needed.
+// The screw remains underneath, which creates the subtle raised bump you would expect
+// from vinyl laid over hardware, while the stripe colors stay continuous.
+function createTopScrewStripeCovers(model, roots, projection) {
+  const covers = new THREE.Group();
+  covers.name = 'Helmet_Stripe_Screw_Covers';
+  if (!model || !roots?.length || !projection) return covers;
+
+  model.updateMatrixWorld(true);
+  const modelInverse = new THREE.Matrix4().copy(model.matrixWorld).invert();
+  const p = new THREE.Vector3();
+  const points = [];
+  const seen = new Set();
+  const { centerZ, height, depth, stripePivotY, stripeRawMin, stripeRawMax } = projection;
+
+  const getPath = (pt) => {
+    const theta = Math.atan2((pt.z - centerZ) / depth, (pt.y - stripePivotY) / height);
+    const raw = 0.5 - theta / Math.PI;
+    return THREE.MathUtils.clamp(
+      (raw - stripeRawMin) / Math.max(0.000001, stripeRawMax - stripeRawMin),
+      0,
+      1
+    );
+  };
+
+  roots.forEach(root => {
+    root.traverse(obj => {
+      if (!obj.isMesh || !obj.geometry?.attributes?.position || seen.has(obj)) return;
+      seen.add(obj);
+      obj.updateWorldMatrix(true, false);
+      const localToModel = new THREE.Matrix4().multiplyMatrices(modelInverse, obj.matrixWorld);
+      const pos = obj.geometry.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        p.fromBufferAttribute(pos, i).applyMatrix4(localToModel);
+        points.push({ x:p.x, y:p.y, z:p.z, path:getPath(p) });
+      }
+    });
+  });
+
+  if (!points.length) return covers;
+
+  // Three physical crown screws are present in this helmet. Cluster their vertices by
+  // front-to-back stripe-path position so this remains robust if the mesh density changes.
+  let centers = [0.15, 0.5, 0.85];
+  for (let pass = 0; pass < 12; pass++) {
+    const sums = [0,0,0];
+    const counts = [0,0,0];
+    points.forEach(pt => {
+      let best = 0;
+      let bestD = Math.abs(pt.path - centers[0]);
+      for (let k = 1; k < 3; k++) {
+        const d = Math.abs(pt.path - centers[k]);
+        if (d < bestD) { best = k; bestD = d; }
+      }
+      sums[best] += pt.path;
+      counts[best]++;
+    });
+    centers = centers.map((c,i) => counts[i] ? sums[i] / counts[i] : c);
+  }
+
+  const clusters = [[],[],[]];
+  points.forEach(pt => {
+    let best = 0;
+    let bestD = Math.abs(pt.path - centers[0]);
+    for (let k = 1; k < 3; k++) {
+      const d = Math.abs(pt.path - centers[k]);
+      if (d < bestD) { best = k; bestD = d; }
+    }
+    clusters[best].push(pt);
+  });
+
+  // Shared materials keep all three screw bridges synchronized with the stripe controls.
+  const leftMat = new THREE.MeshPhysicalMaterial({ color:'#efff00', roughness:0.22, metalness:0, clearcoat:0.72, clearcoatRoughness:0.10 });
+  const centerMat = new THREE.MeshPhysicalMaterial({ color:'#eaeaea', roughness:0.22, metalness:0, clearcoat:0.72, clearcoatRoughness:0.10 });
+  const rightMat = new THREE.MeshPhysicalMaterial({ color:'#efff00', roughness:0.22, metalness:0, clearcoat:0.72, clearcoatRoughness:0.10 });
+  covers.userData.materials = { left:leftMat, center:centerMat, right:rightMat };
+
+  const stripeW = 0.020;
+  const vinylThickness = 0.0022;
+
+  clusters.forEach(cluster => {
+    if (!cluster.length) return;
+
+    const mean = cluster.reduce((a,pt) => ({ x:a.x+pt.x, y:a.y+pt.y, z:a.z+pt.z, path:a.path+pt.path }), {x:0,y:0,z:0,path:0});
+    mean.x /= cluster.length; mean.y /= cluster.length; mean.z /= cluster.length; mean.path /= cluster.length;
+
+    const theta = Math.atan2((mean.z - centerZ) / depth, (mean.y - stripePivotY) / height);
+    const dy = -height * Math.sin(theta);
+    const dz = depth * Math.cos(theta);
+    const tangentLen = Math.max(0.000001, Math.hypot(dy, dz));
+    const ty = dy / tangentLen;
+    const tz = dz / tangentLen;
+    const ny = tz;
+    const nz = -ty;
+
+    // Measure the actual screw dimensions in tangent/normal space. The cover sits just
+    // outside the highest point of the screw and extends beyond both ends by a few mm.
+    let minTan = Infinity, maxTan = -Infinity, maxNormal = -Infinity;
+    cluster.forEach(pt => {
+      const ry = pt.y - mean.y;
+      const rz = pt.z - mean.z;
+      const tan = ry * ty + rz * tz;
+      const normal = ry * ny + rz * nz;
+      minTan = Math.min(minTan, tan);
+      maxTan = Math.max(maxTan, tan);
+      maxNormal = Math.max(maxNormal, normal);
+    });
+
+    const coverLength = Math.max(0.036, (maxTan - minTan) + 0.010);
+    const normalOffset = maxNormal + vinylThickness * 0.55 + 0.00035;
+    const centerY = mean.y + ny * normalOffset;
+    const centerZPos = mean.z + nz * normalOffset;
+    const rotationX = Math.atan2(nz, ny);
+
+    const screwCover = new THREE.Group();
+    screwCover.name = 'Stripe_Screw_Cover';
+    screwCover.position.set(0, centerY, centerZPos);
+    screwCover.rotation.x = rotationX;
+    screwCover.userData.path = mean.path;
+
+    const makeBand = (slot, xCenter, material) => {
+      // Slight overlap between adjacent bands prevents hairline cracks at oblique angles.
+      const geo = new THREE.BoxGeometry(stripeW * 1.035, vinylThickness, coverLength);
+      const mesh = new THREE.Mesh(geo, material);
+      mesh.name = `Stripe_Screw_Cover_${slot}`;
+      mesh.position.x = xCenter;
+      mesh.castShadow = true;
+      mesh.receiveShadow = false;
+      mesh.renderOrder = 4;
+      screwCover.add(mesh);
+    };
+
+    makeBand('Left', -stripeW, leftMat);
+    makeBand('Center', 0, centerMat);
+    makeBand('Right', stripeW, rightMat);
+    covers.add(screwCover);
+  });
+
+  covers.visible = false;
+  return covers;
+}
+
 const FINISHES = [
   { id: 'gloss',    label: 'Gloss',     roughness: 0.05, metalness: 0.1,  clearcoat: 1.0, clearcoatRoughness: 0.05, iridescence: 0.0 },
   { id: 'matte',    label: 'Matte',     roughness: 0.9,  metalness: 0.0,  clearcoat: 0.0, clearcoatRoughness: 0.0,  iridescence: 0.0 },
@@ -576,6 +722,8 @@ export default function HelmetBuilder() {
     centerColor: { value: new THREE.Color('#eaeaea') },
     rightColor:  { value: new THREE.Color('#efff00') },
   });
+
+  const stripeScrewCoversRef = useRef(null);
 
   const [activeTab, setActiveTab]     = useState('colors');
   const [colors, setColors]           = useState(() => Object.fromEntries(ZONES.map(z => [z.id, z.defaultColor])));
@@ -980,6 +1128,18 @@ export default function HelmetBuilder() {
         installShellStripeOverlay(mat, stripeUniformsRef.current);
       });
 
+
+      // Add a tiny raised vinyl bridge over each Top Screw. Unlike the earlier full-length
+      // raised ribbons, these exist only over the hardware, so the rest of the stripe stays
+      // perfectly flush to the shell while the screw heads/recesses are actually covered.
+      const screwCovers = createTopScrewStripeCovers(
+        model,
+        partObjectsRef.current[partKey('Top Screws')] || [],
+        shellProjection
+      );
+      model.add(screwCovers);
+      stripeScrewCoversRef.current = screwCovers;
+
       scene.add(model);
       // Now that all shell/facemask materials exist, route env maps per current finish
       // (scoped to car paint / chrome only — see applyShellEnvMap above).
@@ -1014,6 +1174,18 @@ export default function HelmetBuilder() {
     return () => {
       cancelAnimationFrame(frameRef.current);
       window.removeEventListener('resize', onResize);
+      if (stripeScrewCoversRef.current) {
+        const disposedMaterials = new Set();
+        stripeScrewCoversRef.current.traverse(obj => {
+          if (!obj.isMesh) return;
+          obj.geometry?.dispose();
+          const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+          mats.forEach(mat => {
+            if (mat && !disposedMaterials.has(mat)) { mat.dispose(); disposedMaterials.add(mat); }
+          });
+        });
+        stripeScrewCoversRef.current = null;
+      }
       renderer.dispose();
       if (el.contains(renderer.domElement)) el.removeChild(renderer.domElement);
     };
@@ -1128,15 +1300,23 @@ export default function HelmetBuilder() {
     uniforms.centerColor.value.set(helmetStripeCenterColor);
     uniforms.rightColor.value.set(helmetStripeRightColor);
 
-    // The cross-shaped recess/slot in the Top Screws is real geometry, so a shader
-    // color overlay cannot physically fill it. When helmet stripes are active, treat
-    // the vinyl as the topmost layer and occlude the crown screws completely. The
-    // stripe remains rendered directly on the Shell underneath, so there is no float
-    // or z-fighting. Bumpers stay visible above the decal as separate geometry.
+    // Keep the screw itself in place so it can create a believable bump underneath the
+    // vinyl bridge. The bridge is the only raised decal geometry and covers the hardware.
     const topScrewRoots = partObjectsRef.current[partKey('Top Screws')] || [];
-    topScrewRoots.forEach(root => {
-      root.visible = !helmetStripesEnabled;
-    });
+    topScrewRoots.forEach(root => { root.visible = true; });
+
+    const covers = stripeScrewCoversRef.current;
+    if (covers) {
+      covers.visible = helmetStripesEnabled;
+      covers.scale.x = helmetStripeWidth;
+      const mats = covers.userData.materials || {};
+      mats.left?.color.set(helmetStripeLeftColor);
+      mats.center?.color.set(helmetStripeCenterColor);
+      mats.right?.color.set(helmetStripeRightColor);
+      covers.children.forEach(screwCover => {
+        screwCover.visible = helmetStripesEnabled && (screwCover.userData.path ?? 0) <= helmetStripeLength + 0.01;
+      });
+    }
   }, [loaded, helmetStripesEnabled, helmetStripeWidth, helmetStripeLength, helmetStripeLeftColor, helmetStripeCenterColor, helmetStripeRightColor]);
 
   // ── SHADOW SURFACE ON/OFF ────────────────────────────────────────────────────
@@ -1580,12 +1760,12 @@ export default function HelmetBuilder() {
                   </div>
 
                   <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.5 }}>
-                    This preset uses three equal-width stripes with no gaps. Stripes sit directly on the shell, cover the crown screw hardware, layer above any full wrap, and remain beneath the bumpers.
+                    This preset uses three equal-width stripes with no gaps. Stripes sit directly on the shell, with a thin raised vinyl bridge over the crown screws, above any full wrap and beneath the bumpers.
                   </div>
 
                   <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:10 }}>
                     <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Width</span>
-                    <input type="range" min="70" max="155" value={Math.round(helmetStripeWidth*100)} onChange={e => setHelmetStripeWidth(parseInt(e.target.value)/100)} style={{ flex:1 }} />
+                    <input type="range" min="70" max="200" value={Math.round(helmetStripeWidth*100)} onChange={e => setHelmetStripeWidth(parseInt(e.target.value)/100)} style={{ flex:1 }} />
                     <span style={{ width:34, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{Math.round(helmetStripeWidth*100)}%</span>
                   </div>
                   <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:8 }}>
