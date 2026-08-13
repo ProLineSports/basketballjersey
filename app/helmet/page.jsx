@@ -1293,13 +1293,13 @@ export default function HelmetBuilder() {
   const [bumperLogoFrontFileName, setBumperLogoFrontFileName] = useState('');
   const [bumperLogoRearFileName, setBumperLogoRearFileName] = useState('');
   const [bumperLogoFrontScale, setBumperLogoFrontScale] = useState(6.6);
-  const [bumperLogoRearScale, setBumperLogoRearScale] = useState(6.05);
+  const [bumperLogoRearScale, setBumperLogoRearScale] = useState(5.35);
   const [bumperLogoFrontRotation, setBumperLogoFrontRotation] = useState(0);
   const [bumperLogoRearRotation, setBumperLogoRearRotation] = useState(0);
   const [bumperLogoFrontAcross, setBumperLogoFrontAcross] = useState(0);
   const [bumperLogoRearAcross, setBumperLogoRearAcross] = useState(0);
   const [bumperLogoFrontVertical, setBumperLogoFrontVertical] = useState(0);
-  const [bumperLogoRearVertical, setBumperLogoRearVertical] = useState(-22);
+  const [bumperLogoRearVertical, setBumperLogoRearVertical] = useState(-30);
   const [bumperLogoRearCurve, setBumperLogoRearCurve] = useState(-135);
   const [bumperLogoRevision, setBumperLogoRevision] = useState(0);
 
@@ -2898,8 +2898,8 @@ export default function HelmetBuilder() {
       // so scaling can continue smoothly until the user visually fills/crops the bumper.
 
       // Front bumper looked best with the carrier-surface projection used before the
-      // DecalGeometry rewrite. Restore that method for the front only: it starts square,
-      // does not inherit a random triangle skew, and remains clipped to the bumper mesh.
+      // DecalGeometry rewrite. Keep that method, but add a mild aspect compensation and
+      // a shallower projection so the art reads less squished and doesn't over-wrap.
       if (isFront) {
         const center = hit.point.clone();
         const frontNormal = new THREE.Vector3(0, 0, 1).transformDirection(model.matrixWorld).normalize();
@@ -2914,17 +2914,19 @@ export default function HelmetBuilder() {
           up.applyAxisAngle(frontNormal, rot);
         }
 
-        const projectionDepth = Math.max(boundsModel.depth * 0.12, baseHeight * 0.65);
+        const widthCompensated = baseWidth * 1.16;
+        const heightCompensated = baseHeight * 0.94;
+        const projectionDepth = Math.max(boundsModel.depth * 0.085, heightCompensated * 0.48);
         const lift = Math.max(boundsModel.width * 0.00045, 0.00018);
 
         const shadowUniforms = {
           center:{ value:center }, right:{ value:right }, up:{ value:up }, normal:{ value:frontNormal },
-          width:{ value:baseWidth * 1.018 }, height:{ value:baseHeight * 1.018 },
+          width:{ value:widthCompensated * 1.018 }, height:{ value:heightCompensated * 1.018 },
           depth:{ value:projectionDepth }, lift:{ value:lift * 0.20 },
         };
         const mainUniforms = {
           center:{ value:center }, right:{ value:right }, up:{ value:up }, normal:{ value:frontNormal },
-          width:{ value:baseWidth }, height:{ value:baseHeight },
+          width:{ value:widthCompensated }, height:{ value:heightCompensated },
           depth:{ value:projectionDepth }, lift:{ value:lift * 0.55 },
         };
 
@@ -3757,7 +3759,7 @@ export default function HelmetBuilder() {
 
                 <CollapsibleSection title="BUMPER LOGOS">
                   <div style={{ fontSize:10, color:'#6b7280', lineHeight:1.5, marginBottom:10 }}>
-                    Add independent logos to the front and rear bumpers. Artwork can scale continuously across the bumper width and remains clipped by the physical bumper geometry. Rear wordmarks include an adjustable Curve correction to counter the visual smile created by the curved bumper. Bumper logos use their own independent finish control and the same subtle raised-vinyl effect.
+                    Add independent logos to the front and rear bumpers. Artwork can scale continuously across the bumper width and remains clipped by the physical bumper geometry. Rear wordmarks include an adjustable Curve correction to counter the visual smile created by the curved bumper and now default slightly smaller/lower. Bumper logos use their own independent finish control and the same subtle raised-vinyl effect.
                   </div>
                   {bumperLogoError && <div style={{ marginBottom:10, fontSize:10, color:'#ef4444', lineHeight:1.4 }}>{bumperLogoError}</div>}
                   <SectionLabel>Bumper Logo Finish</SectionLabel>
