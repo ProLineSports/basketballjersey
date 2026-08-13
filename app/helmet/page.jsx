@@ -66,54 +66,110 @@ function indexLoadedParts(model, partsMap, objectsMap) {
 }
 
 
-// Build a lightweight 2D guide from the Shell's real UV coordinates. This lets the
-// upload panel show users where artwork will land without needing a separate image
-// asset checked into /public. It is only a guide; the actual wrap uses the GLB UVs.
-function createUvGuideDataUrl(roots) {
-  if (typeof document === 'undefined' || !roots?.length) return null;
-  const size = 512;
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return null;
+// Generate a clean panoramic UV set for the Shell instead of using the Blender UV
+// islands. The horizontal axis wraps continuously around the helmet with ONE seam at
+// the center back; the middle of the texture is the front of the helmet. This makes a
+// full-wrap image flow across the shell instead of breaking at every original UV island.
+function applyPanoramicShellWrapUV(model, roots) {
+  if (!model || !roots?.length) return;
 
-  ctx.clearRect(0, 0, size, size);
-  ctx.strokeStyle = 'rgba(255,255,255,0.28)';
-  ctx.lineWidth = 0.55;
-
+  // A Set prevents double-processing if a named root and one of its descendants both
+  // happen to be returned for the same part.
+  const meshes = [];
+  const seen = new Set();
   roots.forEach(root => {
     root.traverse(obj => {
-      if (!obj.isMesh || !obj.geometry?.attributes?.uv) return;
-      const geometry = obj.geometry;
-      const uv = geometry.attributes.uv;
-      const index = geometry.index;
-      const triCount = index ? Math.floor(index.count / 3) : Math.floor(uv.count / 3);
-      // Keep the preview responsive even on a very dense shell mesh.
-      const step = Math.max(1, Math.floor(triCount / 14000));
-
-      const uvAt = (vertexIndex) => ({
-        x: uv.getX(vertexIndex) * size,
-        y: uv.getY(vertexIndex) * size,
-      });
-
-      ctx.beginPath();
-      for (let tri = 0; tri < triCount; tri += step) {
-        const base = tri * 3;
-        const ia = index ? index.getX(base) : base;
-        const ib = index ? index.getX(base + 1) : base + 1;
-        const ic = index ? index.getX(base + 2) : base + 2;
-        const a = uvAt(ia), b = uvAt(ib), c = uvAt(ic);
-        ctx.moveTo(a.x, a.y);
-        ctx.lineTo(b.x, b.y);
-        ctx.lineTo(c.x, c.y);
-        ctx.closePath();
-      }
-      ctx.stroke();
+      if (!obj.isMesh || !obj.geometry?.attributes?.position || seen.has(obj)) return;
+      seen.add(obj);
+      meshes.push(obj);
     });
   });
+  if (!meshes.length) return;
 
-  return canvas.toDataURL('image/png');
+  // Cylindrical/equirectangular UVs need a deliberate split at the rear seam. Convert
+  // only the Shell to non-indexed geometry so vertices on triangles that cross u=0/1
+  // can carry independent UV values without changing the visible smooth normals.
+  meshes.forEach(mesh => {
+    if (mesh.geometry.userData?.panoramicWrapPrepared) return;
+    if (mesh.geometry.index) {
+      const original = mesh.geometry;
+      const expanded = original.toNonIndexed();
+      expanded.userData = { ...original.userData, panoramicWrapPrepared: true };
+      mesh.geometry = expanded;
+    } else {
+      mesh.geometry.userData = { ...mesh.geometry.userData, panoramicWrapPrepared: true };
+    }
+  });
+
+  model.updateMatrixWorld(true);
+  const modelInverse = new THREE.Matrix4().copy(model.matrixWorld).invert();
+  const p = new THREE.Vector3();
+  let minX = Infinity, maxX = -Infinity;
+  let minY = Infinity, maxY = -Infinity;
+  let minZ = Infinity, maxZ = -Infinity;
+
+  // Calculate one common shell-space bounding box so every Shell mesh uses the exact
+  // same projection center and orientation.
+  meshes.forEach(mesh => {
+    mesh.updateWorldMatrix(true, false);
+    const localToModel = new THREE.Matrix4().multiplyMatrices(modelInverse, mesh.matrixWorld);
+    const pos = mesh.geometry.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      p.fromBufferAttribute(pos, i).applyMatrix4(localToModel);
+      minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+      minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+      minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z);
+    }
+  });
+
+  const centerX = (minX + maxX) / 2;
+  const centerZ = (minZ + maxZ) / 2;
+  const height = Math.max(0.000001, maxY - minY);
+  const tau = Math.PI * 2;
+
+  meshes.forEach(mesh => {
+    mesh.updateWorldMatrix(true, false);
+    const localToModel = new THREE.Matrix4().multiplyMatrices(modelInverse, mesh.matrixWorld);
+    const pos = mesh.geometry.attributes.position;
+    const uvValues = new Float32Array(pos.count * 2);
+
+    // Non-indexed geometry means every three consecutive vertices form one triangle.
+    // If a triangle crosses the back seam, lift its low-U vertices above 1.0. Repeat
+    // wrapping then samples the same pixels while interpolation stays local to the seam.
+    for (let i = 0; i < pos.count; i += 3) {
+      const u = [0, 0, 0];
+      const v = [0, 0, 0];
+
+      for (let k = 0; k < 3 && i + k < pos.count; k++) {
+        p.fromBufferAttribute(pos, i + k).applyMatrix4(localToModel);
+        // +Z is the front of this helmet model. Front therefore lands at u=0.5 and
+        // the single texture seam lands at the center rear (u=0/1).
+        const angle = Math.atan2(p.x - centerX, p.z - centerZ);
+        u[k] = 0.5 + angle / tau;
+        // Canvas previews read top-to-bottom, so put the crown at v=0 and the lower
+        // shell at v=1. This makes the editor orientation immediately understandable.
+        v[k] = (maxY - p.y) / height;
+      }
+
+      const maxU = Math.max(...u);
+      const minU = Math.min(...u);
+      if (maxU - minU > 0.5) {
+        for (let k = 0; k < 3; k++) if (u[k] < 0.5) u[k] += 1;
+      }
+
+      for (let k = 0; k < 3 && i + k < pos.count; k++) {
+        uvValues[(i + k) * 2] = u[k];
+        uvValues[(i + k) * 2 + 1] = THREE.MathUtils.clamp(v[k], 0, 1);
+      }
+    }
+
+    mesh.geometry.setAttribute('uv', new THREE.BufferAttribute(uvValues, 2));
+    // Car-paint AO/roughness/metalness uses uv2 in this page. Keep it aligned with
+    // the generated wrap projection so the finish remains continuous too.
+    mesh.geometry.setAttribute('uv2', new THREE.BufferAttribute(uvValues.slice(), 2));
+    mesh.geometry.attributes.uv.needsUpdate = true;
+    mesh.geometry.attributes.uv2.needsUpdate = true;
+  });
 }
 
 const FINISHES = [
@@ -286,9 +342,9 @@ export default function HelmetBuilder() {
   const frameRef    = useRef(null);
 
   // Full-wrap design layer. The uploaded image is composited over the current shell
-  // color onto an offscreen square canvas, then used as the Shell's color map. Because
-  // the Shell already has a proper UV layout in the GLB, the result follows the rounded
-  // helmet surface instead of behaving like a flat decal.
+  // color onto a 2:1 panoramic canvas. At load time the Shell receives a generated
+  // continuous wrap projection with the front in the center and one seam at the rear,
+  // so artwork flows over the rounded helmet instead of following fragmented UV islands.
   const wrapImageRef     = useRef(null);
   const wrapCanvasRef    = useRef(null);
   const wrapTextureRef   = useRef(null);
@@ -312,7 +368,6 @@ export default function HelmetBuilder() {
 
   const [wrapEnabled, setWrapEnabled]       = useState(false);
   const [wrapPreviewUrl, setWrapPreviewUrl] = useState(null);
-  const [wrapUvGuideUrl, setWrapUvGuideUrl] = useState(null);
   const [wrapFileName, setWrapFileName]     = useState('');
   const [wrapError, setWrapError]           = useState('');
   const [wrapScale, setWrapScale]           = useState(1);
@@ -645,7 +700,9 @@ export default function HelmetBuilder() {
       partsRef.current = {};
       partObjectsRef.current = {};
       indexLoadedParts(model, partsRef.current, partObjectsRef.current);
-      setWrapUvGuideUrl(createUvGuideDataUrl(partObjectsRef.current[partKey('Shell')] || []));
+      // Ignore the source Shell UV islands for full wraps. Generate one panoramic
+      // projection instead: FRONT at texture center, one seam at center BACK.
+      applyPanoramicShellWrapUV(model, partObjectsRef.current[partKey('Shell')] || []);
 
       scene.add(model);
       // Now that all shell/facemask materials exist, route env maps per current finish
@@ -727,7 +784,7 @@ export default function HelmetBuilder() {
     if (!canvas) {
       canvas = document.createElement('canvas');
       canvas.width = 2048;
-      canvas.height = 2048;
+      canvas.height = 1024;
       wrapCanvasRef.current = canvas;
     }
 
@@ -743,19 +800,25 @@ export default function HelmetBuilder() {
     ctx.fillStyle = colors.shell;
     ctx.fillRect(0, 0, w, h);
 
-    ctx.save();
-    ctx.translate(w / 2 + (wrapOffsetX / 100) * w, h / 2 + (wrapOffsetY / 100) * h);
-    ctx.rotate((wrapRotation * Math.PI) / 180);
-    ctx.globalAlpha = wrapOpacity;
-
-    // Scale 1.0 means "cover the entire 1:1 wrap canvas" without distorting the
-    // uploaded artwork's aspect ratio.
+    // Scale 1.0 means "cover the full 2:1 panoramic wrap canvas" without
+    // distorting the uploaded artwork. Horizontal movement behaves like rotating the
+    // design around the helmet, so duplicate draws on either side keep artwork flowing
+    // cleanly across the editor's left/right back seam.
     const coverScale = Math.max(w / img.naturalWidth, h / img.naturalHeight);
     const drawScale = coverScale * wrapScale;
     const drawW = img.naturalWidth * drawScale;
     const drawH = img.naturalHeight * drawScale;
-    ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
-    ctx.restore();
+    const baseX = w / 2 + (wrapOffsetX / 100) * w;
+    const baseY = h / 2 + (wrapOffsetY / 100) * h;
+
+    [-w, 0, w].forEach(loopX => {
+      ctx.save();
+      ctx.translate(baseX + loopX, baseY);
+      ctx.rotate((wrapRotation * Math.PI) / 180);
+      ctx.globalAlpha = wrapOpacity;
+      ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
+      ctx.restore();
+    });
 
     let texture = wrapTextureRef.current;
     if (!texture) {
@@ -765,7 +828,7 @@ export default function HelmetBuilder() {
       // to flipY=true, so disable the flip to keep the 2D orientation guide aligned
       // with the exported Shell UVs.
       texture.flipY = false;
-      texture.wrapS = THREE.ClampToEdgeWrapping;
+      texture.wrapS = THREE.RepeatWrapping;
       texture.wrapT = THREE.ClampToEdgeWrapping;
       wrapTextureRef.current = texture;
     }
@@ -1114,7 +1177,7 @@ export default function HelmetBuilder() {
               <div>
                 <SectionLabel>Full Wrap</SectionLabel>
                 <div style={{ fontSize:10, color:'#6b7280', lineHeight:1.55, marginBottom:10 }}>
-                  Upload a PNG or JPEG of at least 1080×1080px. The image is mapped directly to the Shell UVs so it follows the helmet's rounded surface.
+                  Upload a PNG or JPEG of at least 1080×1080px. For best results use a wide image (around 2:1). The center maps to the front of the helmet and the left/right edges meet at the back.
                 </div>
 
                 <input id="helmet-wrap-upload" type="file" accept="image/png,image/jpeg" onChange={handleWrapUpload} style={{ display:'none' }} />
@@ -1131,7 +1194,7 @@ export default function HelmetBuilder() {
                     <div style={{ display:'flex', justifyContent:'space-between', gap:8, alignItems:'center', marginBottom:7 }}>
                       <div style={{ minWidth:0 }}>
                         <div style={{ fontSize:10, color:'#9ca3af', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={wrapFileName}>{wrapFileName}</div>
-                        <div style={{ fontSize:8, color:'#4b5563', marginTop:2 }}>FLAT WRAP CANVAS</div>
+                        <div style={{ fontSize:8, color:'#4b5563', marginTop:2 }}>HELMET WRAP VIEW</div>
                       </div>
                       <div style={{ display:'flex', gap:5, flexShrink:0 }}>
                         <button onClick={() => setWrapEnabled(v => !v)} style={{ background:wrapEnabled?'rgba(239,255,0,0.1)':'rgba(255,255,255,0.04)', border:wrapEnabled?'1px solid rgba(239,255,0,0.35)':'1px solid rgba(255,255,255,0.1)', borderRadius:5, padding:'4px 7px', cursor:'pointer', color:wrapEnabled?'#efff00':'#6b7280', fontSize:8, fontWeight:700, fontFamily:"'Barlow Condensed',sans-serif" }}>{wrapEnabled?'ON':'OFF'}</button>
@@ -1139,42 +1202,60 @@ export default function HelmetBuilder() {
                       </div>
                     </div>
 
-                    {/* 2D orientation preview. Front of the helmet is to the right in the Shell UV layout. */}
-                    <div style={{ position:'relative', width:'100%', aspectRatio:'1 / 1', overflow:'hidden', borderRadius:8, border:'1px solid rgba(255,255,255,0.12)', background:colors.shell }}>
-                      <img
-                        src={wrapPreviewUrl}
-                        alt="Uploaded helmet wrap preview"
-                        style={{ position:'absolute', width:'100%', height:'100%', objectFit:'cover', left:`calc(50% + ${wrapOffsetX}%)`, top:`calc(50% + ${wrapOffsetY}%)`, transform:`translate(-50%,-50%) rotate(${wrapRotation}deg) scale(${wrapScale})`, transformOrigin:'center', opacity:wrapEnabled?wrapOpacity:0.2, filter:wrapEnabled?'none':'grayscale(1)', pointerEvents:'none', userSelect:'none' }}
-                      />
-                      {wrapUvGuideUrl && <img src={wrapUvGuideUrl} alt="Helmet shell UV placement guide" style={{ position:'absolute', inset:0, width:'100%', height:'100%', objectFit:'fill', opacity:0.55, pointerEvents:'none' }} />}
-                      <div style={{ position:'absolute', inset:0, pointerEvents:'none', background:'linear-gradient(to right, transparent 49.7%, rgba(255,255,255,0.18) 50%, transparent 50.3%), linear-gradient(to bottom, transparent 49.7%, rgba(255,255,255,0.18) 50%, transparent 50.3%)' }} />
-                      <div style={{ position:'absolute', top:6, left:6, background:'rgba(0,0,0,0.58)', borderRadius:4, padding:'2px 5px', color:'#fff', fontSize:8, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.06em', pointerEvents:'none' }}>SHELL UV GUIDE</div>
-                      <div style={{ position:'absolute', left:6, right:6, bottom:6, background:'rgba(0,0,0,0.58)', borderRadius:4, padding:'3px 5px', color:'#d1d5db', fontSize:8, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.03em', textAlign:'center', pointerEvents:'none' }}>ADJUST HERE · CONFIRM PLACEMENT ON THE 3D HELMET</div>
+                    {/* User-facing panoramic placement guide. The canvas is intentionally
+                        simple: center = front, both outer edges = the single back seam. */}
+                    <div style={{ position:'relative', width:'100%', aspectRatio:'2 / 1', overflow:'hidden', borderRadius:8, border:'1px solid rgba(255,255,255,0.12)', background:colors.shell }}>
+                      {[-100,0,100].map(loop => (
+                        <img
+                          key={loop}
+                          src={wrapPreviewUrl}
+                          alt={loop === 0 ? 'Uploaded helmet wrap preview' : ''}
+                          aria-hidden={loop !== 0}
+                          style={{ position:'absolute', width:'100%', height:'100%', objectFit:'cover', left:`calc(50% + ${wrapOffsetX + loop}%)`, top:`calc(50% + ${wrapOffsetY}%)`, transform:`translate(-50%,-50%) rotate(${wrapRotation}deg) scale(${wrapScale})`, transformOrigin:'center', opacity:wrapEnabled?wrapOpacity:0.2, filter:wrapEnabled?'none':'grayscale(1)', pointerEvents:'none', userSelect:'none' }}
+                        />
+                      ))}
+
+                      {/* Quarter marks show the route around the shell without exposing UV jargon. */}
+                      <div style={{ position:'absolute', top:0, bottom:0, left:'25%', borderLeft:'1px dashed rgba(255,255,255,0.20)', pointerEvents:'none' }} />
+                      <div style={{ position:'absolute', top:0, bottom:0, left:'50%', borderLeft:'2px solid rgba(239,255,0,0.75)', pointerEvents:'none' }} />
+                      <div style={{ position:'absolute', top:0, bottom:0, left:'75%', borderLeft:'1px dashed rgba(255,255,255,0.20)', pointerEvents:'none' }} />
+                      <div style={{ position:'absolute', left:0, right:0, top:'50%', borderTop:'1px dashed rgba(255,255,255,0.16)', pointerEvents:'none' }} />
+
+                      <div style={{ position:'absolute', top:5, left:'50%', transform:'translateX(-50%)', background:'rgba(0,0,0,0.72)', border:'1px solid rgba(239,255,0,0.45)', borderRadius:4, padding:'2px 6px', color:'#efff00', fontSize:8, fontWeight:900, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.07em', pointerEvents:'none', whiteSpace:'nowrap' }}>FRONT OF HELMET</div>
+                      <div style={{ position:'absolute', top:5, left:5, background:'rgba(0,0,0,0.66)', borderRadius:4, padding:'2px 5px', color:'#d1d5db', fontSize:7, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.05em', pointerEvents:'none' }}>BACK SEAM</div>
+                      <div style={{ position:'absolute', top:5, right:5, background:'rgba(0,0,0,0.66)', borderRadius:4, padding:'2px 5px', color:'#d1d5db', fontSize:7, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.05em', pointerEvents:'none' }}>BACK SEAM</div>
+                      <div style={{ position:'absolute', top:'50%', left:5, transform:'translateY(-50%)', background:'rgba(0,0,0,0.52)', borderRadius:4, padding:'2px 5px', color:'#d1d5db', fontSize:7, fontFamily:"'Barlow Condensed',sans-serif", pointerEvents:'none' }}>← wraps around shell</div>
+                      <div style={{ position:'absolute', top:'50%', right:5, transform:'translateY(-50%)', background:'rgba(0,0,0,0.52)', borderRadius:4, padding:'2px 5px', color:'#d1d5db', fontSize:7, fontFamily:"'Barlow Condensed',sans-serif", pointerEvents:'none' }}>wraps around shell →</div>
+                      <div style={{ position:'absolute', left:'50%', bottom:5, transform:'translateX(-50%)', background:'rgba(0,0,0,0.62)', borderRadius:4, padding:'2px 5px', color:'#d1d5db', fontSize:7, fontFamily:"'Barlow Condensed',sans-serif", pointerEvents:'none', whiteSpace:'nowrap' }}>TOP = CROWN · BOTTOM = LOWER SHELL</div>
+                    </div>
+
+                    <div style={{ marginTop:7, fontSize:8, color:'#4b5563', lineHeight:1.45 }}>
+                      Tip: artwork whose left and right edges match will be completely seamless at the back. Use “Around Helmet” to choose where the design sits around the shell.
                     </div>
 
                     <div style={{ marginTop:11 }}>
                       <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
-                        <span style={{ width:48, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Scale</span>
+                        <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Scale</span>
                         <input type="range" min="25" max="300" value={Math.round(wrapScale*100)} onChange={e => setWrapScale(parseInt(e.target.value)/100)} style={{ flex:1 }} />
                         <span style={{ width:34, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{Math.round(wrapScale*100)}%</span>
                       </div>
                       <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
-                        <span style={{ width:48, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Rotate</span>
+                        <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Rotate</span>
                         <input type="range" min="-180" max="180" value={wrapRotation} onChange={e => setWrapRotation(parseInt(e.target.value))} style={{ flex:1 }} />
                         <span style={{ width:34, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{wrapRotation}°</span>
                       </div>
                       <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
-                        <span style={{ width:48, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Left/Right</span>
+                        <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Around Helmet</span>
                         <input type="range" min="-50" max="50" value={wrapOffsetX} onChange={e => setWrapOffsetX(parseInt(e.target.value))} style={{ flex:1 }} />
                         <span style={{ width:34, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{wrapOffsetX}</span>
                       </div>
                       <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
-                        <span style={{ width:48, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Up/Down</span>
+                        <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Up / Down</span>
                         <input type="range" min="-50" max="50" value={wrapOffsetY} onChange={e => setWrapOffsetY(parseInt(e.target.value))} style={{ flex:1 }} />
                         <span style={{ width:34, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{wrapOffsetY}</span>
                       </div>
                       <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
-                        <span style={{ width:48, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Opacity</span>
+                        <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Opacity</span>
                         <input type="range" min="0" max="100" value={Math.round(wrapOpacity*100)} onChange={e => setWrapOpacity(parseInt(e.target.value)/100)} style={{ flex:1 }} />
                         <span style={{ width:34, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{Math.round(wrapOpacity*100)}%</span>
                       </div>
