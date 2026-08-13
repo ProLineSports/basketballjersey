@@ -1561,21 +1561,26 @@ export default function HelmetBuilder() {
         }
       });
       decalSurfaceObjectsRef.current.forEach(root => {
+        // THREE.Raycaster can still intersect invisible objects, so the carrier does not
+        // need to participate in rendering at all. Keeping the root invisible is much more
+        // robust than relying only on zero-opacity materials (which other finish/color
+        // updates could accidentally make visible again).
+        root.visible = false;
         root.traverse(obj => {
           if (!obj.isMesh) return;
           obj.userData.decalSurfaceMesh = true;
           obj.castShadow = false;
           obj.receiveShadow = false;
-          obj.visible = true; // keep raycasting alive
+          obj.visible = false;
           const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
           mats.forEach(mat => {
             if (!mat) return;
+            mat.visible = false;
             mat.transparent = true;
             mat.opacity = 0;
             mat.colorWrite = false;
             mat.depthWrite = false;
-            mat.depthTest = true;
-            mat.side = THREE.DoubleSide;
+            mat.depthTest = false;
             mat.needsUpdate = true;
           });
         });
@@ -1806,10 +1811,9 @@ export default function HelmetBuilder() {
   }, [loaded, helmetStripesEnabled, helmetStripeWidth, helmetStripeLength, helmetStripeLeftColor, helmetStripeCenterColor, helmetStripeRightColor, helmetStripeDesignEnabled, helmetStripeDesignRevision]);
 
   // ── MAIN SIDE LOGO DECALS ───────────────────────────────────────────────
-  // DecalGeometry expects projector/intersection positions in world space. Side-logo
-  // meshes therefore live directly in the scene rather than as children of the GLB;
-  // parenting world-space decal vertices to the model was what sent the first logo
-  // flying away from the helmet.
+  // Main logos project onto the hidden baked `Decal Surface`. Its filled cutouts let
+  // the decal conform tightly to the helmet curvature while still spanning vents/holes.
+  // DecalGeometry outputs world-space geometry here, so generated meshes live in `scene`.
   useEffect(() => {
     const scene = sceneRef.current;
     const renderer = rendererRef.current;
@@ -1890,7 +1894,6 @@ export default function HelmetBuilder() {
       if (!pack) return;
 
       const combinedScale = sideLogoScale * placement.scale;
-      // Large, user-friendly starting size.
       const baseHeight = boundsModel.height * 1.00 * combinedScale;
       const baseWidth = baseHeight * THREE.MathUtils.clamp(pack.aspect, 0.55, 2.6);
 
@@ -1898,28 +1901,46 @@ export default function HelmetBuilder() {
       const worldNormal = hit.face?.normal?.clone().applyMatrix3(normalMatrix).normalize()
         || new THREE.Vector3(side === 'left' ? -1 : 1, 0, 0).transformDirection(model.matrixWorld).normalize();
 
-      const anchorPosition = hit.point.clone();
+      // Project directly onto the baked Decal Surface. Because that carrier has the vents
+      // and cutouts filled, the logo follows the real shell curvature but can bridge across
+      // openings instead of being clipped by them.
+      const projectorPosition = hit.point.clone().addScaledVector(worldNormal, 0.0005);
       const helper = new THREE.Object3D();
-      helper.position.copy(anchorPosition);
-      helper.lookAt(anchorPosition.clone().add(worldNormal));
+      helper.position.copy(projectorPosition);
+      helper.lookAt(projectorPosition.clone().add(worldNormal));
       helper.rotateZ(placement.rotation);
+      const orientation = new THREE.Euler().setFromQuaternion(helper.quaternion, 'XYZ');
 
-      // Use tangent planes instead of DecalGeometry so the logo can bridge across
-      // helmet cutouts/vents and never gets clipped by a projection mask.
-      const physicalDepth = Math.max(boundsModel.width * 0.0024, 0.0014);
-      const shadowPosition = anchorPosition.clone().addScaledVector(worldNormal, physicalDepth * 0.45);
-      const mainPosition = anchorPosition.clone().addScaledVector(worldNormal, physicalDepth * 1.25);
-      const selectionPosition = anchorPosition.clone().addScaledVector(worldNormal, physicalDepth * 2.0);
+      // Enough depth to follow the curved side panel, but shallow enough to avoid catching
+      // the opposite side of the carrier shell.
+      const projectorDepth = Math.max(boundsModel.width * 0.12, 0.04);
 
-      const shadowGeo = new THREE.PlaneGeometry(baseWidth * 1.035, baseHeight * 1.035, 1, 1);
-      const mainGeo = new THREE.PlaneGeometry(baseWidth, baseHeight, 1, 1);
+      const mainGeo = new DecalGeometry(
+        hit.object,
+        projectorPosition,
+        orientation,
+        new THREE.Vector3(baseWidth, baseHeight, projectorDepth),
+      );
+      const shadowGeo = new DecalGeometry(
+        hit.object,
+        projectorPosition,
+        orientation,
+        new THREE.Vector3(baseWidth * 1.018, baseHeight * 1.018, projectorDepth),
+      );
+
+      // Tiny real lift for a thick-vinyl read. Because the underlying decal geometry is
+      // already conformed to the carrier surface, this remains flush instead of turning
+      // into a floating flat card.
+      const physicalDepth = Math.max(boundsModel.width * 0.0012, 0.00055);
+      offsetGeometryAlongNormals(shadowGeo, physicalDepth * 0.35);
+      offsetGeometryAlongNormals(mainGeo, physicalDepth);
 
       const shadowMat = new THREE.MeshPhysicalMaterial({
         color: 0x000000,
         map: pack.rimTexture,
         transparent: true,
         alphaTest: 0.01,
-        opacity: 0.42,
+        opacity: 0.36,
         side: THREE.DoubleSide,
         depthWrite: false,
         depthTest: true,
@@ -1952,8 +1973,6 @@ export default function HelmetBuilder() {
       shadowMesh.userData.sideLogoShadow = true;
       shadowMesh.renderOrder = 39;
       shadowMesh.castShadow = true;
-      shadowMesh.position.copy(shadowPosition);
-      shadowMesh.quaternion.copy(helper.quaternion);
       scene.add(shadowMesh);
 
       const mainMesh = new THREE.Mesh(mainGeo, mainMat);
@@ -1962,20 +1981,20 @@ export default function HelmetBuilder() {
       mainMesh.userData.sideLogoMain = true;
       mainMesh.renderOrder = 40;
       mainMesh.castShadow = true;
-      mainMesh.position.copy(mainPosition);
-      mainMesh.quaternion.copy(helper.quaternion);
       scene.add(mainMesh);
 
       sideLogoMeshesRef.current.push(shadowMesh, mainMesh);
       sideLogoMaterialsRef.current.push(shadowMat, mainMat);
       sideLogoTexturesRef.current.push(pack.rimTexture, pack.mainTexture);
 
+      // Screen-space transform frame. The selection UI can remain a very thin tangent
+      // plane because it is only an editor affordance, not part of the helmet artwork.
       const frameQuat = helper.quaternion.clone();
       const frameRight = new THREE.Vector3(1, 0, 0).applyQuaternion(frameQuat).normalize();
       const frameUp = new THREE.Vector3(0, 1, 0).applyQuaternion(frameQuat).normalize();
       const frameHalfW = baseWidth * 0.50;
       const frameHalfH = baseHeight * 0.50;
-      const frameCenter = mainPosition.clone();
+      const frameCenter = projectorPosition.clone().addScaledVector(worldNormal, physicalDepth * 2.2);
       sideLogoWorldFrameRef.current[side] = {
         center: frameCenter,
         corners: [
@@ -1988,25 +2007,22 @@ export default function HelmetBuilder() {
 
       if (selectedSideLogoRef.current === side) {
         const selectionTex = createSelectionBoxTexture();
-        const selectionGeo = new THREE.PlaneGeometry(baseWidth * 1.12, baseHeight * 1.12, 1, 1);
+        const selectionGeo = new THREE.PlaneGeometry(baseWidth * 1.10, baseHeight * 1.10, 1, 1);
         const selectionMat = new THREE.MeshBasicMaterial({
           map: selectionTex,
           transparent: true,
           alphaTest: 0.02,
-          depthTest: true,
+          depthTest: false,
           depthWrite: false,
           toneMapped: false,
           side: THREE.DoubleSide,
-          polygonOffset: true,
-          polygonOffsetFactor: -3,
-          polygonOffsetUnits: -3,
         });
         const selectionMesh = new THREE.Mesh(selectionGeo, selectionMat);
         selectionMesh.name = `SideLogo_${side}_Selection`;
         selectionMesh.userData.sideLogoSide = side;
         selectionMesh.userData.sideLogoSelection = true;
-        selectionMesh.renderOrder = 50;
-        selectionMesh.position.copy(selectionPosition);
+        selectionMesh.renderOrder = 100;
+        selectionMesh.position.copy(frameCenter);
         selectionMesh.quaternion.copy(helper.quaternion);
         scene.add(selectionMesh);
         sideLogoMeshesRef.current.push(selectionMesh);
