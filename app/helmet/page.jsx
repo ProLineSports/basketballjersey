@@ -11,7 +11,7 @@ import { DecalGeometry } from 'three/addons/geometries/DecalGeometry.js';
 // `parts` uses the exact mesh/node names exported in SpeedFlex.glb.
 // Shell, Side Screws, and Top Screws intentionally share one color control.
 const ZONES = [
-  { id: 'shell',             label: 'Shell',                    parts: ['Shell', 'Side Screws', 'Top Screws'], defaultColor: '#151515' },
+  { id: 'shell',             label: 'Shell',                    parts: ['Shell', 'Side Screws', 'Top Screws'], defaultColor: '#2B2B2B' },
   { id: 'bumpers',           label: 'Bumpers',                  parts: ['Bumpers'],                           defaultColor: '#212121' },
   { id: 'facemask',          label: 'Facemask',                 parts: ['Facemask'],                          defaultColor: '#EFFF00' },
   { id: 'facemaskclips',     label: 'Facemask Clips',           parts: ['Facemask Clips'],                    defaultColor: '#212121' },
@@ -71,7 +71,7 @@ function indexLoadedParts(model, partsMap, objectsMap) {
 // the center back; the middle of the texture is the front of the helmet. This makes a
 // full-wrap image flow across the shell instead of breaking at every original UV island.
 function applyPanoramicShellWrapUV(model, roots) {
-  if (!model || !roots?.length) return;
+  if (!model || !roots?.length) return null;
 
   // A Set prevents double-processing if a named root and one of its descendants both
   // happen to be returned for the same part.
@@ -84,7 +84,7 @@ function applyPanoramicShellWrapUV(model, roots) {
       meshes.push(obj);
     });
   });
-  if (!meshes.length) return;
+  if (!meshes.length) return null;
 
   // Cylindrical/equirectangular UVs need a deliberate split at the rear seam. Convert
   // only the Shell to non-indexed geometry so vertices on triangles that cross u=0/1
@@ -124,14 +124,45 @@ function applyPanoramicShellWrapUV(model, roots) {
 
   const centerX = (minX + maxX) / 2;
   const centerZ = (minZ + maxZ) / 2;
+  const width = Math.max(0.000001, maxX - minX);
   const height = Math.max(0.000001, maxY - minY);
+  const depth = Math.max(0.000001, maxZ - minZ);
   const tau = Math.PI * 2;
+
+  // The stripe length follows the helmet's sagittal arc rather than scaling geometry.
+  // Estimate a Y/Z ellipse center and normalize its polar angle using center-strip
+  // vertices. 0 = front edge, 1 = deepest rear edge.
+  const stripePivotY = minY + height * 0.48;
+  let stripeRawMin = Infinity;
+  let stripeRawMax = -Infinity;
+  const centerBand = width * 0.08;
+
+  meshes.forEach(mesh => {
+    mesh.updateWorldMatrix(true, false);
+    const localToModel = new THREE.Matrix4().multiplyMatrices(modelInverse, mesh.matrixWorld);
+    const pos = mesh.geometry.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      p.fromBufferAttribute(pos, i).applyMatrix4(localToModel);
+      if (Math.abs(p.x - centerX) > centerBand) continue;
+      const theta = Math.atan2((p.z - centerZ) / depth, (p.y - stripePivotY) / height);
+      const raw = 0.5 - theta / Math.PI;
+      stripeRawMin = Math.min(stripeRawMin, raw);
+      stripeRawMax = Math.max(stripeRawMax, raw);
+    }
+  });
+
+  if (!Number.isFinite(stripeRawMin) || !Number.isFinite(stripeRawMax) || stripeRawMax - stripeRawMin < 0.000001) {
+    stripeRawMin = 0;
+    stripeRawMax = 1;
+  }
 
   meshes.forEach(mesh => {
     mesh.updateWorldMatrix(true, false);
     const localToModel = new THREE.Matrix4().multiplyMatrices(modelInverse, mesh.matrixWorld);
     const pos = mesh.geometry.attributes.position;
     const uvValues = new Float32Array(pos.count * 2);
+    const modelPositionValues = new Float32Array(pos.count * 3);
+    const stripePathValues = new Float32Array(pos.count);
 
     // Non-indexed geometry means every three consecutive vertices form one triangle.
     // If a triangle crosses the back seam, lift its low-U vertices above 1.0. Repeat
@@ -139,16 +170,30 @@ function applyPanoramicShellWrapUV(model, roots) {
     for (let i = 0; i < pos.count; i += 3) {
       const u = [0, 0, 0];
       const v = [0, 0, 0];
+      const path = [0, 0, 0];
+      const modelPos = [null, null, null];
 
       for (let k = 0; k < 3 && i + k < pos.count; k++) {
         p.fromBufferAttribute(pos, i + k).applyMatrix4(localToModel);
+        modelPos[k] = p.clone();
+
         // +Z is the front of this helmet model. Front therefore lands at u=0.5 and
         // the single texture seam lands at the center rear (u=0/1).
         const angle = Math.atan2(p.x - centerX, p.z - centerZ);
         u[k] = 0.5 + angle / tau;
+
         // Canvas previews read top-to-bottom, so put the crown at v=0 and the lower
         // shell at v=1. This makes the editor orientation immediately understandable.
         v[k] = (maxY - p.y) / height;
+
+        // Continuous front -> crown -> back coordinate used only by helmet-stripe decals.
+        const theta = Math.atan2((p.z - centerZ) / depth, (p.y - stripePivotY) / height);
+        const raw = 0.5 - theta / Math.PI;
+        path[k] = THREE.MathUtils.clamp(
+          (raw - stripeRawMin) / Math.max(0.000001, stripeRawMax - stripeRawMin),
+          0,
+          1
+        );
       }
 
       const maxU = Math.max(...u);
@@ -158,8 +203,15 @@ function applyPanoramicShellWrapUV(model, roots) {
       }
 
       for (let k = 0; k < 3 && i + k < pos.count; k++) {
-        uvValues[(i + k) * 2] = u[k];
-        uvValues[(i + k) * 2 + 1] = THREE.MathUtils.clamp(v[k], 0, 1);
+        const vi = i + k;
+        uvValues[vi * 2] = u[k];
+        uvValues[vi * 2 + 1] = THREE.MathUtils.clamp(v[k], 0, 1);
+        stripePathValues[vi] = path[k];
+
+        const mp = modelPos[k];
+        modelPositionValues[vi * 3] = mp.x;
+        modelPositionValues[vi * 3 + 1] = mp.y;
+        modelPositionValues[vi * 3 + 2] = mp.z;
       }
     }
 
@@ -167,208 +219,119 @@ function applyPanoramicShellWrapUV(model, roots) {
     // Car-paint AO/roughness/metalness uses uv2 in this page. Keep it aligned with
     // the generated wrap projection so the finish remains continuous too.
     mesh.geometry.setAttribute('uv2', new THREE.BufferAttribute(uvValues.slice(), 2));
+
+    // These attributes let stripe decals be rendered directly on the Shell surface.
+    // That guarantees no floating geometry and makes stripes layer above a full wrap.
+    mesh.geometry.setAttribute('helmetModelPosition', new THREE.BufferAttribute(modelPositionValues, 3));
+    mesh.geometry.setAttribute('helmetStripePath', new THREE.BufferAttribute(stripePathValues, 1));
+
     mesh.geometry.attributes.uv.needsUpdate = true;
     mesh.geometry.attributes.uv2.needsUpdate = true;
+    mesh.geometry.attributes.helmetModelPosition.needsUpdate = true;
+    mesh.geometry.attributes.helmetStripePath.needsUpdate = true;
   });
+
+  return { centerX };
 }
 
 
-// ── STANDARD 3-STRIPE HELMET DECAL ──────────────────────────────────────────
-// This is intentionally real geometry rather than a texture painted onto the Shell.
-// A texture would disappear wherever the helmet has a vent, seam, or cutout. These
-// three slightly raised ribbons instead follow a smoothed front-to-back crown profile
-// and bridge those openings, which is much closer to a physical vinyl helmet stripe.
-function createStandardThreeStripeGroup(model, roots) {
-  const group = new THREE.Group();
-  group.name = 'Standard_3_Stripe_Decal';
-  if (!model || !roots?.length) return group;
+// ── STANDARD 3-STRIPE SURFACE DECAL ─────────────────────────────────────────
+// The first geometry-based version could visibly float away from the curved shell and
+// scaling Z changed its apparent depth instead of giving intuitive length control.
+// This version is blended in the Shell's physical-material shader AFTER the wrap/map
+// is sampled. Result: it is exactly on the helmet surface, always above a wrap, naturally
+// below separate bumper geometry, and its rear endpoint can move forward without
+// deforming the stripe thickness.
+function installShellStripeOverlay(material, stripeUniforms) {
+  if (!material || material.userData?.helmetStripeOverlayInstalled) return;
+  material.userData.helmetStripeOverlayInstalled = true;
 
-  model.updateMatrixWorld(true);
-  const modelInverse = new THREE.Matrix4().copy(model.matrixWorld).invert();
-  const p = new THREE.Vector3();
-  const points = [];
-  const seenMeshes = new Set();
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uHelmetStripesEnabled = stripeUniforms.enabled;
+    shader.uniforms.uHelmetStripeWidthScale = stripeUniforms.widthScale;
+    shader.uniforms.uHelmetStripeLength = stripeUniforms.length;
+    shader.uniforms.uHelmetStripeCenterX = stripeUniforms.centerX;
+    shader.uniforms.uHelmetStripeLeftColor = stripeUniforms.leftColor;
+    shader.uniforms.uHelmetStripeCenterColor = stripeUniforms.centerColor;
+    shader.uniforms.uHelmetStripeRightColor = stripeUniforms.rightColor;
 
-  roots.forEach(root => {
-    root.traverse(obj => {
-      if (!obj.isMesh || !obj.geometry?.attributes?.position || seenMeshes.has(obj)) return;
-      seenMeshes.add(obj);
-      obj.updateWorldMatrix(true, false);
-      const localToModel = new THREE.Matrix4().multiplyMatrices(modelInverse, obj.matrixWorld);
-      const pos = obj.geometry.attributes.position;
-      for (let i = 0; i < pos.count; i++) {
-        p.fromBufferAttribute(pos, i).applyMatrix4(localToModel);
-        points.push({ x: p.x, y: p.y, z: p.z });
-      }
-    });
-  });
-
-  if (!points.length) return group;
-
-  let minX = Infinity, maxX = -Infinity;
-  let minZ = Infinity, maxZ = -Infinity;
-  points.forEach(pt => {
-    minX = Math.min(minX, pt.x); maxX = Math.max(maxX, pt.x);
-    minZ = Math.min(minZ, pt.z); maxZ = Math.max(maxZ, pt.z);
-  });
-
-  const zSpan = Math.max(0.000001, maxZ - minZ);
-  const xSpan = Math.max(0.000001, maxX - minX);
-  const sampleCount = 128;
-  // Extend essentially the full shell length by default so the stripe runs down the back.
-  const zStart = minZ + zSpan * 0.001;
-  const zEnd = maxZ - zSpan * 0.004;
-
-  // Bin shell vertices along front/back so sampling remains quick even on a dense shell.
-  const bins = Array.from({ length: sampleCount }, () => []);
-  points.forEach(pt => {
-    const t = THREE.MathUtils.clamp((pt.z - zStart) / Math.max(0.000001, zEnd - zStart), 0, 0.999999);
-    bins[Math.floor(t * sampleCount)].push(pt);
-  });
-
-  const sampleProfile = (xTarget) => {
-    const values = new Array(sampleCount).fill(null);
-    const baseXRadius = Math.max(0.014, xSpan * 0.035);
-
-    for (let i = 0; i < sampleCount; i++) {
-      let bestY = -Infinity;
-      // First look close to the requested stripe center. Include neighboring Z bins so
-      // vents/cutouts are naturally bridged by the surrounding crown surface.
-      for (let radiusPass = 0; radiusPass < 3 && !Number.isFinite(bestY); radiusPass++) {
-        const xRadius = baseXRadius * (1 + radiusPass * 1.6);
-        const binRadius = 2 + radiusPass * 2;
-        for (let b = Math.max(0, i - binRadius); b <= Math.min(sampleCount - 1, i + binRadius); b++) {
-          for (const pt of bins[b]) {
-            if (Math.abs(pt.x - xTarget) <= xRadius) bestY = Math.max(bestY, pt.y);
-          }
-        }
-      }
-      values[i] = Number.isFinite(bestY) ? bestY : null;
-    }
-
-    // Fill any rare missing samples by interpolation rather than letting a vent create a gap.
-    for (let i = 0; i < sampleCount; i++) {
-      if (values[i] != null) continue;
-      let a = i - 1, b = i + 1;
-      while (a >= 0 && values[a] == null) a--;
-      while (b < sampleCount && values[b] == null) b++;
-      if (a >= 0 && b < sampleCount) {
-        const t = (i - a) / (b - a);
-        values[i] = THREE.MathUtils.lerp(values[a], values[b], t);
-      } else if (a >= 0) values[i] = values[a];
-      else if (b < sampleCount) values[i] = values[b];
-      else values[i] = 0;
-    }
-
-    // Multiple gentle smoothing passes remove tiny polygon/vent fluctuations while retaining
-    // the overall helmet silhouette from the front brow, over the crown, to the rear edge.
-    let smoothed = values;
-    for (let pass = 0; pass < 4; pass++) {
-      smoothed = smoothed.map((v, i, arr) => {
-        if (i === 0 || i === arr.length - 1) return v;
-        const a = arr[Math.max(0, i - 2)];
-        const b = arr[i - 1];
-        const c = arr[i];
-        const d = arr[i + 1];
-        const e = arr[Math.min(arr.length - 1, i + 2)];
-        return (a + 2 * b + 3 * c + 2 * d + e) / 9;
-      });
-    }
-    return smoothed;
-  };
-
-  const makeRibbon = (xCenter, width, color, stripeSlot) => {
-    const profile = sampleProfile(xCenter);
-    const positions = [];
-    const indices = [];
-    // Keep the stripe visually painted tight to the shell while still giving it a little body.
-    const lift = 0.00075;
-    const depth = 0.00135;
-
-    for (let i = 0; i < sampleCount; i++) {
-      const t = i / (sampleCount - 1);
-      const z = THREE.MathUtils.lerp(zStart, zEnd, t);
-      const y = profile[i];
-
-      const i0 = Math.max(0, i - 1);
-      const i1 = Math.min(sampleCount - 1, i + 1);
-      const z0 = THREE.MathUtils.lerp(zStart, zEnd, i0 / (sampleCount - 1));
-      const z1 = THREE.MathUtils.lerp(zStart, zEnd, i1 / (sampleCount - 1));
-      const dy = profile[i1] - profile[i0];
-      const dz = Math.max(0.000001, z1 - z0);
-
-      // Outward normal for the Y/Z crown profile. This keeps the decal depth normal to
-      // the helmet arc instead of simply lifting it vertically.
-      const slope = dy / dz;
-      const invLen = 1 / Math.sqrt(1 + slope * slope);
-      const ny = invLen;
-      const nz = -slope * invLen;
-
-      const topY = y + ny * lift;
-      const topZ = z + nz * lift;
-      const bottomY = y + ny * (lift - depth);
-      const bottomZ = z + nz * (lift - depth);
-      const half = width / 2;
-
-      // Four vertices per station: top-left, top-right, bottom-left, bottom-right.
-      positions.push(
-        xCenter - half, topY, topZ,
-        xCenter + half, topY, topZ,
-        xCenter - half, bottomY, bottomZ,
-        xCenter + half, bottomY, bottomZ,
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+attribute vec3 helmetModelPosition;
+attribute float helmetStripePath;
+varying vec3 vHelmetModelPosition;
+varying float vHelmetStripePath;`
+      )
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+vHelmetModelPosition = helmetModelPosition;
+vHelmetStripePath = helmetStripePath;`
       );
-    }
 
-    for (let i = 0; i < sampleCount - 1; i++) {
-      const a = i * 4;
-      const b = (i + 1) * 4;
-      // top
-      indices.push(a, b, a + 1, a + 1, b, b + 1);
-      // underside
-      indices.push(a + 2, a + 3, b + 2, a + 3, b + 3, b + 2);
-      // left edge
-      indices.push(a, a + 2, b, a + 2, b + 2, b);
-      // right edge
-      indices.push(a + 1, b + 1, a + 3, a + 3, b + 1, b + 3);
-    }
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+varying vec3 vHelmetModelPosition;
+varying float vHelmetStripePath;
+uniform float uHelmetStripesEnabled;
+uniform float uHelmetStripeWidthScale;
+uniform float uHelmetStripeLength;
+uniform float uHelmetStripeCenterX;
+uniform vec3 uHelmetStripeLeftColor;
+uniform vec3 uHelmetStripeCenterColor;
+uniform vec3 uHelmetStripeRightColor;`
+      )
+      .replace(
+        '#include <map_fragment>',
+        `#include <map_fragment>
 
-    // Front/back end caps.
-    const first = 0;
-    const last = (sampleCount - 1) * 4;
-    indices.push(first, first + 1, first + 2, first + 1, first + 3, first + 2);
-    indices.push(last, last + 2, last + 1, last + 1, last + 2, last + 3);
+if (uHelmetStripesEnabled > 0.5) {
+  // Three equal-width touching bands. Base width is in the Shell's model-space units.
+  float stripeW = 0.020 * uHelmetStripeWidthScale;
+  float stripeX = vHelmetModelPosition.x - uHelmetStripeCenterX;
+  float totalHalfWidth = stripeW * 1.5;
 
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    geometry.setIndex(indices);
-    geometry.computeVertexNormals();
+  // Antialias only the outside edge of the complete 3-stripe pack; internal color
+  // boundaries remain touching with no shell-colored gap.
+  float edgeAA = max(fwidth(stripeX) * 1.5, 0.00030);
+  float widthMask = 1.0 - smoothstep(totalHalfWidth - edgeAA, totalHalfWidth + edgeAA, abs(stripeX));
 
-    const material = new THREE.MeshPhysicalMaterial({
-      color: new THREE.Color(color),
-      roughness: 0.24,
-      metalness: 0.0,
-      clearcoat: 0.7,
-      clearcoatRoughness: 0.12,
-      side: THREE.DoubleSide,
-    });
+  // Length=1 reaches the deepest rear extent. Lower values pull only the rear endpoint
+  // toward the crown/front; the front endpoint remains fixed.
+  float pathAA = max(fwidth(vHelmetStripePath) * 1.5, 0.0020);
+  float lengthMask = 1.0 - smoothstep(
+    uHelmetStripeLength - pathAA,
+    uHelmetStripeLength + pathAA,
+    vHelmetStripePath
+  );
 
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.name = `Stripe_${stripeSlot}`;
-    mesh.userData.stripeSlot = stripeSlot;
-    mesh.castShadow = true;
-    mesh.receiveShadow = false;
-    mesh.renderOrder = 0;
-    return mesh;
+  float stripeMask = widthMask * lengthMask;
+
+  vec3 stripeColor = uHelmetStripeCenterColor;
+  if (stripeX < -0.5 * stripeW) {
+    stripeColor = uHelmetStripeLeftColor;
+  } else if (stripeX > 0.5 * stripeW) {
+    stripeColor = uHelmetStripeRightColor;
+  }
+
+  // Applied after the wrap texture is sampled, so decals always sit visually above it.
+  diffuseColor.rgb = mix(diffuseColor.rgb, stripeColor, stripeMask);
+
+  // A very narrow edge contrast gives a slight vinyl/bevel read without lifting geometry
+  // away from the shell surface.
+  float edgeDistance = abs(abs(stripeX) - totalHalfWidth);
+  float bevelBand = (1.0 - smoothstep(0.0, edgeAA * 3.0, edgeDistance)) * stripeMask;
+  diffuseColor.rgb *= 1.0 + bevelBand * 0.035;
+}`
+      );
   };
 
-  // First preset: three equal-width stripes, touching edge-to-edge with no gaps.
-  const stripeWidth = 0.020;
-  group.add(makeRibbon(-stripeWidth, stripeWidth, '#ffffff', 'left'));
-  group.add(makeRibbon(0, stripeWidth, '#ffffff', 'center'));
-  group.add(makeRibbon(stripeWidth, stripeWidth, '#ffffff', 'right'));
-  group.userData.frontZ = zEnd;
-  group.visible = false;
-  return group;
+  material.customProgramCacheKey = () => 'helmet-standard-three-stripe-surface-v1';
+  material.needsUpdate = true;
 }
 
 const FINISHES = [
@@ -549,8 +512,17 @@ export default function HelmetBuilder() {
   const wrapTextureRef   = useRef(null);
   const wrapObjectUrlRef = useRef(null);
 
-  // Raised center-stripe geometry generated from the Shell crown profile.
-  const stripeGroupRef = useRef(null);
+  // Shared shader-uniform objects for Shell stripe decals. The renderer keeps references
+  // to these objects across material recompiles (wrap on/off, finish changes, etc.).
+  const stripeUniformsRef = useRef({
+    enabled:     { value: 0 },
+    widthScale:  { value: 1 },
+    length:      { value: 1 },
+    centerX:     { value: 0 },
+    leftColor:   { value: new THREE.Color('#efff00') },
+    centerColor: { value: new THREE.Color('#eaeaea') },
+    rightColor:  { value: new THREE.Color('#efff00') },
+  });
 
   const [activeTab, setActiveTab]     = useState('colors');
   const [colors, setColors]           = useState(() => Object.fromEntries(ZONES.map(z => [z.id, z.defaultColor])));
@@ -582,9 +554,9 @@ export default function HelmetBuilder() {
   const [helmetStripesEnabled, setHelmetStripesEnabled] = useState(false);
   const [helmetStripeWidth, setHelmetStripeWidth]       = useState(1);
   const [helmetStripeLength, setHelmetStripeLength]     = useState(1);
-  const [helmetStripeLeftColor, setHelmetStripeLeftColor]     = useState('#ffffff');
-  const [helmetStripeCenterColor, setHelmetStripeCenterColor] = useState('#ffffff');
-  const [helmetStripeRightColor, setHelmetStripeRightColor]   = useState('#ffffff');
+  const [helmetStripeLeftColor, setHelmetStripeLeftColor]     = useState('#efff00');
+  const [helmetStripeCenterColor, setHelmetStripeCenterColor] = useState('#eaeaea');
+  const [helmetStripeRightColor, setHelmetStripeRightColor]   = useState('#efff00');
 
   const finishRef = useRef(finish);
   useEffect(() => { finishRef.current = finish; }, [finish]);
@@ -932,14 +904,19 @@ export default function HelmetBuilder() {
       partObjectsRef.current = {};
       indexLoadedParts(model, partsRef.current, partObjectsRef.current);
       // Ignore the source Shell UV islands for full wraps. Generate one panoramic
-      // projection instead: FRONT at texture center, one seam at center BACK.
-      applyPanoramicShellWrapUV(model, partObjectsRef.current[partKey('Shell')] || []);
+      // projection instead: FRONT at texture center, one seam at center BACK. The same
+      // pass also creates model-space/path attributes used by surface-hugging stripe decals.
+      const shellProjection = applyPanoramicShellWrapUV(
+        model,
+        partObjectsRef.current[partKey('Shell')] || []
+      );
 
-      // Build the first helmet-stripe option as real raised geometry. Because it is not
-      // painted into the Shell texture, it stays continuous across vents, seams and cutouts.
-      const stripeGroup = createStandardThreeStripeGroup(model, partObjectsRef.current[partKey('Shell')] || []);
-      model.add(stripeGroup);
-      stripeGroupRef.current = stripeGroup;
+      // Install the stripe overlay only on Shell materials. Since bumpers are separate
+      // GLB geometry, they naturally render over these decals wherever they overlap.
+      stripeUniformsRef.current.centerX.value = shellProjection?.centerX || 0;
+      (partsRef.current[partKey('Shell')] || []).forEach(mat => {
+        installShellStripeOverlay(mat, stripeUniformsRef.current);
+      });
 
       scene.add(model);
       // Now that all shell/facemask materials exist, route env maps per current finish
@@ -975,15 +952,6 @@ export default function HelmetBuilder() {
     return () => {
       cancelAnimationFrame(frameRef.current);
       window.removeEventListener('resize', onResize);
-      if (stripeGroupRef.current) {
-        stripeGroupRef.current.traverse(obj => {
-          if (!obj.isMesh) return;
-          obj.geometry?.dispose();
-          if (Array.isArray(obj.material)) obj.material.forEach(m => m?.dispose());
-          else obj.material?.dispose();
-        });
-        stripeGroupRef.current = null;
-      }
       renderer.dispose();
       if (el.contains(renderer.domElement)) el.removeChild(renderer.domElement);
     };
@@ -1090,28 +1058,13 @@ export default function HelmetBuilder() {
 
   // ── STANDARD 3-STRIPE DECAL ─────────────────────────────────────────────────
   useEffect(() => {
-    const group = stripeGroupRef.current;
-    if (!group) return;
-    group.visible = helmetStripesEnabled;
-    // Width scales the three-stripe pack laterally; length scales it front-to-back while
-    // keeping the front endpoint pinned so shortening happens from the back.
-    const frontZ = group.userData.frontZ || 0;
-    group.scale.set(helmetStripeWidth, 1, helmetStripeLength);
-    group.position.set(0, 0, frontZ * (1 - helmetStripeLength));
-
-    const stripeColors = {
-      left: helmetStripeLeftColor,
-      center: helmetStripeCenterColor,
-      right: helmetStripeRightColor,
-    };
-    group.traverse(obj => {
-      if (!obj.isMesh) return;
-      const slot = obj.userData?.stripeSlot;
-      if (slot && stripeColors[slot] && obj.material?.color) {
-        obj.material.color.set(stripeColors[slot]);
-        obj.material.needsUpdate = true;
-      }
-    });
+    const uniforms = stripeUniformsRef.current;
+    uniforms.enabled.value = helmetStripesEnabled ? 1 : 0;
+    uniforms.widthScale.value = helmetStripeWidth;
+    uniforms.length.value = helmetStripeLength;
+    uniforms.leftColor.value.set(helmetStripeLeftColor);
+    uniforms.centerColor.value.set(helmetStripeCenterColor);
+    uniforms.rightColor.value.set(helmetStripeRightColor);
   }, [loaded, helmetStripesEnabled, helmetStripeWidth, helmetStripeLength, helmetStripeLeftColor, helmetStripeCenterColor, helmetStripeRightColor]);
 
   // ── SHADOW SURFACE ON/OFF ────────────────────────────────────────────────────
@@ -1555,7 +1508,7 @@ export default function HelmetBuilder() {
                   </div>
 
                   <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.5 }}>
-                    This preset uses three equal-width stripes with no gaps. The stripe layer hugs the shell closely, bridges shell openings, and sits beneath the bumpers.
+                    This preset uses three equal-width stripes with no gaps. Stripes are rendered directly on the shell surface, above any full wrap and beneath the bumpers.
                   </div>
 
                   <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:10 }}>
@@ -1565,7 +1518,7 @@ export default function HelmetBuilder() {
                   </div>
                   <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:8 }}>
                     <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Length</span>
-                    <input type="range" min="55" max="100" value={Math.round(helmetStripeLength*100)} onChange={e => setHelmetStripeLength(parseInt(e.target.value)/100)} style={{ flex:1 }} />
+                    <input type="range" min="40" max="100" value={Math.round(helmetStripeLength*100)} onChange={e => setHelmetStripeLength(parseInt(e.target.value)/100)} style={{ flex:1 }} />
                     <span style={{ width:34, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{Math.round(helmetStripeLength*100)}%</span>
                   </div>
 
@@ -1576,7 +1529,7 @@ export default function HelmetBuilder() {
                   <ColorSwatch color={helmetStripeRightColor} onChange={setHelmetStripeRightColor} label="Right Stripe" />
 
                   <div style={{ marginTop:8, fontSize:8, color:'#4b5563', lineHeight:1.4 }}>
-                    Default length reaches the back of the helmet. Pull the Length slider down to shorten it from the rear while keeping the front aligned.
+                    100% reaches the full rear extent below the bumper. Reducing Length moves only the rear ends forward toward the crown while keeping the front aligned.
                   </div>
                 </div>
 
