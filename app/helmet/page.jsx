@@ -635,7 +635,7 @@ export default function HelmetBuilder() {
   const [wrapRevision, setWrapRevision]     = useState(0);
 
   const [helmetStripesEnabled, setHelmetStripesEnabled] = useState(false);
-  const [helmetStripeWidth, setHelmetStripeWidth]       = useState(1);
+  const [helmetStripeWidth, setHelmetStripeWidth]       = useState(2);
   const [helmetStripeLength, setHelmetStripeLength]     = useState(1);
   const [helmetStripeLeftColor, setHelmetStripeLeftColor]     = useState('#efff00');
   const [helmetStripeCenterColor, setHelmetStripeCenterColor] = useState('#eaeaea');
@@ -650,6 +650,7 @@ export default function HelmetBuilder() {
   const [helmetStripeDesignOffsetY, setHelmetStripeDesignOffsetY] = useState(0);
   const [helmetStripeDesignOpacity, setHelmetStripeDesignOpacity] = useState(1);
   const [helmetStripeDesignRevision, setHelmetStripeDesignRevision] = useState(0);
+  const [activeViewPreset, setActiveViewPreset] = useState('sideA');
 
   const finishRef = useRef(finish);
   useEffect(() => { finishRef.current = finish; }, [finish]);
@@ -813,6 +814,30 @@ export default function HelmetBuilder() {
   useEffect(() => () => {
     if (stripeDesignObjectUrlRef.current) URL.revokeObjectURL(stripeDesignObjectUrlRef.current);
     if (stripeDesignTextureRef.current) stripeDesignTextureRef.current.dispose();
+  }, []);
+
+  const applyViewPreset = useCallback((presetId) => {
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
+    if (!camera || !controls) return;
+
+    const target = new THREE.Vector3(0, 0.05, 0);
+    const presets = {
+      sideA: { position: [-3.2, 0.1, 0.0], up: [0, 1, 0] },
+      sideB: { position: [3.2, 0.1, 0.0], up: [0, 1, 0] },
+      front: { position: [0.0, 0.08, 3.15], up: [0, 1, 0] },
+      back:  { position: [0.0, 0.08, -3.15], up: [0, 1, 0] },
+      top:   { position: [0.0, 3.25, 0.001], up: [0, 0, 1] },
+      hero:  { position: [-1.95, 1.18, 2.15], up: [0, 1, 0] },
+    };
+
+    const preset = presets[presetId] || presets.sideA;
+    camera.up.set(...preset.up);
+    camera.position.set(...preset.position);
+    controls.target.copy(target);
+    camera.lookAt(target);
+    controls.update();
+    setActiveViewPreset(presetId);
   }, []);
 
   // ── THREE.JS SETUP ──────────────────────────────────────────────────────────
@@ -1590,7 +1615,7 @@ export default function HelmetBuilder() {
                   <div>
                     <div style={{ height:1, background:'rgba(255,255,255,0.06)', marginBottom:14 }} />
                     <SectionLabel>Glitter Intensity</SectionLabel>
-                    <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:10 }}>
                       <span style={{ fontSize:10, color:'#9ca3af', minWidth:48 }}>Amount</span>
                       <input type="range" min="0" max="100" value={Math.round(glitter*100)} onChange={e => setGlitter(parseInt(e.target.value)/100)} style={{ flex:1 }} />
                       <span style={{ fontSize:11, color:'#efff00', fontFamily:"'Barlow Condensed',sans-serif", width:34, textAlign:'right' }}>{Math.round(glitter*100)}%</span>
@@ -1670,22 +1695,22 @@ export default function HelmetBuilder() {
                     </div>
 
                     <div style={{ marginTop:11 }}>
-                      <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
+                      <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:8 }}>
                         <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Scale</span>
                         <input type="range" min="25" max="300" value={Math.round(wrapScale*100)} onChange={e => setWrapScale(parseInt(e.target.value)/100)} style={{ flex:1 }} />
                         <span style={{ width:34, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{Math.round(wrapScale*100)}%</span>
                       </div>
-                      <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
+                      <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:8 }}>
                         <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Rotate</span>
                         <input type="range" min="-180" max="180" value={wrapRotation} onChange={e => setWrapRotation(parseInt(e.target.value))} style={{ flex:1 }} />
                         <span style={{ width:34, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{wrapRotation}°</span>
                       </div>
-                      <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
+                      <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:8 }}>
                         <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Around Helmet</span>
                         <input type="range" min="-50" max="50" value={wrapOffsetX} onChange={e => setWrapOffsetX(parseInt(e.target.value))} style={{ flex:1 }} />
                         <span style={{ width:34, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{wrapOffsetX}</span>
                       </div>
-                      <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
+                      <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:8 }}>
                         <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Up / Down</span>
                         <input type="range" min="-50" max="50" value={wrapOffsetY} onChange={e => setWrapOffsetY(parseInt(e.target.value))} style={{ flex:1 }} />
                         <span style={{ width:34, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{wrapOffsetY}</span>
@@ -1769,14 +1794,18 @@ export default function HelmetBuilder() {
                         </div>
                       </div>
 
-                      <div style={{ position:'relative', width:'100%', aspectRatio:'1 / 2.8', overflow:'hidden', borderRadius:8, border:'1px solid rgba(255,255,255,0.12)', background:'rgba(0,0,0,0.2)' }}>
-                        <div style={{ position:'absolute', inset:0, display:'grid', gridTemplateColumns:'1fr 1fr 1fr' }}>
-                          <div style={{ background:helmetStripeLeftColor, opacity:0.75 }} />
-                          <div style={{ background:helmetStripeCenterColor, opacity:0.85 }} />
-                          <div style={{ background:helmetStripeRightColor, opacity:0.75 }} />
-                        </div>
-                        <div style={{ position:'absolute', top:0, bottom:0, left:'33.333%', borderLeft:'1px dashed rgba(0,0,0,0.35)', pointerEvents:'none' }} />
-                        <div style={{ position:'absolute', top:0, bottom:0, left:'66.666%', borderLeft:'1px dashed rgba(0,0,0,0.35)', pointerEvents:'none' }} />
+                      <div style={{
+                        position:'relative',
+                        width:'100%',
+                        aspectRatio:'1 / 2.8',
+                        overflow:'hidden',
+                        borderRadius:8,
+                        border:'1px solid rgba(255,255,255,0.12)',
+                        backgroundColor:'#c8cdd4',
+                        backgroundImage:'linear-gradient(45deg, rgba(255,255,255,0.95) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.95) 75%, rgba(255,255,255,0.95)), linear-gradient(45deg, rgba(255,255,255,0.95) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.95) 75%, rgba(255,255,255,0.95))',
+                        backgroundSize:'18px 18px',
+                        backgroundPosition:'0 0, 9px 9px'
+                      }}>
                         <img
                           src={helmetStripeDesignPreviewUrl}
                           alt="Uploaded stripe design preview"
@@ -1788,29 +1817,29 @@ export default function HelmetBuilder() {
 
                       <div style={{ marginTop:11 }}>
                         <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
-                          <span style={{ width:70, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Scale</span>
+                          <span style={{ width:60, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Scale</span>
                           <input type="range" min="25" max="300" value={Math.round(helmetStripeDesignScale*100)} onChange={e => setHelmetStripeDesignScale(parseInt(e.target.value)/100)} style={{ flex:1 }} />
-                          <span style={{ width:34, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{Math.round(helmetStripeDesignScale*100)}%</span>
+                          <span style={{ width:42, flexShrink:0, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{Math.round(helmetStripeDesignScale*100)}%</span>
                         </div>
                         <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
-                          <span style={{ width:70, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Rotate</span>
+                          <span style={{ width:60, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Rotate</span>
                           <input type="range" min="-180" max="180" value={helmetStripeDesignRotation} onChange={e => setHelmetStripeDesignRotation(parseInt(e.target.value))} style={{ flex:1 }} />
-                          <span style={{ width:34, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{helmetStripeDesignRotation}°</span>
+                          <span style={{ width:42, flexShrink:0, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{helmetStripeDesignRotation}°</span>
                         </div>
                         <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
-                          <span style={{ width:70, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Across Stripe</span>
+                          <span style={{ width:60, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Across</span>
                           <input type="range" min="-50" max="50" value={helmetStripeDesignOffsetX} onChange={e => setHelmetStripeDesignOffsetX(parseInt(e.target.value))} style={{ flex:1 }} />
-                          <span style={{ width:34, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{helmetStripeDesignOffsetX}</span>
+                          <span style={{ width:42, flexShrink:0, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{helmetStripeDesignOffsetX}</span>
                         </div>
                         <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
-                          <span style={{ width:70, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Front / Back</span>
+                          <span style={{ width:60, flexShrink:0, fontSize:9, color:'#9ca3af' }}>F / B</span>
                           <input type="range" min="-50" max="50" value={helmetStripeDesignOffsetY} onChange={e => setHelmetStripeDesignOffsetY(parseInt(e.target.value))} style={{ flex:1 }} />
-                          <span style={{ width:34, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{helmetStripeDesignOffsetY}</span>
+                          <span style={{ width:42, flexShrink:0, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{helmetStripeDesignOffsetY}</span>
                         </div>
                         <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
-                          <span style={{ width:70, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Opacity</span>
+                          <span style={{ width:60, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Opacity</span>
                           <input type="range" min="0" max="100" value={Math.round(helmetStripeDesignOpacity*100)} onChange={e => setHelmetStripeDesignOpacity(parseInt(e.target.value)/100)} style={{ flex:1 }} />
-                          <span style={{ width:34, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{Math.round(helmetStripeDesignOpacity*100)}%</span>
+                          <span style={{ width:42, flexShrink:0, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{Math.round(helmetStripeDesignOpacity*100)}%</span>
                         </div>
                         <button onClick={resetStripeDesignTransform} style={{ width:'100%', background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:6, padding:'7px 8px', cursor:'pointer', color:'#9ca3af', fontSize:9, fontWeight:700, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.05em' }}>RESET POSITION</button>
                       </div>
@@ -1844,6 +1873,42 @@ export default function HelmetBuilder() {
               <div style={{ textAlign: 'center' }}>
                 <div style={{ fontSize: 32, marginBottom: 12 }}>🏈</div>
                 <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 14, color: '#6b7280', letterSpacing: '0.1em' }}>LOADING HELMET...</div>
+              </div>
+            </div>
+          )}
+
+          {/* Preset view buttons */}
+          {loaded && (
+            <div style={{ position:'absolute', top:16, right:16, width:180, background:'rgba(0,0,0,0.45)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:10, padding:'10px 10px 9px', backdropFilter:'blur(6px)' }}>
+              <div style={{ fontSize:9, color:'#6b7280', letterSpacing:'0.12em', fontFamily:"'Barlow Condensed',sans-serif", marginBottom:8 }}>PRESET VIEWS</div>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:6 }}>
+                {[
+                  { id:'sideA', label:'SIDE A' },
+                  { id:'sideB', label:'SIDE B' },
+                  { id:'front', label:'FRONT' },
+                  { id:'back', label:'BACK' },
+                  { id:'top', label:'TOP' },
+                  { id:'hero', label:'HERO' },
+                ].map(view => (
+                  <button
+                    key={view.id}
+                    onClick={() => applyViewPreset(view.id)}
+                    style={{
+                      background: activeViewPreset === view.id ? 'rgba(239,255,0,0.12)' : 'rgba(255,255,255,0.04)',
+                      border: activeViewPreset === view.id ? '1px solid rgba(239,255,0,0.45)' : '1px solid rgba(255,255,255,0.10)',
+                      borderRadius: 7,
+                      padding: '7px 6px',
+                      cursor: 'pointer',
+                      color: activeViewPreset === view.id ? '#efff00' : '#9ca3af',
+                      fontSize: 9,
+                      fontWeight: 700,
+                      fontFamily: "'Barlow Condensed', sans-serif",
+                      letterSpacing: '0.06em'
+                    }}
+                  >
+                    {view.label}
+                  </button>
+                ))}
               </div>
             </div>
           )}
