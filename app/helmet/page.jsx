@@ -1561,17 +1561,18 @@ export default function HelmetBuilder() {
         }
       });
       decalSurfaceObjectsRef.current.forEach(root => {
-        // THREE.Raycaster can still intersect invisible objects, so the carrier does not
-        // need to participate in rendering at all. Keeping the root invisible is much more
-        // robust than relying only on zero-opacity materials (which other finish/color
-        // updates could accidentally make visible again).
+        // Hidden carrier only: never draw it, never write depth, never cast/receive shadows.
+        // It exists strictly for raycasting + DecalGeometry projection.
         root.visible = false;
+        root.renderOrder = -9999;
         root.traverse(obj => {
           if (!obj.isMesh) return;
           obj.userData.decalSurfaceMesh = true;
           obj.castShadow = false;
           obj.receiveShadow = false;
           obj.visible = false;
+          obj.frustumCulled = false;
+          obj.renderOrder = -9999;
           const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
           mats.forEach(mat => {
             if (!mat) return;
@@ -1581,6 +1582,7 @@ export default function HelmetBuilder() {
             mat.colorWrite = false;
             mat.depthWrite = false;
             mat.depthTest = false;
+            mat.toneMapped = false;
             mat.needsUpdate = true;
           });
         });
@@ -1595,20 +1597,18 @@ export default function HelmetBuilder() {
       // Ignore the source Shell UV islands for full wraps. Generate one panoramic
       // projection instead: FRONT at texture center, one seam at center BACK. The same
       // pass also creates model-space/path attributes used by surface-hugging stripe decals.
-      const decalProjectionRoots = decalSurfaceObjectsRef.current.length
-        ? decalSurfaceObjectsRef.current
-        : (partObjectsRef.current[partKey('Shell')] || []);
+      const shellRoots = partObjectsRef.current[partKey('Shell')] || [];
       const shellProjection = applyPanoramicShellWrapUV(
         model,
-        decalProjectionRoots
+        shellRoots
       );
 
-      // Build a second, coincident Shell surface used only for decal layers. Because
-      // this overlay has its own material, Shell glitter/Car Paint can never bleed through
-      // an opaque wrap or stripe. Polygon offset keeps it visually flush without floating.
+      // Wraps and stripes still use the real Shell as their decal overlay surface.
+      // The baked `Decal Surface` is reserved as a hidden carrier for main-logo placement,
+      // exactly like a clipping-mask shape: only the projected logo itself becomes visible.
       stripeUniformsRef.current.centerX.value = shellProjection?.centerX || 0;
       const decalOverlays = createShellDecalOverlays(
-        decalProjectionRoots,
+        shellRoots,
         stripeUniformsRef.current
       );
       decalOverlayMeshesRef.current = decalOverlays.overlays;
@@ -1931,9 +1931,9 @@ export default function HelmetBuilder() {
       // Tiny real lift for a thick-vinyl read. Because the underlying decal geometry is
       // already conformed to the carrier surface, this remains flush instead of turning
       // into a floating flat card.
-      const physicalDepth = Math.max(boundsModel.width * 0.0012, 0.00055);
-      offsetGeometryAlongNormals(shadowGeo, physicalDepth * 0.35);
-      offsetGeometryAlongNormals(mainGeo, physicalDepth);
+      const physicalDepth = Math.max(boundsModel.width * 0.00065, 0.00028);
+      offsetGeometryAlongNormals(shadowGeo, physicalDepth * 0.25);
+      offsetGeometryAlongNormals(mainGeo, physicalDepth * 0.70);
 
       const shadowMat = new THREE.MeshPhysicalMaterial({
         color: 0x000000,
