@@ -172,6 +172,209 @@ function applyPanoramicShellWrapUV(model, roots) {
   });
 }
 
+
+// ── STANDARD 3-STRIPE HELMET DECAL ──────────────────────────────────────────
+// This is intentionally real geometry rather than a texture painted onto the Shell.
+// A texture would disappear wherever the helmet has a vent, seam, or cutout. These
+// three slightly raised ribbons instead follow a smoothed front-to-back crown profile
+// and bridge those openings, which is much closer to a physical vinyl helmet stripe.
+function createStandardThreeStripeGroup(model, roots) {
+  const group = new THREE.Group();
+  group.name = 'Standard_3_Stripe_Decal';
+  if (!model || !roots?.length) return group;
+
+  model.updateMatrixWorld(true);
+  const modelInverse = new THREE.Matrix4().copy(model.matrixWorld).invert();
+  const p = new THREE.Vector3();
+  const points = [];
+  const seenMeshes = new Set();
+
+  roots.forEach(root => {
+    root.traverse(obj => {
+      if (!obj.isMesh || !obj.geometry?.attributes?.position || seenMeshes.has(obj)) return;
+      seenMeshes.add(obj);
+      obj.updateWorldMatrix(true, false);
+      const localToModel = new THREE.Matrix4().multiplyMatrices(modelInverse, obj.matrixWorld);
+      const pos = obj.geometry.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        p.fromBufferAttribute(pos, i).applyMatrix4(localToModel);
+        points.push({ x: p.x, y: p.y, z: p.z });
+      }
+    });
+  });
+
+  if (!points.length) return group;
+
+  let minX = Infinity, maxX = -Infinity;
+  let minZ = Infinity, maxZ = -Infinity;
+  points.forEach(pt => {
+    minX = Math.min(minX, pt.x); maxX = Math.max(maxX, pt.x);
+    minZ = Math.min(minZ, pt.z); maxZ = Math.max(maxZ, pt.z);
+  });
+
+  const zSpan = Math.max(0.000001, maxZ - minZ);
+  const xSpan = Math.max(0.000001, maxX - minX);
+  const sampleCount = 110;
+  const zStart = minZ + zSpan * 0.006;
+  const zEnd = maxZ - zSpan * 0.008;
+
+  // Bin shell vertices along front/back so sampling remains quick even on a dense shell.
+  const bins = Array.from({ length: sampleCount }, () => []);
+  points.forEach(pt => {
+    const t = THREE.MathUtils.clamp((pt.z - zStart) / Math.max(0.000001, zEnd - zStart), 0, 0.999999);
+    bins[Math.floor(t * sampleCount)].push(pt);
+  });
+
+  const sampleProfile = (xTarget) => {
+    const values = new Array(sampleCount).fill(null);
+    const baseXRadius = Math.max(0.014, xSpan * 0.035);
+
+    for (let i = 0; i < sampleCount; i++) {
+      let bestY = -Infinity;
+      // First look close to the requested stripe center. Include neighboring Z bins so
+      // vents/cutouts are naturally bridged by the surrounding crown surface.
+      for (let radiusPass = 0; radiusPass < 3 && !Number.isFinite(bestY); radiusPass++) {
+        const xRadius = baseXRadius * (1 + radiusPass * 1.6);
+        const binRadius = 2 + radiusPass * 2;
+        for (let b = Math.max(0, i - binRadius); b <= Math.min(sampleCount - 1, i + binRadius); b++) {
+          for (const pt of bins[b]) {
+            if (Math.abs(pt.x - xTarget) <= xRadius) bestY = Math.max(bestY, pt.y);
+          }
+        }
+      }
+      values[i] = Number.isFinite(bestY) ? bestY : null;
+    }
+
+    // Fill any rare missing samples by interpolation rather than letting a vent create a gap.
+    for (let i = 0; i < sampleCount; i++) {
+      if (values[i] != null) continue;
+      let a = i - 1, b = i + 1;
+      while (a >= 0 && values[a] == null) a--;
+      while (b < sampleCount && values[b] == null) b++;
+      if (a >= 0 && b < sampleCount) {
+        const t = (i - a) / (b - a);
+        values[i] = THREE.MathUtils.lerp(values[a], values[b], t);
+      } else if (a >= 0) values[i] = values[a];
+      else if (b < sampleCount) values[i] = values[b];
+      else values[i] = 0;
+    }
+
+    // Multiple gentle smoothing passes remove tiny polygon/vent fluctuations while retaining
+    // the overall helmet silhouette from the front brow, over the crown, to the rear edge.
+    let smoothed = values;
+    for (let pass = 0; pass < 4; pass++) {
+      smoothed = smoothed.map((v, i, arr) => {
+        if (i === 0 || i === arr.length - 1) return v;
+        const a = arr[Math.max(0, i - 2)];
+        const b = arr[i - 1];
+        const c = arr[i];
+        const d = arr[i + 1];
+        const e = arr[Math.min(arr.length - 1, i + 2)];
+        return (a + 2 * b + 3 * c + 2 * d + e) / 9;
+      });
+    }
+    return smoothed;
+  };
+
+  const makeRibbon = (xCenter, width, color) => {
+    const profile = sampleProfile(xCenter);
+    const positions = [];
+    const indices = [];
+    const lift = 0.0030;   // slight separation avoids z-fighting with the shell
+    const depth = 0.0036;  // raised vinyl/rubber-like edge; intentionally subtle
+
+    for (let i = 0; i < sampleCount; i++) {
+      const t = i / (sampleCount - 1);
+      const z = THREE.MathUtils.lerp(zStart, zEnd, t);
+      const y = profile[i];
+
+      const i0 = Math.max(0, i - 1);
+      const i1 = Math.min(sampleCount - 1, i + 1);
+      const z0 = THREE.MathUtils.lerp(zStart, zEnd, i0 / (sampleCount - 1));
+      const z1 = THREE.MathUtils.lerp(zStart, zEnd, i1 / (sampleCount - 1));
+      const dy = profile[i1] - profile[i0];
+      const dz = Math.max(0.000001, z1 - z0);
+
+      // Outward normal for the Y/Z crown profile. This keeps the decal depth normal to
+      // the helmet arc instead of simply lifting it vertically.
+      const slope = dy / dz;
+      const invLen = 1 / Math.sqrt(1 + slope * slope);
+      const ny = invLen;
+      const nz = -slope * invLen;
+
+      const topY = y + ny * lift;
+      const topZ = z + nz * lift;
+      const bottomY = y + ny * (lift - depth);
+      const bottomZ = z + nz * (lift - depth);
+      const half = width / 2;
+
+      // Four vertices per station: top-left, top-right, bottom-left, bottom-right.
+      positions.push(
+        xCenter - half, topY, topZ,
+        xCenter + half, topY, topZ,
+        xCenter - half, bottomY, bottomZ,
+        xCenter + half, bottomY, bottomZ,
+      );
+    }
+
+    for (let i = 0; i < sampleCount - 1; i++) {
+      const a = i * 4;
+      const b = (i + 1) * 4;
+      // top
+      indices.push(a, b, a + 1, a + 1, b, b + 1);
+      // underside
+      indices.push(a + 2, a + 3, b + 2, a + 3, b + 3, b + 2);
+      // left edge
+      indices.push(a, a + 2, b, a + 2, b + 2, b);
+      // right edge
+      indices.push(a + 1, b + 1, a + 3, a + 3, b + 1, b + 3);
+    }
+
+    // Front/back end caps.
+    const first = 0;
+    const last = (sampleCount - 1) * 4;
+    indices.push(first, first + 1, first + 2, first + 1, first + 3, first + 2);
+    indices.push(last, last + 2, last + 1, last + 1, last + 2, last + 3);
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setIndex(indices);
+    geometry.computeVertexNormals();
+
+    const material = new THREE.MeshPhysicalMaterial({
+      color: new THREE.Color(color),
+      roughness: 0.22,
+      metalness: 0.0,
+      clearcoat: 0.75,
+      clearcoatRoughness: 0.10,
+      side: THREE.DoubleSide,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
+    });
+
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.castShadow = true;
+    mesh.receiveShadow = false;
+    mesh.renderOrder = 5;
+    return mesh;
+  };
+
+  // Classic three-stripe proportions: a wider center stripe with two narrower outer
+  // stripes and a small shell-colored gap between each. All three are white for this
+  // first geometry test; independent color/pattern controls can layer on next.
+  const centerWidth = 0.044;
+  const outerWidth = 0.027;
+  const gap = 0.007;
+  const outerCenter = centerWidth / 2 + gap + outerWidth / 2;
+
+  group.add(makeRibbon(-outerCenter, outerWidth, '#ffffff'));
+  group.add(makeRibbon(0, centerWidth, '#ffffff'));
+  group.add(makeRibbon(outerCenter, outerWidth, '#ffffff'));
+  group.visible = false;
+  return group;
+}
+
 const FINISHES = [
   { id: 'gloss',    label: 'Gloss',     roughness: 0.05, metalness: 0.1,  clearcoat: 1.0, clearcoatRoughness: 0.05, iridescence: 0.0 },
   { id: 'matte',    label: 'Matte',     roughness: 0.9,  metalness: 0.0,  clearcoat: 0.0, clearcoatRoughness: 0.0,  iridescence: 0.0 },
@@ -350,6 +553,9 @@ export default function HelmetBuilder() {
   const wrapTextureRef   = useRef(null);
   const wrapObjectUrlRef = useRef(null);
 
+  // Raised center-stripe geometry generated from the Shell crown profile.
+  const stripeGroupRef = useRef(null);
+
   const [activeTab, setActiveTab]     = useState('colors');
   const [colors, setColors]           = useState(() => Object.fromEntries(ZONES.map(z => [z.id, z.defaultColor])));
   const [finish, setFinish]           = useState('gloss');
@@ -376,6 +582,9 @@ export default function HelmetBuilder() {
   const [wrapOffsetY, setWrapOffsetY]       = useState(0);
   const [wrapOpacity, setWrapOpacity]       = useState(1);
   const [wrapRevision, setWrapRevision]     = useState(0);
+
+  const [helmetStripesEnabled, setHelmetStripesEnabled] = useState(false);
+  const [helmetStripeWidth, setHelmetStripeWidth]       = useState(1);
 
   const finishRef = useRef(finish);
   useEffect(() => { finishRef.current = finish; }, [finish]);
@@ -726,6 +935,12 @@ export default function HelmetBuilder() {
       // projection instead: FRONT at texture center, one seam at center BACK.
       applyPanoramicShellWrapUV(model, partObjectsRef.current[partKey('Shell')] || []);
 
+      // Build the first helmet-stripe option as real raised geometry. Because it is not
+      // painted into the Shell texture, it stays continuous across vents, seams and cutouts.
+      const stripeGroup = createStandardThreeStripeGroup(model, partObjectsRef.current[partKey('Shell')] || []);
+      model.add(stripeGroup);
+      stripeGroupRef.current = stripeGroup;
+
       scene.add(model);
       // Now that all shell/facemask materials exist, route env maps per current finish
       // (scoped to car paint / chrome only — see applyShellEnvMap above).
@@ -760,6 +975,15 @@ export default function HelmetBuilder() {
     return () => {
       cancelAnimationFrame(frameRef.current);
       window.removeEventListener('resize', onResize);
+      if (stripeGroupRef.current) {
+        stripeGroupRef.current.traverse(obj => {
+          if (!obj.isMesh) return;
+          obj.geometry?.dispose();
+          if (Array.isArray(obj.material)) obj.material.forEach(m => m?.dispose());
+          else obj.material?.dispose();
+        });
+        stripeGroupRef.current = null;
+      }
       renderer.dispose();
       if (el.contains(renderer.domElement)) el.removeChild(renderer.domElement);
     };
@@ -862,6 +1086,17 @@ export default function HelmetBuilder() {
       mat.needsUpdate = true;
     });
   }, [loaded, colors.shell, wrapEnabled, wrapRevision, wrapScale, wrapRotation, wrapOffsetX, wrapOffsetY, wrapOpacity]);
+
+
+  // ── STANDARD 3-STRIPE DECAL ─────────────────────────────────────────────────
+  useEffect(() => {
+    const group = stripeGroupRef.current;
+    if (!group) return;
+    group.visible = helmetStripesEnabled;
+    // Scaling only X changes stripe/gap width while preserving the fitted crown curve
+    // and the intentionally subtle raised depth.
+    group.scale.set(helmetStripeWidth, 1, 1);
+  }, [loaded, helmetStripesEnabled, helmetStripeWidth]);
 
   // ── SHADOW SURFACE ON/OFF ────────────────────────────────────────────────────
   // Was previously just UI state with nothing reading it — floor/wall never actually
@@ -1287,9 +1522,41 @@ export default function HelmetBuilder() {
                 )}
 
                 <div style={{ height:1, background:'rgba(255,255,255,0.06)', margin:'16px 0 14px' }} />
-                <SectionLabel>Individual Decals</SectionLabel>
+                <SectionLabel>Helmet Stripes</SectionLabel>
+                <div style={{ background:'rgba(255,255,255,0.035)', border:'1px solid rgba(255,255,255,0.09)', borderRadius:8, padding:10 }}>
+                  <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:10 }}>
+                    <div>
+                      <div style={{ fontSize:11, fontWeight:800, color:'#d1d5db', fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.04em' }}>STANDARD 3 STRIPE</div>
+                      <div style={{ fontSize:8, color:'#4b5563', marginTop:2 }}>Front → crown → back</div>
+                    </div>
+                    <button onClick={() => setHelmetStripesEnabled(v => !v)} style={{ background:helmetStripesEnabled?'rgba(239,255,0,0.12)':'rgba(255,255,255,0.04)', border:helmetStripesEnabled?'1px solid rgba(239,255,0,0.45)':'1px solid rgba(255,255,255,0.12)', borderRadius:20, padding:'4px 10px', cursor:'pointer', fontSize:8, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif", color:helmetStripesEnabled?'#efff00':'#6b7280', letterSpacing:'0.06em' }}>{helmetStripesEnabled?'ON':'OFF'}</button>
+                  </div>
+
+                  <div style={{ display:'flex', justifyContent:'center', gap:4, height:24, margin:'10px 0 8px', padding:'5px 0', background:'rgba(0,0,0,0.18)', borderRadius:5 }} aria-label="Three white helmet stripes preview">
+                    <div style={{ width:8, height:'100%', background:'#ffffff', borderRadius:2 }} />
+                    <div style={{ width:13, height:'100%', background:'#ffffff', borderRadius:2 }} />
+                    <div style={{ width:8, height:'100%', background:'#ffffff', borderRadius:2 }} />
+                  </div>
+
+                  <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.5 }}>
+                    A slightly raised stripe layer follows the helmet crown and bridges vents, seams and shell cutouts instead of disappearing into them.
+                  </div>
+
+                  <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:10 }}>
+                    <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Width</span>
+                    <input type="range" min="70" max="140" value={Math.round(helmetStripeWidth*100)} onChange={e => setHelmetStripeWidth(parseInt(e.target.value)/100)} style={{ flex:1 }} />
+                    <span style={{ width:34, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{Math.round(helmetStripeWidth*100)}%</span>
+                  </div>
+
+                  <div style={{ marginTop:8, fontSize:8, color:'#4b5563', lineHeight:1.4 }}>
+                    First pass uses three white stripes so we can dial in fit and coverage. Pattern presets and independent stripe colors come next.
+                  </div>
+                </div>
+
+                <div style={{ height:1, background:'rgba(255,255,255,0.06)', margin:'16px 0 14px' }} />
+                <SectionLabel>Other Decals</SectionLabel>
                 <div style={{ background:'rgba(255,255,255,0.03)', border:'1px dashed rgba(255,255,255,0.1)', borderRadius:8, padding:12, textAlign:'center', color:'#4b5563', fontSize:10, lineHeight:1.5 }}>
-                  Coming next: click-to-place logos, stripes and number decals on top of the wrap.
+                  Coming next: click-to-place logos and number decals on top of the shell or wrap.
                 </div>
               </div>
             )}
