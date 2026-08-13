@@ -214,9 +214,10 @@ function createStandardThreeStripeGroup(model, roots) {
 
   const zSpan = Math.max(0.000001, maxZ - minZ);
   const xSpan = Math.max(0.000001, maxX - minX);
-  const sampleCount = 110;
-  const zStart = minZ + zSpan * 0.006;
-  const zEnd = maxZ - zSpan * 0.008;
+  const sampleCount = 128;
+  // Extend essentially the full shell length by default so the stripe runs down the back.
+  const zStart = minZ + zSpan * 0.001;
+  const zEnd = maxZ - zSpan * 0.004;
 
   // Bin shell vertices along front/back so sampling remains quick even on a dense shell.
   const bins = Array.from({ length: sampleCount }, () => []);
@@ -276,12 +277,13 @@ function createStandardThreeStripeGroup(model, roots) {
     return smoothed;
   };
 
-  const makeRibbon = (xCenter, width, color) => {
+  const makeRibbon = (xCenter, width, color, stripeSlot) => {
     const profile = sampleProfile(xCenter);
     const positions = [];
     const indices = [];
-    const lift = 0.0030;   // slight separation avoids z-fighting with the shell
-    const depth = 0.0036;  // raised vinyl/rubber-like edge; intentionally subtle
+    // Keep the stripe visually painted tight to the shell while still giving it a little body.
+    const lift = 0.00075;
+    const depth = 0.00135;
 
     for (let i = 0; i < sampleCount; i++) {
       const t = i / (sampleCount - 1);
@@ -343,34 +345,28 @@ function createStandardThreeStripeGroup(model, roots) {
 
     const material = new THREE.MeshPhysicalMaterial({
       color: new THREE.Color(color),
-      roughness: 0.22,
+      roughness: 0.24,
       metalness: 0.0,
-      clearcoat: 0.75,
-      clearcoatRoughness: 0.10,
+      clearcoat: 0.7,
+      clearcoatRoughness: 0.12,
       side: THREE.DoubleSide,
-      polygonOffset: true,
-      polygonOffsetFactor: -2,
-      polygonOffsetUnits: -2,
     });
 
     const mesh = new THREE.Mesh(geometry, material);
+    mesh.name = `Stripe_${stripeSlot}`;
+    mesh.userData.stripeSlot = stripeSlot;
     mesh.castShadow = true;
     mesh.receiveShadow = false;
-    mesh.renderOrder = 5;
+    mesh.renderOrder = 0;
     return mesh;
   };
 
-  // Classic three-stripe proportions: a wider center stripe with two narrower outer
-  // stripes and a small shell-colored gap between each. All three are white for this
-  // first geometry test; independent color/pattern controls can layer on next.
-  const centerWidth = 0.044;
-  const outerWidth = 0.027;
-  const gap = 0.007;
-  const outerCenter = centerWidth / 2 + gap + outerWidth / 2;
-
-  group.add(makeRibbon(-outerCenter, outerWidth, '#ffffff'));
-  group.add(makeRibbon(0, centerWidth, '#ffffff'));
-  group.add(makeRibbon(outerCenter, outerWidth, '#ffffff'));
+  // First preset: three equal-width stripes, touching edge-to-edge with no gaps.
+  const stripeWidth = 0.020;
+  group.add(makeRibbon(-stripeWidth, stripeWidth, '#ffffff', 'left'));
+  group.add(makeRibbon(0, stripeWidth, '#ffffff', 'center'));
+  group.add(makeRibbon(stripeWidth, stripeWidth, '#ffffff', 'right'));
+  group.userData.frontZ = zEnd;
   group.visible = false;
   return group;
 }
@@ -585,6 +581,10 @@ export default function HelmetBuilder() {
 
   const [helmetStripesEnabled, setHelmetStripesEnabled] = useState(false);
   const [helmetStripeWidth, setHelmetStripeWidth]       = useState(1);
+  const [helmetStripeLength, setHelmetStripeLength]     = useState(1);
+  const [helmetStripeLeftColor, setHelmetStripeLeftColor]     = useState('#ffffff');
+  const [helmetStripeCenterColor, setHelmetStripeCenterColor] = useState('#ffffff');
+  const [helmetStripeRightColor, setHelmetStripeRightColor]   = useState('#ffffff');
 
   const finishRef = useRef(finish);
   useEffect(() => { finishRef.current = finish; }, [finish]);
@@ -1093,10 +1093,26 @@ export default function HelmetBuilder() {
     const group = stripeGroupRef.current;
     if (!group) return;
     group.visible = helmetStripesEnabled;
-    // Scaling only X changes stripe/gap width while preserving the fitted crown curve
-    // and the intentionally subtle raised depth.
-    group.scale.set(helmetStripeWidth, 1, 1);
-  }, [loaded, helmetStripesEnabled, helmetStripeWidth]);
+    // Width scales the three-stripe pack laterally; length scales it front-to-back while
+    // keeping the front endpoint pinned so shortening happens from the back.
+    const frontZ = group.userData.frontZ || 0;
+    group.scale.set(helmetStripeWidth, 1, helmetStripeLength);
+    group.position.set(0, 0, frontZ * (1 - helmetStripeLength));
+
+    const stripeColors = {
+      left: helmetStripeLeftColor,
+      center: helmetStripeCenterColor,
+      right: helmetStripeRightColor,
+    };
+    group.traverse(obj => {
+      if (!obj.isMesh) return;
+      const slot = obj.userData?.stripeSlot;
+      if (slot && stripeColors[slot] && obj.material?.color) {
+        obj.material.color.set(stripeColors[slot]);
+        obj.material.needsUpdate = true;
+      }
+    });
+  }, [loaded, helmetStripesEnabled, helmetStripeWidth, helmetStripeLength, helmetStripeLeftColor, helmetStripeCenterColor, helmetStripeRightColor]);
 
   // ── SHADOW SURFACE ON/OFF ────────────────────────────────────────────────────
   // Was previously just UI state with nothing reading it — floor/wall never actually
@@ -1532,24 +1548,35 @@ export default function HelmetBuilder() {
                     <button onClick={() => setHelmetStripesEnabled(v => !v)} style={{ background:helmetStripesEnabled?'rgba(239,255,0,0.12)':'rgba(255,255,255,0.04)', border:helmetStripesEnabled?'1px solid rgba(239,255,0,0.45)':'1px solid rgba(255,255,255,0.12)', borderRadius:20, padding:'4px 10px', cursor:'pointer', fontSize:8, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif", color:helmetStripesEnabled?'#efff00':'#6b7280', letterSpacing:'0.06em' }}>{helmetStripesEnabled?'ON':'OFF'}</button>
                   </div>
 
-                  <div style={{ display:'flex', justifyContent:'center', gap:4, height:24, margin:'10px 0 8px', padding:'5px 0', background:'rgba(0,0,0,0.18)', borderRadius:5 }} aria-label="Three white helmet stripes preview">
-                    <div style={{ width:8, height:'100%', background:'#ffffff', borderRadius:2 }} />
-                    <div style={{ width:13, height:'100%', background:'#ffffff', borderRadius:2 }} />
-                    <div style={{ width:8, height:'100%', background:'#ffffff', borderRadius:2 }} />
+                  <div style={{ display:'flex', justifyContent:'center', gap:0, height:24, margin:'10px 0 8px', padding:'5px 0', background:'rgba(0,0,0,0.18)', borderRadius:5 }} aria-label="Three helmet stripes preview">
+                    <div style={{ width:10, height:'100%', background:helmetStripeLeftColor, borderRadius:'2px 0 0 2px' }} />
+                    <div style={{ width:10, height:'100%', background:helmetStripeCenterColor }} />
+                    <div style={{ width:10, height:'100%', background:helmetStripeRightColor, borderRadius:'0 2px 2px 0' }} />
                   </div>
 
                   <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.5 }}>
-                    A slightly raised stripe layer follows the helmet crown and bridges vents, seams and shell cutouts instead of disappearing into them.
+                    This preset uses three equal-width stripes with no gaps. The stripe layer hugs the shell closely, bridges shell openings, and sits beneath the bumpers.
                   </div>
 
                   <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:10 }}>
                     <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Width</span>
-                    <input type="range" min="70" max="140" value={Math.round(helmetStripeWidth*100)} onChange={e => setHelmetStripeWidth(parseInt(e.target.value)/100)} style={{ flex:1 }} />
+                    <input type="range" min="70" max="155" value={Math.round(helmetStripeWidth*100)} onChange={e => setHelmetStripeWidth(parseInt(e.target.value)/100)} style={{ flex:1 }} />
                     <span style={{ width:34, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{Math.round(helmetStripeWidth*100)}%</span>
                   </div>
+                  <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:8 }}>
+                    <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Length</span>
+                    <input type="range" min="55" max="100" value={Math.round(helmetStripeLength*100)} onChange={e => setHelmetStripeLength(parseInt(e.target.value)/100)} style={{ flex:1 }} />
+                    <span style={{ width:34, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{Math.round(helmetStripeLength*100)}%</span>
+                  </div>
+
+                  <div style={{ height:1, background:'rgba(255,255,255,0.06)', margin:'12px 0 10px' }} />
+                  <SectionLabel>Stripe Colors</SectionLabel>
+                  <ColorSwatch color={helmetStripeLeftColor} onChange={setHelmetStripeLeftColor} label="Left Stripe" />
+                  <ColorSwatch color={helmetStripeCenterColor} onChange={setHelmetStripeCenterColor} label="Center Stripe" />
+                  <ColorSwatch color={helmetStripeRightColor} onChange={setHelmetStripeRightColor} label="Right Stripe" />
 
                   <div style={{ marginTop:8, fontSize:8, color:'#4b5563', lineHeight:1.4 }}>
-                    First pass uses three white stripes so we can dial in fit and coverage. Pattern presets and independent stripe colors come next.
+                    Default length reaches the back of the helmet. Pull the Length slider down to shorten it from the rear while keeping the front aligned.
                   </div>
                 </div>
 
