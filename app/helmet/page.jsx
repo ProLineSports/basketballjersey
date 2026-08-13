@@ -660,6 +660,7 @@ function createSideLogoTexturePack(image, options = {}) {
     strokeThickness = 8,
     strokeOpacity = 1,
     textureSize = 1024,
+    arcCompensation = 0,
   } = options;
 
   const size = Math.max(512, textureSize | 0);
@@ -731,12 +732,15 @@ function createSideLogoTexturePack(image, options = {}) {
     true
   );
 
-  const mainTexture = new THREE.CanvasTexture(finalCanvas);
+  const warpedFinalCanvas = warpCanvasArc(finalCanvas, arcCompensation);
+  const warpedRimCanvas = warpCanvasArc(rimCanvas, arcCompensation);
+
+  const mainTexture = new THREE.CanvasTexture(warpedFinalCanvas);
   mainTexture.colorSpace = THREE.SRGBColorSpace;
   mainTexture.wrapS = mainTexture.wrapT = THREE.ClampToEdgeWrapping;
   mainTexture.needsUpdate = true;
 
-  const rimTexture = new THREE.CanvasTexture(rimCanvas);
+  const rimTexture = new THREE.CanvasTexture(warpedRimCanvas);
   rimTexture.colorSpace = THREE.SRGBColorSpace;
   rimTexture.wrapS = rimTexture.wrapT = THREE.ClampToEdgeWrapping;
   rimTexture.needsUpdate = true;
@@ -746,6 +750,24 @@ function createSideLogoTexturePack(image, options = {}) {
     mainTexture,
     rimTexture,
   };
+}
+
+
+function warpCanvasArc(sourceCanvas, arcAmountPx = 0) {
+  if (!sourceCanvas || Math.abs(arcAmountPx) < 0.001) return sourceCanvas;
+  const out = document.createElement('canvas');
+  out.width = sourceCanvas.width;
+  out.height = sourceCanvas.height;
+  const ctx = out.getContext('2d');
+  if (!ctx) return sourceCanvas;
+  const w = sourceCanvas.width;
+  const h = sourceCanvas.height;
+  for (let x = 0; x < w; x++) {
+    const t = w <= 1 ? 0 : (x / (w - 1)) * 2 - 1;
+    const yOffset = arcAmountPx * (1.0 - t * t);
+    ctx.drawImage(sourceCanvas, x, 0, 1, h, x, yOffset, 1, h);
+  }
+  return out;
 }
 
 
@@ -1083,6 +1105,7 @@ export default function HelmetBuilder() {
   const decalOverlayMaterialsRef = useRef([]);
   const stripeCarrierOverlayMeshesRef = useRef([]);
   const stripeCarrierOverlayMaterialsRef = useRef([]);
+  const bumperStripeCoverMeshesRef = useRef([]);
   const bumperLogoMeshesRef      = useRef([]);
   const bumperLogoMaterialsRef   = useRef([]);
   const bumperLogoTexturesRef    = useRef([]);
@@ -1233,7 +1256,7 @@ export default function HelmetBuilder() {
   const [bumperLogoFrontFileName, setBumperLogoFrontFileName] = useState('');
   const [bumperLogoRearFileName, setBumperLogoRearFileName] = useState('');
   const [bumperLogoFrontScale, setBumperLogoFrontScale] = useState(6.6);
-  const [bumperLogoRearScale, setBumperLogoRearScale] = useState(6.6);
+  const [bumperLogoRearScale, setBumperLogoRearScale] = useState(9.5);
   const [bumperLogoFrontRotation, setBumperLogoFrontRotation] = useState(0);
   const [bumperLogoRearRotation, setBumperLogoRearRotation] = useState(0);
   const [bumperLogoFrontAcross, setBumperLogoFrontAcross] = useState(0);
@@ -1959,6 +1982,8 @@ export default function HelmetBuilder() {
       stripeCarrierOverlayMaterialsRef.current.forEach(mat => mat.dispose?.());
       stripeCarrierOverlayMeshesRef.current = [];
       stripeCarrierOverlayMaterialsRef.current = [];
+      bumperStripeCoverMeshesRef.current.forEach(mesh => { mesh.parent?.remove(mesh); mesh.geometry?.dispose?.(); });
+      bumperStripeCoverMeshesRef.current = [];
       bumperLogoMeshesRef.current.forEach(mesh => { mesh.parent?.remove(mesh); mesh.geometry?.dispose?.(); });
       bumperLogoMaterialsRef.current.forEach(mat => mat.dispose?.());
       bumperLogoTexturesRef.current.forEach(tex => tex.dispose?.());
@@ -2753,14 +2778,20 @@ export default function HelmetBuilder() {
       const hit = getBumperHit(slot, acrossValue, verticalValue);
       if (!hit) return;
 
-      const pack = createSideLogoTexturePack(image, { strokeEnabled:false, textureSize:2048 });
+      const pack = createSideLogoTexturePack(image, {
+        strokeEnabled:false,
+        textureSize: isFront ? 2048 : 4096,
+        // Rear bumper wordmarks tend to read with a slight smile when projected onto the
+        // convex bumper. Apply a subtle opposite arch so they look visually straighter.
+        arcCompensation: isFront ? 0 : -28,
+      });
       if (!pack) return;
 
-      let baseHeight = boundsModel.width * 0.060 * scaleValue;
+      let baseHeight = boundsModel.width * (isFront ? 0.060 : 0.072) * scaleValue;
       let baseWidth = baseHeight * THREE.MathUtils.clamp(pack.aspect, 0.55, 5.0);
       // Bumper marks are commonly wide wordmarks. Allow artwork to span almost the
       // full physical bumper width while still clipping to the bumper mesh itself.
-      const maxWidth = boundsModel.width * 0.98;
+      const maxWidth = boundsModel.width * (isFront ? 0.98 : 1.18);
       if (baseWidth > maxWidth) {
         const k = maxWidth / baseWidth;
         baseWidth *= k;
@@ -3559,7 +3590,7 @@ export default function HelmetBuilder() {
 
                 <CollapsibleSection title="BUMPER LOGOS">
                   <div style={{ fontSize:10, color:'#6b7280', lineHeight:1.5, marginBottom:10 }}>
-                    Add independent logos to the front and rear bumpers. Artwork starts large and can span nearly the full bumper width. It wraps directly to the 3D bumper geometry, stays clipped to the bumper itself, uses the active Decal Finish, and includes the same subtle raised-vinyl effect.
+                    Add independent logos to the front and rear bumpers. Artwork starts large and can span nearly the full bumper width. The rear bumper option is tuned for wide wordmarks and uses a subtle arc compensation so logos read straighter across the curved bumper. Both wrap directly to the 3D bumper geometry, stay clipped to the bumper itself, use the active Decal Finish, and include the same subtle raised-vinyl effect.
                   </div>
                   {bumperLogoError && <div style={{ marginBottom:10, fontSize:10, color:'#ef4444', lineHeight:1.4 }}>{bumperLogoError}</div>}
                   <input id="front-bumper-logo-upload" type="file" accept="image/png,image/jpeg" onChange={handleFrontBumperLogoUpload} style={{ display:'none' }} />
@@ -3593,7 +3624,7 @@ export default function HelmetBuilder() {
                           </div>
                           <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:7 }}>
                             <span style={{ width:50, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Size</span>
-                            <input type="range" min="100" max="1000" value={Math.round(item.scale*100)} onChange={e => item.setScale(parseInt(e.target.value)/100)} style={{ flex:1, minWidth:0 }} />
+                            <input type="range" min="100" max="1600" value={Math.round(item.scale*100)} onChange={e => item.setScale(parseInt(e.target.value)/100)} style={{ flex:1, minWidth:0 }} />
                           </div>
                           <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:7 }}>
                             <span style={{ width:50, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Rotate</span>
