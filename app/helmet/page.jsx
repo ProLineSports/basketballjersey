@@ -385,7 +385,9 @@ if (uHelmetStripesEnabled > 0.5) {
 
   if (uHelmetStripeDesignEnabled > 0.5) {
     float localU = (stripeX + totalHalfWidth) / max(totalHalfWidth * 2.0, 0.0001);
-    float localV = vHelmetStripePath / max(uHelmetStripeLength, 0.0001);
+    // Front/back orientation for uploaded stripe art should match the flat editor:
+    // top of the preview = front of helmet, bottom = back of helmet.
+    float localV = 1.0 - (vHelmetStripePath / max(uHelmetStripeLength, 0.0001));
     if (localU >= 0.0 && localU <= 1.0 && localV >= 0.0 && localV <= 1.0) {
       vec4 designSample = texture2D(uHelmetStripeDesignMap, vec2(localU, localV));
       diffuseColor.rgb = mix(diffuseColor.rgb, designSample.rgb, stripeMask * designSample.a);
@@ -401,7 +403,7 @@ if (uHelmetStripesEnabled > 0.5) {
       );
   };
 
-  material.customProgramCacheKey = () => 'helmet-standard-three-stripe-surface-v3';
+  material.customProgramCacheKey = () => 'helmet-standard-three-stripe-surface-v4';
   material.needsUpdate = true;
 }
 
