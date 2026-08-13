@@ -243,10 +243,10 @@ function applyPanoramicShellWrapUV(model, roots) {
   };
 }
 
-function applyStripeProjectionAttributes(model, roots, projection) {
+function applyStripeProjectionAttributes(model, roots, projection, xCompression = 1) {
   if (!model || !roots?.length || !projection) return;
 
-  const { centerZ, height, depth, stripePivotY, stripeRawMin, stripeRawMax } = projection;
+  const { centerX, centerZ, height, depth, stripePivotY, stripeRawMin, stripeRawMax } = projection;
   const p = new THREE.Vector3();
   const modelInverse = new THREE.Matrix4().copy(model.matrixWorld).invert();
   const seen = new Set();
@@ -263,7 +263,10 @@ function applyStripeProjectionAttributes(model, roots, projection) {
 
       for (let i = 0; i < pos.count; i++) {
         p.fromBufferAttribute(pos, i).applyMatrix4(localToModel);
-        modelPositionValues[i * 3] = p.x;
+        // Optional X compression expands stripe coverage on small crown hardware without
+        // changing the stripe width on the Shell itself. Top screws use this to prevent a
+        // hairline of the screw edge from peeking out beside the decal.
+        modelPositionValues[i * 3] = centerX + (p.x - centerX) * xCompression;
         modelPositionValues[i * 3 + 1] = p.y;
         modelPositionValues[i * 3 + 2] = p.z;
 
@@ -966,7 +969,8 @@ export default function HelmetBuilder() {
       applyStripeProjectionAttributes(
         model,
         partObjectsRef.current[partKey('Top Screws')] || [],
-        shellProjection
+        shellProjection,
+        0.85 // slightly over-cover the screw heads so no metal edge peeks through
       );
 
       // Install the stripe overlay on the Shell and Top Screws. Bumpers remain separate
