@@ -683,7 +683,7 @@ function createSideLogoTexturePack(image, options = {}) {
   const drawW = image.naturalWidth * scale;
   const drawH = image.naturalHeight * scale;
 
-  baseCtx.clearRect(0, 0, size, size);
+  baseCtx.clearRect(0, 0, canvasWidth, canvasHeight);
   baseCtx.save();
   baseCtx.translate(canvasWidth / 2, canvasHeight / 2);
   if (rotate180) baseCtx.rotate(Math.PI);
@@ -693,8 +693,8 @@ function createSideLogoTexturePack(image, options = {}) {
 
   const makeExpandedAlphaCanvas = (radiusPx, colorHex, opacityValue, cutCenter = false) => {
     const out = document.createElement('canvas');
-    out.width = size;
-    out.height = size;
+    out.width = canvasWidth;
+    out.height = canvasHeight;
     const ctx = out.getContext('2d');
     if (!ctx) return out;
     const radius = Math.max(0, radiusPx);
@@ -719,8 +719,8 @@ function createSideLogoTexturePack(image, options = {}) {
   };
 
   const finalCanvas = document.createElement('canvas');
-  finalCanvas.width = size;
-  finalCanvas.height = size;
+  finalCanvas.width = canvasWidth;
+  finalCanvas.height = canvasHeight;
   const finalCtx = finalCanvas.getContext('2d');
   if (!finalCtx) return null;
   if (strokeEnabled && strokeThickness > 0 && strokeOpacity > 0) {
@@ -2756,11 +2756,23 @@ export default function HelmetBuilder() {
     const model = modelRef.current;
     if (!loaded || !scene || !model) return;
 
-    const bumperRoots = partObjectsRef.current[partKey('Bumpers')] || [];
+    // Bumper logos live on the actual visible Bumpers mesh, never on `Decal Surface`.
+    // The Decal Surface can therefore exclude the bumper regions without affecting these.
+    let bumperRoots = partObjectsRef.current[partKey('Bumpers')] || [];
+    if (!bumperRoots.length) {
+      const bumperKey = partKey('Bumpers');
+      bumperRoots = [];
+      model.traverse(obj => {
+        if (partKey(obj.name) === bumperKey) bumperRoots.push(obj);
+      });
+    }
     const bumperMeshes = collectMeshDescendants(bumperRoots);
     const boundsWorld = getWorldBoundsForRoots(bumperRoots);
     const boundsModel = computeRootsBoundsInModelSpace(model, bumperRoots);
-    if (!bumperMeshes.length || !boundsWorld || !boundsModel) return;
+    if (!bumperMeshes.length || !boundsWorld || !boundsModel) {
+      console.warn('[HelmetBuilder] Visible Bumpers mesh not found; bumper logos cannot be placed.');
+      return;
+    }
 
     const cleanup = () => {
       bumperLogoMeshesRef.current.forEach(mesh => { mesh.parent?.remove(mesh); mesh.geometry?.dispose?.(); });
