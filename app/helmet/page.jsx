@@ -11,20 +11,20 @@ import { DecalGeometry } from 'three/addons/geometries/DecalGeometry.js';
 // `parts` uses the exact mesh/node names exported in SpeedFlex.glb.
 // Shell, Side Screws, and Top Screws intentionally share one color control.
 const ZONES = [
-  { id: 'shell',             label: 'Shell',                    parts: ['Shell', 'Side Screws', 'Top Screws'], defaultColor: '#1a3a6b' },
-  { id: 'bumpers',           label: 'Bumpers',                  parts: ['Bumpers'],                           defaultColor: '#ffffff' },
-  { id: 'facemask',          label: 'Facemask',                 parts: ['Facemask'],                          defaultColor: '#c8102e' },
+  { id: 'shell',             label: 'Shell',                    parts: ['Shell', 'Side Screws', 'Top Screws'], defaultColor: '#151515' },
+  { id: 'bumpers',           label: 'Bumpers',                  parts: ['Bumpers'],                           defaultColor: '#212121' },
+  { id: 'facemask',          label: 'Facemask',                 parts: ['Facemask'],                          defaultColor: '#EFFF00' },
   { id: 'facemaskclips',     label: 'Facemask Clips',           parts: ['Facemask Clips'],                    defaultColor: '#212121' },
-  { id: 'facemaskhardware',  label: 'Facemask Clips Hardware',  parts: ['Facemask Clips Hardware'],           defaultColor: '#aaaaaa' },
+  { id: 'facemaskhardware',  label: 'Facemask Clips Hardware',  parts: ['Facemask Clips Hardware'],           defaultColor: '#151515' },
   { id: 'innerpads',         label: 'Inner Pads',                parts: ['Inner Pads'],                        defaultColor: '#212121' },
   { id: 'visor',             label: 'Visor',                     parts: ['Visor'],                             defaultColor: '#000000' },
-  { id: 'visorclips',        label: 'Visor Clips',               parts: ['Visor Clips'],                       defaultColor: '#212121' },
-  { id: 'chinguardinner',    label: 'Chin Guard - Inner',        parts: ['Chin Guard - Inner'],                defaultColor: '#eaeaea' },
-  { id: 'chinguardouter',    label: 'Chin Guard - Outer',        parts: ['Chin Guard - Outer'],                defaultColor: '#eaeaea' },
-  { id: 'metalparts',        label: 'Metal Parts',               parts: ['Metal Parts'],                       defaultColor: '#888888' },
-  { id: 'strapclipslower',   label: 'Strap Clips - Lower',       parts: ['Strap Clips - Lower'],               defaultColor: '#212121' },
-  { id: 'strapclipsupper',   label: 'Strap Clips - Upper',       parts: ['Strap Clips - Upper'],               defaultColor: '#212121' },
-  { id: 'straps',            label: 'Straps',                    parts: ['Straps'],                            defaultColor: '#eaeaea' },
+  { id: 'visorclips',        label: 'Visor Clips',               parts: ['Visor Clips'],                       defaultColor: '#EFFF00' },
+  { id: 'chinguardinner',    label: 'Chin Guard - Inner',        parts: ['Chin Guard - Inner'],                defaultColor: '#353535' },
+  { id: 'chinguardouter',    label: 'Chin Guard - Outer',        parts: ['Chin Guard - Outer'],                defaultColor: '#EFFF00' },
+  { id: 'metalparts',        label: 'Metal Parts',               parts: ['Metal Parts'],                       defaultColor: '#212121' },
+  { id: 'strapclipslower',   label: 'Strap Clips - Lower',       parts: ['Strap Clips - Lower'],               defaultColor: '#EFFF00' },
+  { id: 'strapclipsupper',   label: 'Strap Clips - Upper',       parts: ['Strap Clips - Upper'],               defaultColor: '#EFFF00' },
+  { id: 'straps',            label: 'Straps',                    parts: ['Straps'],                            defaultColor: '#EFFF00' },
 ];
 
 // Three.js sanitizes glTF node names when it loads them (for example, spaces can
@@ -529,21 +529,43 @@ export default function HelmetBuilder() {
     envTex.dispose();
     pmremGenerator.dispose();
 
-    // Chrome reflection — a real photo reads as chrome far better than a flat gradient,
-    // the same trick as reflecting a stadium/skyline photo onto chrome in Photoshop.
-    // Drop the reflection image at public/chrome-reflection.jpg.
+    // Chrome reflection — use the stadium photo for realistic shapes/highlights, but
+    // desaturate it before PMREM generation so colored seats/signage (especially red)
+    // cannot tint a user's chrome finish. The source JPG itself does not need editing.
     const chromeLoader = new THREE.TextureLoader();
     chromeLoader.load(
       '/chrome-reflection.jpg',
       (tex) => {
-        tex.mapping = THREE.EquirectangularReflectionMapping;
-        tex.colorSpace = THREE.SRGBColorSpace;
+        const image = tex.image;
+        const chromeCanvas = document.createElement('canvas');
+        chromeCanvas.width = image?.naturalWidth || image?.width || 1;
+        chromeCanvas.height = image?.naturalHeight || image?.height || 1;
+        const chromeCtx = chromeCanvas.getContext('2d', { willReadFrequently: true });
+        chromeCtx.drawImage(image, 0, 0, chromeCanvas.width, chromeCanvas.height);
+
+        // Convert every pixel to luminance while preserving the photo's contrast.
+        const pixels = chromeCtx.getImageData(0, 0, chromeCanvas.width, chromeCanvas.height);
+        const data = pixels.data;
+        for (let i = 0; i < data.length; i += 4) {
+          const gray = Math.round(data[i] * 0.2126 + data[i + 1] * 0.7152 + data[i + 2] * 0.0722);
+          data[i] = gray;
+          data[i + 1] = gray;
+          data[i + 2] = gray;
+        }
+        chromeCtx.putImageData(pixels, 0, 0);
+
+        const neutralChromeTex = new THREE.CanvasTexture(chromeCanvas);
+        neutralChromeTex.mapping = THREE.EquirectangularReflectionMapping;
+        neutralChromeTex.colorSpace = THREE.SRGBColorSpace;
+
         const chromePmrem = new THREE.PMREMGenerator(renderer);
         chromePmrem.compileEquirectangularShader();
-        const chromeRT = chromePmrem.fromEquirectangular(tex);
+        const chromeRT = chromePmrem.fromEquirectangular(neutralChromeTex);
         scene.userData.chromeEnvTexture = chromeRT.texture;
+        neutralChromeTex.dispose();
         tex.dispose();
         chromePmrem.dispose();
+
         // Refresh in case Chrome is already the active finish and materials already exist
         applyShellEnvMap(materialsRef.current, scene, finishRef.current);
         applyFacemaskEnvMap(materialsRef.current, scene, facemaskFinishRef.current);
