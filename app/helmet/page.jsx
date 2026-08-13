@@ -2987,7 +2987,7 @@ export default function HelmetBuilder() {
                   ) : (
                     <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:12 }}>
                       <div>
-                        <label htmlFor="side-logo-left-upload" style={{ display:'flex', alignItems:'center', justifyContent:'center', width:'100%', boxSizing:'border-box', background:'rgba(239,255,0,0.08)', border:'1px dashed rgba(239,255,0,0.35)', borderRadius:7, padding:'9px 10px', cursor:'pointer', fontSize:9, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif", color:'#efff00', letterSpacing:'0.06em' }}>UPLOAD LEFT</label>
+                        <label htmlFor="side-logo-left-upload" style={{ display:'flex', alignItems:'center', justifyContent:'center', width:'100%', boxSizing:'border-box', background:'rgba(239,255,0,0.08)', border:'1px dashed rgba(239,255,0,0.35)', borderRadius:7, padding:'9px 10px', cursor:'pointer', fontSize:9, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif", color:'#efff00', letterSpacing:'0.06em' }}>UPLOAD RIGHT</label>
                         {sideLogoLeftPreviewUrl && (
                           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:6, marginTop:8 }}>
                             <div style={{ fontSize:8, color:'#9ca3af', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={sideLogoLeftFileName}>{sideLogoLeftFileName}</div>
@@ -2996,7 +2996,7 @@ export default function HelmetBuilder() {
                         )}
                       </div>
                       <div>
-                        <label htmlFor="side-logo-right-upload" style={{ display:'flex', alignItems:'center', justifyContent:'center', width:'100%', boxSizing:'border-box', background:'rgba(239,255,0,0.08)', border:'1px dashed rgba(239,255,0,0.35)', borderRadius:7, padding:'9px 10px', cursor:'pointer', fontSize:9, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif", color:'#efff00', letterSpacing:'0.06em' }}>UPLOAD RIGHT</label>
+                        <label htmlFor="side-logo-right-upload" style={{ display:'flex', alignItems:'center', justifyContent:'center', width:'100%', boxSizing:'border-box', background:'rgba(239,255,0,0.08)', border:'1px dashed rgba(239,255,0,0.35)', borderRadius:7, padding:'9px 10px', cursor:'pointer', fontSize:9, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif", color:'#efff00', letterSpacing:'0.06em' }}>UPLOAD LEFT</label>
                         {sideLogoRightPreviewUrl && (
                           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:6, marginTop:8 }}>
                             <div style={{ fontSize:8, color:'#9ca3af', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={sideLogoRightFileName}>{sideLogoRightFileName}</div>
@@ -3011,8 +3011,8 @@ export default function HelmetBuilder() {
 
                   <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:12 }}>
                     {[
-                      { side:'left', title:'LEFT SIDE', preview: sideLogoIndependent ? sideLogoLeftPreviewUrl : sideLogoSharedPreviewUrl, visible: sideLogoLeftVisible, setVisible: setSideLogoLeftVisible, mirrored: sideLogoLeftMirror, setMirrored: setSideLogoLeftMirror, rotated: sideLogoLeftRotate180, setRotated: setSideLogoLeftRotate180 },
-                      { side:'right', title:'RIGHT SIDE', preview: sideLogoIndependent ? sideLogoRightPreviewUrl : sideLogoSharedPreviewUrl, visible: sideLogoRightVisible, setVisible: setSideLogoRightVisible, mirrored: sideLogoRightMirror, setMirrored: setSideLogoRightMirror, rotated: sideLogoRightRotate180, setRotated: setSideLogoRightRotate180 },
+                      { side:'left', title:'RIGHT SIDE', preview: sideLogoIndependent ? sideLogoLeftPreviewUrl : sideLogoSharedPreviewUrl, visible: sideLogoLeftVisible, setVisible: setSideLogoLeftVisible, mirrored: sideLogoLeftMirror, setMirrored: setSideLogoLeftMirror, rotated: sideLogoLeftRotate180, setRotated: setSideLogoLeftRotate180 },
+                      { side:'right', title:'LEFT SIDE', preview: sideLogoIndependent ? sideLogoRightPreviewUrl : sideLogoSharedPreviewUrl, visible: sideLogoRightVisible, setVisible: setSideLogoRightVisible, mirrored: sideLogoRightMirror, setMirrored: setSideLogoRightMirror, rotated: sideLogoRightRotate180, setRotated: setSideLogoRightRotate180 },
                     ].map(card => (
                       <div key={card.side} style={{ background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.05)', borderRadius:8, padding:8 }}>
                         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:7 }}>
