@@ -1291,14 +1291,14 @@ export default function HelmetBuilder() {
   const [bumperLogoFrontFileName, setBumperLogoFrontFileName] = useState('');
   const [bumperLogoRearFileName, setBumperLogoRearFileName] = useState('');
   const [bumperLogoFrontScale, setBumperLogoFrontScale] = useState(6.6);
-  const [bumperLogoRearScale, setBumperLogoRearScale] = useState(9.5);
+  const [bumperLogoRearScale, setBumperLogoRearScale] = useState(7.1);
   const [bumperLogoFrontRotation, setBumperLogoFrontRotation] = useState(0);
   const [bumperLogoRearRotation, setBumperLogoRearRotation] = useState(0);
   const [bumperLogoFrontAcross, setBumperLogoFrontAcross] = useState(0);
   const [bumperLogoRearAcross, setBumperLogoRearAcross] = useState(0);
-  const [bumperLogoFrontVertical, setBumperLogoFrontVertical] = useState(0);
-  const [bumperLogoRearVertical, setBumperLogoRearVertical] = useState(0);
-  const [bumperLogoRearCurve, setBumperLogoRearCurve] = useState(-110);
+  const [bumperLogoFrontVertical, setBumperLogoFrontVertical] = useState(-6);
+  const [bumperLogoRearVertical, setBumperLogoRearVertical] = useState(-8);
+  const [bumperLogoRearCurve, setBumperLogoRearCurve] = useState(-135);
   const [bumperLogoRevision, setBumperLogoRevision] = useState(0);
 
   const finishRef = useRef(finish);
@@ -1307,6 +1307,9 @@ export default function HelmetBuilder() {
   useEffect(() => { facemaskFinishRef.current = facemaskFinish; }, [facemaskFinish]);
   const decalFinishRef = useRef(decalFinish);
   useEffect(() => { decalFinishRef.current = decalFinish; }, [decalFinish]);
+  const [bumperLogoFinish, setBumperLogoFinish] = useState('gloss');
+  const bumperLogoFinishRef = useRef(bumperLogoFinish);
+  useEffect(() => { bumperLogoFinishRef.current = bumperLogoFinish; }, [bumperLogoFinish]);
 
   // ── AUTH + CREDITS (Clerk + Supabase) — mirrors /jersey ──
   const [credits, setCredits]             = useState(0);
@@ -1730,8 +1733,10 @@ export default function HelmetBuilder() {
           ...decalOverlayMaterialsRef.current,
           ...stripeCarrierOverlayMaterialsRef.current,
           ...sideLogoMaterialsRef.current.filter(mat => mat.userData?.sideLogoMainMaterial),
-          ...bumperLogoMaterialsRef.current.filter(mat => mat.userData?.bumperLogoMainMaterial),
         ], scene, decalFinishRef.current);
+        applyDecalFinishToMaterials([
+          ...bumperLogoMaterialsRef.current.filter(mat => mat.userData?.bumperLogoMainMaterial),
+        ], scene, bumperLogoFinishRef.current);
       },
       undefined,
       () => console.warn('No /chrome-reflection.jpg found — Chrome will fall back to the gradient env map until you add one.')
@@ -2430,7 +2435,7 @@ export default function HelmetBuilder() {
       });
       mainMat.userData.sideLogoMainMaterial = true;
       installSideLogoSurfaceProjection(mainMat, mainUniforms, `side-logo-main-v2-${side}`);
-      applyDecalFinishToMaterials([mainMat], scene, decalFinishRef.current);
+      applyDecalFinishToMaterials([mainMat], scene, bumperLogoFinishRef.current);
 
       const shadowMeshes = createCarrierSurfaceLogoMeshes(scene, shellMeshes, shadowMat, side, 'Shadow', 39);
       const artworkMeshes = createCarrierSurfaceLogoMeshes(scene, shellMeshes, mainMat, side, 'Artwork', 40);
@@ -2784,11 +2789,12 @@ export default function HelmetBuilder() {
 
     const getBumperHit = (slot, across, vertical) => {
       const isFront = slot === 'front';
+      const xTravel = boundsModel.width * 0.34;
+      const yTravel = boundsModel.height * 0.18;
+      const targetY = boundsModel.centerY + (vertical / 100) * yTravel;
       const localTarget = new THREE.Vector3(
-        boundsModel.centerX + (across / 100) * boundsModel.width * 0.22,
-        isFront
-          ? boundsModel.maxY - boundsModel.height * (0.10 - (vertical / 100) * 0.12)
-          : boundsModel.minY + boundsModel.height * (0.10 + (vertical / 100) * 0.12),
+        boundsModel.centerX + (across / 100) * xTravel,
+        targetY,
         isFront ? boundsModel.maxZ : boundsModel.minZ,
       );
       const targetWorld = model.localToWorld(localTarget.clone());
@@ -2832,7 +2838,7 @@ export default function HelmetBuilder() {
           // A wide canvas gives wordmarks far more useful horizontal pixels than a
           // giant square texture and is cheaper to regenerate.
           textureWidth: isFront ? 3072 : 4096,
-          textureHeight: 1024,
+          textureHeight: isFront ? 1536 : 1024,
           arcCompensation: isFront ? 0 : bumperLogoRearCurve,
         });
         cache = { key:cacheKey, pack:nextPack };
@@ -2841,7 +2847,7 @@ export default function HelmetBuilder() {
       const pack = cache?.pack;
       if (!pack) return;
 
-      let baseHeight = boundsModel.width * (isFront ? 0.060 : 0.072) * scaleValue;
+      let baseHeight = boundsModel.width * (isFront ? 0.068 : 0.080) * scaleValue;
       let baseWidth = baseHeight * THREE.MathUtils.clamp(pack.aspect, 0.55, 5.0);
       // Intentionally no max-width clamp. The physical bumper geometry is the mask,
       // so scaling can continue smoothly until the user visually fills/crops the bumper.
@@ -2885,7 +2891,7 @@ export default function HelmetBuilder() {
         polygonOffset:true, polygonOffsetFactor:-2, polygonOffsetUnits:-2,
       });
       mainMat.userData.bumperLogoMainMaterial = true;
-      applyDecalFinishToMaterials([mainMat], scene, decalFinishRef.current);
+      applyDecalFinishToMaterials([mainMat], scene, bumperLogoFinishRef.current);
 
       const shadowMesh = new THREE.Mesh(shadowGeo, shadowMat);
       shadowMesh.name = `BumperLogo_${slot}_Shadow`;
@@ -2936,9 +2942,15 @@ export default function HelmetBuilder() {
       ...decalOverlayMaterialsRef.current,
       ...stripeCarrierOverlayMaterialsRef.current,
       ...sideLogoMaterialsRef.current.filter(mat => mat.userData?.sideLogoMainMaterial),
-      ...bumperLogoMaterialsRef.current.filter(mat => mat.userData?.bumperLogoMainMaterial),
     ], sceneRef.current, decalFinish);
   }, [loaded, decalFinish]);
+
+  // ── BUMPER LOGO FINISH ─────────────────────────────────────────────────────
+  useEffect(() => {
+    applyDecalFinishToMaterials([
+      ...bumperLogoMaterialsRef.current.filter(mat => mat.userData?.bumperLogoMainMaterial),
+    ], sceneRef.current, bumperLogoFinish);
+  }, [loaded, bumperLogoFinish]);
 
   // ── SHADOW SURFACE ON/OFF ────────────────────────────────────────────────────
   // Was previously just UI state with nothing reading it — floor/wall never actually
@@ -3646,9 +3658,30 @@ export default function HelmetBuilder() {
 
                 <CollapsibleSection title="BUMPER LOGOS">
                   <div style={{ fontSize:10, color:'#6b7280', lineHeight:1.5, marginBottom:10 }}>
-                    Add independent logos to the front and rear bumpers. Artwork can scale continuously across the bumper width and remains clipped by the physical bumper geometry. Rear wordmarks include an adjustable Curve correction to counter the visual smile created by the curved bumper. Both use high-resolution decal textures, the active Decal Finish, and the same subtle raised-vinyl effect.
+                    Add independent logos to the front and rear bumpers. Artwork can scale continuously across the bumper width and remains clipped by the physical bumper geometry. Rear wordmarks include an adjustable Curve correction to counter the visual smile created by the curved bumper. Bumper logos use their own independent finish control and the same subtle raised-vinyl effect.
                   </div>
                   {bumperLogoError && <div style={{ marginBottom:10, fontSize:10, color:'#ef4444', lineHeight:1.4 }}>{bumperLogoError}</div>}
+                  <SectionLabel>Bumper Logo Finish</SectionLabel>
+                  <div style={{ display:'grid', gridTemplateColumns:'repeat(4, minmax(0,1fr))', gap:6, marginBottom:10 }}>
+                    {FINISHES.map(f => (
+                      <button
+                        key={`bumper-finish-${f.id}`}
+                        onClick={() => setBumperLogoFinish(f.id)}
+                        style={{
+                          background: bumperLogoFinish===f.id ? 'rgba(239,255,0,0.10)' : 'rgba(255,255,255,0.04)',
+                          border: bumperLogoFinish===f.id ? '1px solid rgba(239,255,0,0.35)' : '1px solid rgba(255,255,255,0.10)',
+                          borderRadius: 6,
+                          padding:'7px 4px',
+                          cursor:'pointer',
+                          color: bumperLogoFinish===f.id ? '#efff00' : '#9ca3af',
+                          fontSize:9,
+                          fontWeight:800,
+                          fontFamily:"'Barlow Condensed',sans-serif",
+                          letterSpacing:'0.06em'
+                        }}
+                      >{f.label}</button>
+                    ))}
+                  </div>
                   <input id="front-bumper-logo-upload" type="file" accept="image/png,image/jpeg" onChange={handleFrontBumperLogoUpload} style={{ display:'none' }} />
                   <input id="rear-bumper-logo-upload" type="file" accept="image/png,image/jpeg" onChange={handleRearBumperLogoUpload} style={{ display:'none' }} />
 
@@ -3688,11 +3721,11 @@ export default function HelmetBuilder() {
                           </div>
                           <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:7 }}>
                             <span style={{ width:50, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Across</span>
-                            <input type="range" min="-50" max="50" value={item.across} onChange={e => item.setAcross(parseInt(e.target.value))} style={{ flex:1, minWidth:0 }} />
+                            <input type="range" min="-80" max="80" value={item.across} onChange={e => item.setAcross(parseInt(e.target.value))} style={{ flex:1, minWidth:0 }} />
                           </div>
                           <div style={{ display:'flex', alignItems:'center', gap:8 }}>
                             <span style={{ width:50, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Up / Down</span>
-                            <input type="range" min="-50" max="50" value={item.vertical} onChange={e => item.setVertical(parseInt(e.target.value))} style={{ flex:1, minWidth:0 }} />
+                            <input type="range" min="-80" max="80" value={item.vertical} onChange={e => item.setVertical(parseInt(e.target.value))} style={{ flex:1, minWidth:0 }} />
                           </div>
                           {item.slot === 'rear' && (
                             <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:7 }}>
