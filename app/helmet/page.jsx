@@ -307,6 +307,8 @@ function installShellStripeOverlay(material, stripeUniforms) {
     shader.uniforms.uHelmetStripeLeftColor = stripeUniforms.leftColor;
     shader.uniforms.uHelmetStripeCenterColor = stripeUniforms.centerColor;
     shader.uniforms.uHelmetStripeRightColor = stripeUniforms.rightColor;
+    shader.uniforms.uHelmetStripeDesignEnabled = stripeUniforms.designEnabled;
+    shader.uniforms.uHelmetStripeDesignMap = stripeUniforms.designMap;
 
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -336,7 +338,9 @@ uniform float uHelmetStripeLength;
 uniform float uHelmetStripeCenterX;
 uniform vec3 uHelmetStripeLeftColor;
 uniform vec3 uHelmetStripeCenterColor;
-uniform vec3 uHelmetStripeRightColor;`
+uniform vec3 uHelmetStripeRightColor;
+uniform float uHelmetStripeDesignEnabled;
+uniform sampler2D uHelmetStripeDesignMap;`
       )
       .replace(
         '#include <map_fragment>',
@@ -374,6 +378,15 @@ if (uHelmetStripesEnabled > 0.5) {
   // Applied after the wrap texture is sampled, so decals always sit visually above it.
   diffuseColor.rgb = mix(diffuseColor.rgb, stripeColor, stripeMask);
 
+  if (uHelmetStripeDesignEnabled > 0.5) {
+    float localU = (stripeX + totalHalfWidth) / max(totalHalfWidth * 2.0, 0.0001);
+    float localV = vHelmetStripePath / max(uHelmetStripeLength, 0.0001);
+    if (localU >= 0.0 && localU <= 1.0 && localV >= 0.0 && localV <= 1.0) {
+      vec4 designSample = texture2D(uHelmetStripeDesignMap, vec2(localU, localV));
+      diffuseColor.rgb = mix(diffuseColor.rgb, designSample.rgb, stripeMask * designSample.a);
+    }
+  }
+
   // A very narrow edge contrast gives a slight vinyl/bevel read without lifting geometry
   // away from the shell surface.
   float edgeDistance = abs(abs(stripeX) - totalHalfWidth);
@@ -383,7 +396,7 @@ if (uHelmetStripesEnabled > 0.5) {
       );
   };
 
-  material.customProgramCacheKey = () => 'helmet-standard-three-stripe-surface-v1';
+  material.customProgramCacheKey = () => 'helmet-standard-three-stripe-surface-v2';
   material.needsUpdate = true;
 }
 
@@ -565,16 +578,25 @@ export default function HelmetBuilder() {
   const wrapTextureRef   = useRef(null);
   const wrapObjectUrlRef = useRef(null);
 
+  // Uploaded custom artwork for the stripe zone. This is rendered into a tall canvas
+  // and sampled inside the stripe area so it stays contained by the current stripe width/length.
+  const stripeDesignImageRef     = useRef(null);
+  const stripeDesignCanvasRef    = useRef(null);
+  const stripeDesignTextureRef   = useRef(null);
+  const stripeDesignObjectUrlRef = useRef(null);
+
   // Shared shader-uniform objects for Shell stripe decals. The renderer keeps references
   // to these objects across material recompiles (wrap on/off, finish changes, etc.).
   const stripeUniformsRef = useRef({
-    enabled:     { value: 0 },
-    widthScale:  { value: 1 },
-    length:      { value: 1 },
-    centerX:     { value: 0 },
-    leftColor:   { value: new THREE.Color('#efff00') },
-    centerColor: { value: new THREE.Color('#eaeaea') },
-    rightColor:  { value: new THREE.Color('#efff00') },
+    enabled:       { value: 0 },
+    widthScale:    { value: 1 },
+    length:        { value: 1 },
+    centerX:       { value: 0 },
+    leftColor:     { value: new THREE.Color('#efff00') },
+    centerColor:   { value: new THREE.Color('#eaeaea') },
+    rightColor:    { value: new THREE.Color('#efff00') },
+    designEnabled: { value: 0 },
+    designMap:     { value: null },
   });
 
   const [activeTab, setActiveTab]     = useState('colors');
@@ -610,6 +632,16 @@ export default function HelmetBuilder() {
   const [helmetStripeLeftColor, setHelmetStripeLeftColor]     = useState('#efff00');
   const [helmetStripeCenterColor, setHelmetStripeCenterColor] = useState('#eaeaea');
   const [helmetStripeRightColor, setHelmetStripeRightColor]   = useState('#efff00');
+  const [helmetStripeDesignEnabled, setHelmetStripeDesignEnabled] = useState(false);
+  const [helmetStripeDesignPreviewUrl, setHelmetStripeDesignPreviewUrl] = useState(null);
+  const [helmetStripeDesignFileName, setHelmetStripeDesignFileName] = useState('');
+  const [helmetStripeDesignError, setHelmetStripeDesignError] = useState('');
+  const [helmetStripeDesignScale, setHelmetStripeDesignScale] = useState(1);
+  const [helmetStripeDesignRotation, setHelmetStripeDesignRotation] = useState(0);
+  const [helmetStripeDesignOffsetX, setHelmetStripeDesignOffsetX] = useState(0);
+  const [helmetStripeDesignOffsetY, setHelmetStripeDesignOffsetY] = useState(0);
+  const [helmetStripeDesignOpacity, setHelmetStripeDesignOpacity] = useState(1);
+  const [helmetStripeDesignRevision, setHelmetStripeDesignRevision] = useState(0);
 
   const finishRef = useRef(finish);
   useEffect(() => { finishRef.current = finish; }, [finish]);
@@ -715,6 +747,64 @@ export default function HelmetBuilder() {
   useEffect(() => () => {
     if (wrapObjectUrlRef.current) URL.revokeObjectURL(wrapObjectUrlRef.current);
     if (wrapTextureRef.current) wrapTextureRef.current.dispose();
+  }, []);
+
+  // ── STRIPE DESIGN UPLOAD + CONTROLS ────────────────────────────────────────
+  const resetStripeDesignTransform = useCallback(() => {
+    setHelmetStripeDesignScale(1);
+    setHelmetStripeDesignRotation(0);
+    setHelmetStripeDesignOffsetX(0);
+    setHelmetStripeDesignOffsetY(0);
+    setHelmetStripeDesignOpacity(1);
+  }, []);
+
+  const removeStripeDesign = useCallback(() => {
+    if (stripeDesignObjectUrlRef.current) {
+      URL.revokeObjectURL(stripeDesignObjectUrlRef.current);
+      stripeDesignObjectUrlRef.current = null;
+    }
+    stripeDesignImageRef.current = null;
+    setHelmetStripeDesignPreviewUrl(null);
+    setHelmetStripeDesignFileName('');
+    setHelmetStripeDesignError('');
+    setHelmetStripeDesignEnabled(false);
+    resetStripeDesignTransform();
+    setHelmetStripeDesignRevision(r => r + 1);
+  }, [resetStripeDesignTransform]);
+
+  const handleStripeDesignUpload = useCallback((event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    if (!['image/png', 'image/jpeg'].includes(file.type)) {
+      setHelmetStripeDesignError('Please upload a PNG or JPEG image.');
+      return;
+    }
+
+    const objectUrl = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      if (stripeDesignObjectUrlRef.current) URL.revokeObjectURL(stripeDesignObjectUrlRef.current);
+      stripeDesignObjectUrlRef.current = objectUrl;
+      stripeDesignImageRef.current = img;
+      setHelmetStripeDesignPreviewUrl(objectUrl);
+      setHelmetStripeDesignFileName(file.name);
+      setHelmetStripeDesignError('');
+      setHelmetStripeDesignEnabled(true);
+      resetStripeDesignTransform();
+      setHelmetStripeDesignRevision(r => r + 1);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      setHelmetStripeDesignError('That image could not be read. Please try another PNG or JPEG.');
+    };
+    img.src = objectUrl;
+  }, [resetStripeDesignTransform]);
+
+  useEffect(() => () => {
+    if (stripeDesignObjectUrlRef.current) URL.revokeObjectURL(stripeDesignObjectUrlRef.current);
+    if (stripeDesignTextureRef.current) stripeDesignTextureRef.current.dispose();
   }, []);
 
   // ── THREE.JS SETUP ──────────────────────────────────────────────────────────
@@ -1110,6 +1200,61 @@ export default function HelmetBuilder() {
   }, [loaded, colors.shell, wrapEnabled, wrapRevision, wrapScale, wrapRotation, wrapOffsetX, wrapOffsetY, wrapOpacity]);
 
 
+  // ── STRIPE DESIGN TEXTURE ───────────────────────────────────────────────────
+  useEffect(() => {
+    const uniforms = stripeUniformsRef.current;
+
+    if (!helmetStripeDesignEnabled || !stripeDesignImageRef.current) {
+      uniforms.designEnabled.value = 0;
+      uniforms.designMap.value = stripeDesignTextureRef.current || null;
+      return;
+    }
+
+    const img = stripeDesignImageRef.current;
+    let canvas = stripeDesignCanvasRef.current;
+    if (!canvas) {
+      canvas = document.createElement('canvas');
+      canvas.width = 1024;
+      canvas.height = 3072;
+      stripeDesignCanvasRef.current = canvas;
+    }
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const w = canvas.width;
+    const h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    // Fit inside the available stripe zone by default so the full uploaded design is visible.
+    const containScale = Math.min(w / img.naturalWidth, h / img.naturalHeight);
+    const drawScale = containScale * helmetStripeDesignScale;
+    const drawW = img.naturalWidth * drawScale;
+    const drawH = img.naturalHeight * drawScale;
+    const baseX = w / 2 + (helmetStripeDesignOffsetX / 100) * w;
+    const baseY = h / 2 + (helmetStripeDesignOffsetY / 100) * h;
+
+    ctx.save();
+    ctx.translate(baseX, baseY);
+    ctx.rotate((helmetStripeDesignRotation * Math.PI) / 180);
+    ctx.globalAlpha = helmetStripeDesignOpacity;
+    ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
+    ctx.restore();
+
+    let texture = stripeDesignTextureRef.current;
+    if (!texture) {
+      texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.wrapS = THREE.ClampToEdgeWrapping;
+      texture.wrapT = THREE.ClampToEdgeWrapping;
+      stripeDesignTextureRef.current = texture;
+    }
+    texture.needsUpdate = true;
+
+    uniforms.designMap.value = texture;
+    uniforms.designEnabled.value = 1;
+  }, [loaded, helmetStripeDesignEnabled, helmetStripeDesignRevision, helmetStripeDesignScale, helmetStripeDesignRotation, helmetStripeDesignOffsetX, helmetStripeDesignOffsetY, helmetStripeDesignOpacity]);
+
   // ── STANDARD 3-STRIPE DECAL ─────────────────────────────────────────────────
   useEffect(() => {
     const uniforms = stripeUniformsRef.current;
@@ -1119,7 +1264,8 @@ export default function HelmetBuilder() {
     uniforms.leftColor.value.set(helmetStripeLeftColor);
     uniforms.centerColor.value.set(helmetStripeCenterColor);
     uniforms.rightColor.value.set(helmetStripeRightColor);
-  }, [loaded, helmetStripesEnabled, helmetStripeWidth, helmetStripeLength, helmetStripeLeftColor, helmetStripeCenterColor, helmetStripeRightColor]);
+    uniforms.designEnabled.value = helmetStripeDesignEnabled && stripeDesignImageRef.current ? 1 : 0;
+  }, [loaded, helmetStripesEnabled, helmetStripeWidth, helmetStripeLength, helmetStripeLeftColor, helmetStripeCenterColor, helmetStripeRightColor, helmetStripeDesignEnabled]);
 
   // ── SHADOW SURFACE ON/OFF ────────────────────────────────────────────────────
   // Was previously just UI state with nothing reading it — floor/wall never actually
@@ -1581,6 +1727,85 @@ export default function HelmetBuilder() {
                   <ColorSwatch color={helmetStripeLeftColor} onChange={setHelmetStripeLeftColor} label="Left Stripe" />
                   <ColorSwatch color={helmetStripeCenterColor} onChange={setHelmetStripeCenterColor} label="Center Stripe" />
                   <ColorSwatch color={helmetStripeRightColor} onChange={setHelmetStripeRightColor} label="Right Stripe" />
+
+                  <div style={{ height:1, background:'rgba(255,255,255,0.06)', margin:'12px 0 10px' }} />
+                  <SectionLabel>Custom Stripe Design</SectionLabel>
+                  <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.5, marginBottom:10 }}>
+                    Upload a PNG or JPEG to place artwork inside the stripe zone. For a full-width full-length design, ideal artwork is around 1200×3600px or larger, but narrower or shorter artwork is perfectly fine too.
+                  </div>
+                  <div style={{ fontSize:8, color:'#4b5563', lineHeight:1.45, marginBottom:10 }}>
+                    The current Width and Length sliders define the available stripe area on the helmet. Your uploaded design fits inside that live area and can be repositioned below.
+                  </div>
+
+                  <input id="helmet-stripe-design-upload" type="file" accept="image/png,image/jpeg" onChange={handleStripeDesignUpload} style={{ display:'none' }} />
+                  <label htmlFor="helmet-stripe-design-upload" style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:7, width:'100%', boxSizing:'border-box', background:'rgba(239,255,0,0.08)', border:'1px dashed rgba(239,255,0,0.35)', borderRadius:7, padding:'10px 12px', cursor:'pointer', fontSize:10, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif", color:'#efff00', letterSpacing:'0.06em' }}>
+                    <span style={{ fontSize:14 }}>＋</span>{helmetStripeDesignPreviewUrl ? 'REPLACE STRIPE DESIGN' : 'UPLOAD STRIPE DESIGN'}
+                  </label>
+
+                  {helmetStripeDesignError && (
+                    <div style={{ marginTop:8, fontSize:10, color:'#ef4444', lineHeight:1.4 }}>{helmetStripeDesignError}</div>
+                  )}
+
+                  {helmetStripeDesignPreviewUrl && (
+                    <div style={{ marginTop:12 }}>
+                      <div style={{ display:'flex', justifyContent:'space-between', gap:8, alignItems:'center', marginBottom:7 }}>
+                        <div style={{ minWidth:0 }}>
+                          <div style={{ fontSize:10, color:'#9ca3af', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={helmetStripeDesignFileName}>{helmetStripeDesignFileName}</div>
+                          <div style={{ fontSize:8, color:'#4b5563', marginTop:2 }}>STRIPE DESIGN VIEW</div>
+                        </div>
+                        <div style={{ display:'flex', gap:5, flexShrink:0 }}>
+                          <button onClick={() => setHelmetStripeDesignEnabled(v => !v)} style={{ background:helmetStripeDesignEnabled?'rgba(239,255,0,0.1)':'rgba(255,255,255,0.04)', border:helmetStripeDesignEnabled?'1px solid rgba(239,255,0,0.35)':'1px solid rgba(255,255,255,0.1)', borderRadius:5, padding:'4px 7px', cursor:'pointer', color:helmetStripeDesignEnabled?'#efff00':'#6b7280', fontSize:8, fontWeight:700, fontFamily:"'Barlow Condensed',sans-serif" }}>{helmetStripeDesignEnabled?'ON':'OFF'}</button>
+                          <button onClick={removeStripeDesign} style={{ background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:5, padding:'4px 7px', cursor:'pointer', color:'#ef4444', fontSize:8, fontWeight:700, fontFamily:"'Barlow Condensed',sans-serif" }}>REMOVE</button>
+                        </div>
+                      </div>
+
+                      <div style={{ position:'relative', width:'100%', aspectRatio:'1 / 2.8', overflow:'hidden', borderRadius:8, border:'1px solid rgba(255,255,255,0.12)', background:'rgba(0,0,0,0.2)' }}>
+                        <div style={{ position:'absolute', inset:0, display:'grid', gridTemplateColumns:'1fr 1fr 1fr' }}>
+                          <div style={{ background:helmetStripeLeftColor, opacity:0.75 }} />
+                          <div style={{ background:helmetStripeCenterColor, opacity:0.85 }} />
+                          <div style={{ background:helmetStripeRightColor, opacity:0.75 }} />
+                        </div>
+                        <div style={{ position:'absolute', top:0, bottom:0, left:'33.333%', borderLeft:'1px dashed rgba(0,0,0,0.35)', pointerEvents:'none' }} />
+                        <div style={{ position:'absolute', top:0, bottom:0, left:'66.666%', borderLeft:'1px dashed rgba(0,0,0,0.35)', pointerEvents:'none' }} />
+                        <img
+                          src={helmetStripeDesignPreviewUrl}
+                          alt="Uploaded stripe design preview"
+                          style={{ position:'absolute', width:'100%', height:'100%', objectFit:'contain', left:`calc(50% + ${helmetStripeDesignOffsetX}%)`, top:`calc(50% + ${helmetStripeDesignOffsetY}%)`, transform:`translate(-50%,-50%) rotate(${helmetStripeDesignRotation}deg) scale(${helmetStripeDesignScale})`, transformOrigin:'center', opacity:helmetStripeDesignEnabled?helmetStripeDesignOpacity:0.25, filter:helmetStripeDesignEnabled?'none':'grayscale(1)', pointerEvents:'none', userSelect:'none' }}
+                        />
+                        <div style={{ position:'absolute', top:5, left:'50%', transform:'translateX(-50%)', background:'rgba(0,0,0,0.68)', border:'1px solid rgba(239,255,0,0.4)', borderRadius:4, padding:'2px 6px', color:'#efff00', fontSize:8, fontWeight:900, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.07em', pointerEvents:'none', whiteSpace:'nowrap' }}>FRONT</div>
+                        <div style={{ position:'absolute', left:'50%', bottom:5, transform:'translateX(-50%)', background:'rgba(0,0,0,0.68)', borderRadius:4, padding:'2px 6px', color:'#d1d5db', fontSize:8, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.05em', pointerEvents:'none', whiteSpace:'nowrap' }}>BACK</div>
+                      </div>
+
+                      <div style={{ marginTop:11 }}>
+                        <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
+                          <span style={{ width:70, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Scale</span>
+                          <input type="range" min="25" max="300" value={Math.round(helmetStripeDesignScale*100)} onChange={e => setHelmetStripeDesignScale(parseInt(e.target.value)/100)} style={{ flex:1 }} />
+                          <span style={{ width:34, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{Math.round(helmetStripeDesignScale*100)}%</span>
+                        </div>
+                        <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
+                          <span style={{ width:70, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Rotate</span>
+                          <input type="range" min="-180" max="180" value={helmetStripeDesignRotation} onChange={e => setHelmetStripeDesignRotation(parseInt(e.target.value))} style={{ flex:1 }} />
+                          <span style={{ width:34, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{helmetStripeDesignRotation}°</span>
+                        </div>
+                        <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
+                          <span style={{ width:70, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Across Stripe</span>
+                          <input type="range" min="-50" max="50" value={helmetStripeDesignOffsetX} onChange={e => setHelmetStripeDesignOffsetX(parseInt(e.target.value))} style={{ flex:1 }} />
+                          <span style={{ width:34, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{helmetStripeDesignOffsetX}</span>
+                        </div>
+                        <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
+                          <span style={{ width:70, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Front / Back</span>
+                          <input type="range" min="-50" max="50" value={helmetStripeDesignOffsetY} onChange={e => setHelmetStripeDesignOffsetY(parseInt(e.target.value))} style={{ flex:1 }} />
+                          <span style={{ width:34, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{helmetStripeDesignOffsetY}</span>
+                        </div>
+                        <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
+                          <span style={{ width:70, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Opacity</span>
+                          <input type="range" min="0" max="100" value={Math.round(helmetStripeDesignOpacity*100)} onChange={e => setHelmetStripeDesignOpacity(parseInt(e.target.value)/100)} style={{ flex:1 }} />
+                          <span style={{ width:34, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{Math.round(helmetStripeDesignOpacity*100)}%</span>
+                        </div>
+                        <button onClick={resetStripeDesignTransform} style={{ width:'100%', background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:6, padding:'7px 8px', cursor:'pointer', color:'#9ca3af', fontSize:9, fontWeight:700, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.05em' }}>RESET POSITION</button>
+                      </div>
+                    </div>
+                  )}
 
                   <div style={{ marginTop:8, fontSize:8, color:'#4b5563', lineHeight:1.4 }}>
                     100% reaches the full rear extent below the bumper. Reducing Length moves only the rear ends forward toward the crown while keeping the front aligned.
