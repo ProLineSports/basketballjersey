@@ -804,6 +804,7 @@ export default function HelmetBuilder() {
 
   const mountRef    = useRef(null);
   const sceneRef    = useRef(null);
+  const modelRef    = useRef(null);
   const cameraRef   = useRef(null);
   const rendererRef = useRef(null);
   const controlsRef = useRef(null);
@@ -1344,6 +1345,7 @@ export default function HelmetBuilder() {
     const loader = new GLTFLoader();
     loader.load('/SpeedFlex.glb', (gltf) => {
       const model = gltf.scene;
+      modelRef.current = model;
 
       // Smooth normals + enable shadows
       model.traverse(child => {
@@ -1487,6 +1489,13 @@ export default function HelmetBuilder() {
       decalOverlayMaterialsRef.current.forEach(mat => mat.dispose());
       decalOverlayMeshesRef.current = [];
       decalOverlayMaterialsRef.current = [];
+      sideLogoMeshesRef.current.forEach(mesh => mesh.parent?.remove(mesh));
+      sideLogoMaterialsRef.current.forEach(mat => mat.dispose());
+      sideLogoTexturesRef.current.forEach(tex => tex.dispose?.());
+      sideLogoMeshesRef.current = [];
+      sideLogoMaterialsRef.current = [];
+      sideLogoTexturesRef.current = [];
+      modelRef.current = null;
       renderer.dispose();
       if (el.contains(renderer.domElement)) el.removeChild(renderer.domElement);
     };
