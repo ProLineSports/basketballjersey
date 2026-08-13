@@ -2550,8 +2550,7 @@ export default function HelmetBuilder() {
                     <SectionLabel>Glitter Intensity</SectionLabel>
                     <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:10 }}>
                       <span style={{ fontSize:10, color:'#9ca3af', minWidth:48 }}>Amount</span>
-                      <input type="range" min="0" max="100" value={Math.round(glitter*100)} onChange={e => setGlitter(parseInt(e.target.value)/100)} style={{ flex:1 }} />
-                      <span style={{ fontSize:11, color:'#efff00', fontFamily:"'Barlow Condensed',sans-serif", width:34, textAlign:'right' }}>{Math.round(glitter*100)}%</span>
+                      <input type="range" min="0" max="100" value={Math.round(glitter*100)} onChange={e => setGlitter(parseInt(e.target.value)/100)} style={{ flex:1, minWidth:0 }} />
                     </div>
                     <ColorSwatch color={glitterColor} onChange={setGlitterColor} label="Sparkle Color" />
                   </div>
@@ -2657,28 +2656,23 @@ export default function HelmetBuilder() {
                     <div style={{ marginTop:11 }}>
                       <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:8 }}>
                         <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Scale</span>
-                        <input type="range" min="25" max="300" value={Math.round(wrapScale*100)} onChange={e => setWrapScale(parseInt(e.target.value)/100)} style={{ flex:1 }} />
-                        <span style={{ width:34, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{Math.round(wrapScale*100)}%</span>
+                        <input type="range" min="25" max="300" value={Math.round(wrapScale*100)} onChange={e => setWrapScale(parseInt(e.target.value)/100)} style={{ flex:1, minWidth:0 }} />
                       </div>
                       <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:8 }}>
                         <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Rotate</span>
-                        <input type="range" min="-180" max="180" value={wrapRotation} onChange={e => setWrapRotation(parseInt(e.target.value))} style={{ flex:1 }} />
-                        <span style={{ width:34, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{wrapRotation}°</span>
+                        <input type="range" min="-180" max="180" value={wrapRotation} onChange={e => setWrapRotation(parseInt(e.target.value))} style={{ flex:1, minWidth:0 }} />
                       </div>
                       <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:8 }}>
                         <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Around Helmet</span>
-                        <input type="range" min="-50" max="50" value={wrapOffsetX} onChange={e => setWrapOffsetX(parseInt(e.target.value))} style={{ flex:1 }} />
-                        <span style={{ width:34, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{wrapOffsetX}</span>
+                        <input type="range" min="-50" max="50" value={wrapOffsetX} onChange={e => setWrapOffsetX(parseInt(e.target.value))} style={{ flex:1, minWidth:0 }} />
                       </div>
                       <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:8 }}>
                         <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Up / Down</span>
-                        <input type="range" min="-50" max="50" value={wrapOffsetY} onChange={e => setWrapOffsetY(parseInt(e.target.value))} style={{ flex:1 }} />
-                        <span style={{ width:34, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{wrapOffsetY}</span>
+                        <input type="range" min="-50" max="50" value={wrapOffsetY} onChange={e => setWrapOffsetY(parseInt(e.target.value))} style={{ flex:1, minWidth:0 }} />
                       </div>
                       <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
                         <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Opacity</span>
-                        <input type="range" min="0" max="100" value={Math.round(wrapOpacity*100)} onChange={e => setWrapOpacity(parseInt(e.target.value)/100)} style={{ flex:1 }} />
-                        <span style={{ width:34, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{Math.round(wrapOpacity*100)}%</span>
+                        <input type="range" min="0" max="100" value={Math.round(wrapOpacity*100)} onChange={e => setWrapOpacity(parseInt(e.target.value)/100)} style={{ flex:1, minWidth:0 }} />
                       </div>
                       <button onClick={resetWrapTransform} style={{ width:'100%', background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:6, padding:'7px 8px', cursor:'pointer', color:'#9ca3af', fontSize:9, fontWeight:700, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.05em' }}>RESET POSITION</button>
                     </div>
@@ -2708,13 +2702,11 @@ export default function HelmetBuilder() {
 
                   <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:10 }}>
                     <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Width</span>
-                    <input type="range" min="70" max="200" value={Math.round(helmetStripeWidth*100)} onChange={e => setHelmetStripeWidth(parseInt(e.target.value)/100)} style={{ flex:1 }} />
-                    <span style={{ width:34, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{Math.round(helmetStripeWidth*100)}%</span>
+                    <input type="range" min="70" max="200" value={Math.round(helmetStripeWidth*100)} onChange={e => setHelmetStripeWidth(parseInt(e.target.value)/100)} style={{ flex:1, minWidth:0 }} />
                   </div>
                   <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:8 }}>
                     <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Length</span>
-                    <input type="range" min="40" max="100" value={Math.round(helmetStripeLength*100)} onChange={e => setHelmetStripeLength(parseInt(e.target.value)/100)} style={{ flex:1 }} />
-                    <span style={{ width:34, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{Math.round(helmetStripeLength*100)}%</span>
+                    <input type="range" min="40" max="100" value={Math.round(helmetStripeLength*100)} onChange={e => setHelmetStripeLength(parseInt(e.target.value)/100)} style={{ flex:1, minWidth:0 }} />
                   </div>
 
                   <div style={{ height:1, background:'rgba(255,255,255,0.06)', margin:'12px 0 10px' }} />
@@ -2778,28 +2770,23 @@ export default function HelmetBuilder() {
                       <div style={{ marginTop:11 }}>
                         <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
                           <span style={{ width:60, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Scale</span>
-                          <input type="range" min="25" max="300" value={Math.round(helmetStripeDesignScale*100)} onChange={e => setHelmetStripeDesignScale(parseInt(e.target.value)/100)} style={{ flex:1 }} />
-                          <span style={{ width:42, flexShrink:0, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{Math.round(helmetStripeDesignScale*100)}%</span>
+                          <input type="range" min="25" max="300" value={Math.round(helmetStripeDesignScale*100)} onChange={e => setHelmetStripeDesignScale(parseInt(e.target.value)/100)} style={{ flex:1, minWidth:0 }} />
                         </div>
                         <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
                           <span style={{ width:60, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Rotate</span>
-                          <input type="range" min="-180" max="180" value={helmetStripeDesignRotation} onChange={e => setHelmetStripeDesignRotation(parseInt(e.target.value))} style={{ flex:1 }} />
-                          <span style={{ width:42, flexShrink:0, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{helmetStripeDesignRotation}°</span>
+                          <input type="range" min="-180" max="180" value={helmetStripeDesignRotation} onChange={e => setHelmetStripeDesignRotation(parseInt(e.target.value))} style={{ flex:1, minWidth:0 }} />
                         </div>
                         <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
                           <span style={{ width:60, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Across</span>
-                          <input type="range" min="-50" max="50" value={helmetStripeDesignOffsetX} onChange={e => setHelmetStripeDesignOffsetX(parseInt(e.target.value))} style={{ flex:1 }} />
-                          <span style={{ width:42, flexShrink:0, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{helmetStripeDesignOffsetX}</span>
+                          <input type="range" min="-50" max="50" value={helmetStripeDesignOffsetX} onChange={e => setHelmetStripeDesignOffsetX(parseInt(e.target.value))} style={{ flex:1, minWidth:0 }} />
                         </div>
                         <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
                           <span style={{ width:60, flexShrink:0, fontSize:9, color:'#9ca3af' }}>F / B</span>
-                          <input type="range" min="-50" max="50" value={helmetStripeDesignOffsetY} onChange={e => setHelmetStripeDesignOffsetY(parseInt(e.target.value))} style={{ flex:1 }} />
-                          <span style={{ width:42, flexShrink:0, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{helmetStripeDesignOffsetY}</span>
+                          <input type="range" min="-50" max="50" value={helmetStripeDesignOffsetY} onChange={e => setHelmetStripeDesignOffsetY(parseInt(e.target.value))} style={{ flex:1, minWidth:0 }} />
                         </div>
                         <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
                           <span style={{ width:60, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Opacity</span>
-                          <input type="range" min="0" max="100" value={Math.round(helmetStripeDesignOpacity*100)} onChange={e => setHelmetStripeDesignOpacity(parseInt(e.target.value)/100)} style={{ flex:1 }} />
-                          <span style={{ width:42, flexShrink:0, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{Math.round(helmetStripeDesignOpacity*100)}%</span>
+                          <input type="range" min="0" max="100" value={Math.round(helmetStripeDesignOpacity*100)} onChange={e => setHelmetStripeDesignOpacity(parseInt(e.target.value)/100)} style={{ flex:1, minWidth:0 }} />
                         </div>
                         <button onClick={resetStripeDesignTransform} style={{ width:'100%', background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:6, padding:'7px 8px', cursor:'pointer', color:'#9ca3af', fontSize:9, fontWeight:700, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.05em' }}>RESET POSITION</button>
                       </div>
