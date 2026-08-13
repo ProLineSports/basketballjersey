@@ -301,6 +301,7 @@ function installShellStripeOverlay(material, stripeUniforms) {
 
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uHelmetStripesEnabled = stripeUniforms.enabled;
+    shader.uniforms.uHelmetStripeBaseEnabled = stripeUniforms.baseEnabled;
     shader.uniforms.uHelmetStripeWidthScale = stripeUniforms.widthScale;
     shader.uniforms.uHelmetStripeLength = stripeUniforms.length;
     shader.uniforms.uHelmetStripeCenterX = stripeUniforms.centerX;
@@ -333,6 +334,7 @@ vHelmetStripePath = helmetStripePath;`
 varying vec3 vHelmetModelPosition;
 varying float vHelmetStripePath;
 uniform float uHelmetStripesEnabled;
+uniform float uHelmetStripeBaseEnabled;
 uniform float uHelmetStripeWidthScale;
 uniform float uHelmetStripeLength;
 uniform float uHelmetStripeCenterX;
@@ -375,8 +377,11 @@ if (uHelmetStripesEnabled > 0.5) {
     stripeColor = uHelmetStripeRightColor;
   }
 
-  // Applied after the wrap texture is sampled, so decals always sit visually above it.
-  diffuseColor.rgb = mix(diffuseColor.rgb, stripeColor, stripeMask);
+  // Base preset stripes are optional. This lets a custom stripe design be used by
+  // itself without forcing the preset 3-color stripes underneath.
+  if (uHelmetStripeBaseEnabled > 0.5) {
+    diffuseColor.rgb = mix(diffuseColor.rgb, stripeColor, stripeMask);
+  }
 
   if (uHelmetStripeDesignEnabled > 0.5) {
     float localU = (stripeX + totalHalfWidth) / max(totalHalfWidth * 2.0, 0.0001);
@@ -396,7 +401,7 @@ if (uHelmetStripesEnabled > 0.5) {
       );
   };
 
-  material.customProgramCacheKey = () => 'helmet-standard-three-stripe-surface-v2';
+  material.customProgramCacheKey = () => 'helmet-standard-three-stripe-surface-v3';
   material.needsUpdate = true;
 }
 
@@ -588,15 +593,16 @@ export default function HelmetBuilder() {
   // Shared shader-uniform objects for Shell stripe decals. The renderer keeps references
   // to these objects across material recompiles (wrap on/off, finish changes, etc.).
   const stripeUniformsRef = useRef({
-    enabled:       { value: 0 },
-    widthScale:    { value: 1 },
-    length:        { value: 1 },
-    centerX:       { value: 0 },
-    leftColor:     { value: new THREE.Color('#efff00') },
-    centerColor:   { value: new THREE.Color('#eaeaea') },
-    rightColor:    { value: new THREE.Color('#efff00') },
-    designEnabled: { value: 0 },
-    designMap:     { value: null },
+    enabled:         { value: 0 },
+    baseEnabled:     { value: 0 },
+    widthScale:      { value: 1 },
+    length:          { value: 1 },
+    centerX:         { value: 0 },
+    leftColor:       { value: new THREE.Color('#efff00') },
+    centerColor:     { value: new THREE.Color('#eaeaea') },
+    rightColor:      { value: new THREE.Color('#efff00') },
+    designEnabled:   { value: 0 },
+    designMap:       { value: null },
   });
 
   const [activeTab, setActiveTab]     = useState('colors');
@@ -1258,14 +1264,16 @@ export default function HelmetBuilder() {
   // ── STANDARD 3-STRIPE DECAL ─────────────────────────────────────────────────
   useEffect(() => {
     const uniforms = stripeUniformsRef.current;
-    uniforms.enabled.value = helmetStripesEnabled ? 1 : 0;
+    const hasDesign = !!stripeDesignImageRef.current;
+    uniforms.enabled.value = (helmetStripesEnabled || (helmetStripeDesignEnabled && hasDesign)) ? 1 : 0;
+    uniforms.baseEnabled.value = helmetStripesEnabled ? 1 : 0;
     uniforms.widthScale.value = helmetStripeWidth;
     uniforms.length.value = helmetStripeLength;
     uniforms.leftColor.value.set(helmetStripeLeftColor);
     uniforms.centerColor.value.set(helmetStripeCenterColor);
     uniforms.rightColor.value.set(helmetStripeRightColor);
-    uniforms.designEnabled.value = helmetStripeDesignEnabled && stripeDesignImageRef.current ? 1 : 0;
-  }, [loaded, helmetStripesEnabled, helmetStripeWidth, helmetStripeLength, helmetStripeLeftColor, helmetStripeCenterColor, helmetStripeRightColor, helmetStripeDesignEnabled]);
+    uniforms.designEnabled.value = helmetStripeDesignEnabled && hasDesign ? 1 : 0;
+  }, [loaded, helmetStripesEnabled, helmetStripeWidth, helmetStripeLength, helmetStripeLeftColor, helmetStripeCenterColor, helmetStripeRightColor, helmetStripeDesignEnabled, helmetStripeDesignRevision]);
 
   // ── SHADOW SURFACE ON/OFF ────────────────────────────────────────────────────
   // Was previously just UI state with nothing reading it — floor/wall never actually
@@ -1734,7 +1742,7 @@ export default function HelmetBuilder() {
                     Upload a PNG or JPEG to place artwork inside the stripe zone. For a full-width full-length design, ideal artwork is around 1200×3600px or larger, but narrower or shorter artwork is perfectly fine too.
                   </div>
                   <div style={{ fontSize:8, color:'#4b5563', lineHeight:1.45, marginBottom:10 }}>
-                    The current Width and Length sliders define the available stripe area on the helmet. Your uploaded design fits inside that live area and can be repositioned below.
+                    The current Width and Length sliders define the available stripe area on the helmet. Your uploaded design fits inside that live area and can be used with or without the preset stripe colors underneath.
                   </div>
 
                   <input id="helmet-stripe-design-upload" type="file" accept="image/png,image/jpeg" onChange={handleStripeDesignUpload} style={{ display:'none' }} />
