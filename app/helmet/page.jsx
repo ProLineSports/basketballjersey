@@ -617,8 +617,9 @@ function createSideLogoTexturePack(image, options = {}) {
   const baseCtx = baseCanvas.getContext('2d');
   if (!baseCtx) return null;
 
-  const maxStrokePad = strokeEnabled ? Math.max(0, strokeThickness) * 4 : 0;
-  const pad = 90 + maxStrokePad;
+  // Keep the base logo footprint fixed so increasing the stroke does not make
+  // the logo itself shrink. We reserve a generous constant margin instead.
+  const pad = 120;
   const fitW = size - pad * 2;
   const fitH = size - pad * 2;
   const scale = Math.min(fitW / image.naturalWidth, fitH / image.naturalHeight);
@@ -694,6 +695,9 @@ function createSideLogoTexturePack(image, options = {}) {
     rimTexture,
   };
 }
+
+const DEFAULT_SIDE_LOGO_PLACEMENT = Object.freeze({ yNorm: 0.64, zNorm: -0.18, scale: 1, rotation: 0 });
+const cloneDefaultSideLogoPlacement = () => ({ ...DEFAULT_SIDE_LOGO_PLACEMENT });
 
 const FINISHES = [
   { id: 'gloss',    label: 'Gloss',     roughness: 0.05, metalness: 0.1,  clearcoat: 1.0, clearcoatRoughness: 0.05, iridescence: 0.0 },
@@ -921,10 +925,9 @@ export default function HelmetBuilder() {
   const sideLogoLeftObjectUrlRef   = useRef(null);
   const sideLogoRightObjectUrlRef  = useRef(null);
   const sideLogoPlacementRef = useRef({
-    // Default main-logo target: high on the side panel and slightly rearward from the
-    // facemask hardware, matching the traditional helmet-logo position.
-    left:  { yNorm: 0.68, zNorm: -0.10, scale: 1, rotation: 0 },
-    right: { yNorm: 0.68, zNorm: -0.10, scale: 1, rotation: 0 },
+    // Default main-logo target: centered in the classic side-logo zone.
+    left:  cloneDefaultSideLogoPlacement(),
+    right: cloneDefaultSideLogoPlacement(),
   });
   const selectedSideLogoRef = useRef(null);
   const sideLogoWorldFrameRef = useRef({ left:null, right:null });
@@ -1026,6 +1029,7 @@ export default function HelmetBuilder() {
   const [sideLogoStrokeOpacity, setSideLogoStrokeOpacity] = useState(1);
   const [sideLogoRevision, setSideLogoRevision] = useState(0);
   const [selectedSideLogo, setSelectedSideLogo] = useState(null); // left | right | null
+  const [sideLogoLocked, setSideLogoLocked] = useState(false);
 
   const finishRef = useRef(finish);
   useEffect(() => { finishRef.current = finish; }, [finish]);
@@ -1216,10 +1220,10 @@ export default function HelmetBuilder() {
       target.setPreview(objectUrl);
       target.setName(file.name);
       if (slot === 'shared') {
-        sideLogoPlacementRef.current.left = { yNorm:0.60, zNorm:0.12, scale:1, rotation:0 };
-        sideLogoPlacementRef.current.right = { yNorm:0.60, zNorm:0.12, scale:1, rotation:0 };
+        sideLogoPlacementRef.current.left = cloneDefaultSideLogoPlacement();
+        sideLogoPlacementRef.current.right = cloneDefaultSideLogoPlacement();
       } else if (sideLogoPlacementRef.current[slot]) {
-        sideLogoPlacementRef.current[slot] = { yNorm:0.60, zNorm:0.12, scale:1, rotation:0 };
+        sideLogoPlacementRef.current[slot] = cloneDefaultSideLogoPlacement();
       }
       setSideLogoError('');
       setSideLogoRevision(v => v + 1);
@@ -1272,6 +1276,15 @@ export default function HelmetBuilder() {
       if (ref.current) URL.revokeObjectURL(ref.current);
     });
   }, []);
+
+  useEffect(() => {
+    if (sideLogoIndependent) return;
+    const sourceSide = selectedSideLogoRef.current === 'right' ? 'right' : 'left';
+    const sourcePlacement = sideLogoPlacementRef.current[sourceSide] || cloneDefaultSideLogoPlacement();
+    sideLogoPlacementRef.current.left = { ...sourcePlacement };
+    sideLogoPlacementRef.current.right = { ...sourcePlacement };
+    setSideLogoRevision(v => v + 1);
+  }, [sideLogoIndependent]);
 
   const applyViewPreset = useCallback((presetId) => {
     const camera = cameraRef.current;
@@ -1838,43 +1851,29 @@ export default function HelmetBuilder() {
       if (!pack) return;
 
       const combinedScale = sideLogoScale * placement.scale;
-      // Main helmet logos are intentionally substantial. This is 5x the previous
-      // starting footprint while keeping the UI's 100% size value intuitive.
+      // Large, user-friendly starting size.
       const baseHeight = boundsModel.height * 1.00 * combinedScale;
       const baseWidth = baseHeight * THREE.MathUtils.clamp(pack.aspect, 0.55, 2.6);
-      // Keep projector depth shallow enough that it cannot punch through to the far side.
-      const projectorDepth = Math.max(boundsModel.width * 0.10, 0.035);
 
       const normalMatrix = new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld);
       const worldNormal = hit.face?.normal?.clone().applyMatrix3(normalMatrix).normalize()
         || new THREE.Vector3(side === 'left' ? -1 : 1, 0, 0).transformDirection(model.matrixWorld).normalize();
 
-      const projectorPosition = hit.point.clone().addScaledVector(worldNormal, 0.002);
+      const anchorPosition = hit.point.clone();
       const helper = new THREE.Object3D();
-      helper.position.copy(projectorPosition);
-      helper.lookAt(projectorPosition.clone().add(worldNormal));
+      helper.position.copy(anchorPosition);
+      helper.lookAt(anchorPosition.clone().add(worldNormal));
       helper.rotateZ(placement.rotation);
-      const orientation = new THREE.Euler().setFromQuaternion(helper.quaternion, 'XYZ');
 
-      const mainGeo = new DecalGeometry(
-        hit.object,
-        projectorPosition,
-        orientation,
-        new THREE.Vector3(baseWidth, baseHeight, projectorDepth),
-      );
-      const shadowGeo = new DecalGeometry(
-        hit.object,
-        projectorPosition,
-        orientation,
-        new THREE.Vector3(baseWidth * 1.035, baseHeight * 1.035, projectorDepth),
-      );
+      // Use tangent planes instead of DecalGeometry so the logo can bridge across
+      // helmet cutouts/vents and never gets clipped by a projection mask.
+      const physicalDepth = Math.max(boundsModel.width * 0.0024, 0.0014);
+      const shadowPosition = anchorPosition.clone().addScaledVector(worldNormal, physicalDepth * 0.45);
+      const mainPosition = anchorPosition.clone().addScaledVector(worldNormal, physicalDepth * 1.25);
+      const selectionPosition = anchorPosition.clone().addScaledVector(worldNormal, physicalDepth * 2.0);
 
-      // Give the logo a tiny physical lift. This is intentionally much smaller than the
-      // failed helmet-stripe geometry experiment: just enough for rim light and contact
-      // shadow while the decal still reads as bonded to the curved shell.
-      const physicalDepth = Math.max(boundsModel.width * 0.0022, 0.0012);
-      offsetGeometryAlongNormals(shadowGeo, physicalDepth * 0.30);
-      offsetGeometryAlongNormals(mainGeo, physicalDepth);
+      const shadowGeo = new THREE.PlaneGeometry(baseWidth * 1.035, baseHeight * 1.035, 1, 1);
+      const mainGeo = new THREE.PlaneGeometry(baseWidth, baseHeight, 1, 1);
 
       const shadowMat = new THREE.MeshPhysicalMaterial({
         color: 0x000000,
@@ -1882,7 +1881,7 @@ export default function HelmetBuilder() {
         transparent: true,
         alphaTest: 0.01,
         opacity: 0.42,
-        side: THREE.FrontSide,
+        side: THREE.DoubleSide,
         depthWrite: false,
         depthTest: true,
         polygonOffset: true,
@@ -1898,7 +1897,7 @@ export default function HelmetBuilder() {
         transparent: true,
         alphaTest: 0.01,
         opacity: 1,
-        side: THREE.FrontSide,
+        side: THREE.DoubleSide,
         depthWrite: false,
         depthTest: true,
         polygonOffset: true,
@@ -1914,6 +1913,8 @@ export default function HelmetBuilder() {
       shadowMesh.userData.sideLogoShadow = true;
       shadowMesh.renderOrder = 39;
       shadowMesh.castShadow = true;
+      shadowMesh.position.copy(shadowPosition);
+      shadowMesh.quaternion.copy(helper.quaternion);
       scene.add(shadowMesh);
 
       const mainMesh = new THREE.Mesh(mainGeo, mainMat);
@@ -1922,21 +1923,20 @@ export default function HelmetBuilder() {
       mainMesh.userData.sideLogoMain = true;
       mainMesh.renderOrder = 40;
       mainMesh.castShadow = true;
+      mainMesh.position.copy(mainPosition);
+      mainMesh.quaternion.copy(helper.quaternion);
       scene.add(mainMesh);
 
       sideLogoMeshesRef.current.push(shadowMesh, mainMesh);
       sideLogoMaterialsRef.current.push(shadowMat, mainMat);
       sideLogoTexturesRef.current.push(pack.rimTexture, pack.mainTexture);
 
-      // Save an approximate rectangle in world space. The visible selection outline
-      // remains projected onto the shell, while these corner points provide familiar
-      // screen-space transform handles for scale and rotate interaction.
       const frameQuat = helper.quaternion.clone();
       const frameRight = new THREE.Vector3(1, 0, 0).applyQuaternion(frameQuat).normalize();
       const frameUp = new THREE.Vector3(0, 1, 0).applyQuaternion(frameQuat).normalize();
-      const frameHalfW = baseWidth * 0.56;
-      const frameHalfH = baseHeight * 0.56;
-      const frameCenter = projectorPosition.clone();
+      const frameHalfW = baseWidth * 0.50;
+      const frameHalfH = baseHeight * 0.50;
+      const frameCenter = mainPosition.clone();
       sideLogoWorldFrameRef.current[side] = {
         center: frameCenter,
         corners: [
@@ -1947,16 +1947,9 @@ export default function HelmetBuilder() {
         ],
       };
 
-      // Bounding box is shown only while this logo is selected.
       if (selectedSideLogoRef.current === side) {
         const selectionTex = createSelectionBoxTexture();
-        const selectionGeo = new DecalGeometry(
-          hit.object,
-          projectorPosition,
-          orientation,
-          new THREE.Vector3(baseWidth * 1.12, baseHeight * 1.12, projectorDepth),
-        );
-        offsetGeometryAlongNormals(selectionGeo, physicalDepth * 1.35);
+        const selectionGeo = new THREE.PlaneGeometry(baseWidth * 1.12, baseHeight * 1.12, 1, 1);
         const selectionMat = new THREE.MeshBasicMaterial({
           map: selectionTex,
           transparent: true,
@@ -1964,6 +1957,7 @@ export default function HelmetBuilder() {
           depthTest: true,
           depthWrite: false,
           toneMapped: false,
+          side: THREE.DoubleSide,
           polygonOffset: true,
           polygonOffsetFactor: -3,
           polygonOffsetUnits: -3,
@@ -1973,6 +1967,8 @@ export default function HelmetBuilder() {
         selectionMesh.userData.sideLogoSide = side;
         selectionMesh.userData.sideLogoSelection = true;
         selectionMesh.renderOrder = 50;
+        selectionMesh.position.copy(selectionPosition);
+        selectionMesh.quaternion.copy(helper.quaternion);
         scene.add(selectionMesh);
         sideLogoMeshesRef.current.push(selectionMesh);
         sideLogoMaterialsRef.current.push(selectionMat);
@@ -2092,7 +2088,7 @@ export default function HelmetBuilder() {
 
     const onPointerDown = (event) => {
       if (event.button !== 0) return;
-      const cornerInteraction = getCornerInteraction(event);
+      const cornerInteraction = !sideLogoLocked ? getCornerInteraction(event) : null;
       if (cornerInteraction) {
         event.preventDefault();
         event.stopPropagation();
@@ -2109,23 +2105,31 @@ export default function HelmetBuilder() {
       event.preventDefault();
       event.stopPropagation();
       if (selectedSideLogoRef.current !== clickedSide) selectLogo(clickedSide);
-      startInteraction(event, clickedSide, 'move');
+      if (!sideLogoLocked) startInteraction(event, clickedSide, 'move');
     };
 
     const onPointerMove = (event) => {
       const interaction = sideLogoInteractionRef.current;
       if (!interaction.dragging) {
-        const cornerInteraction = getCornerInteraction(event);
-        if (cornerInteraction?.action === 'scale') {
-          canvas.style.cursor = scaleCursorForCorner(cornerInteraction.cornerIndex);
-          return;
-        }
-        if (cornerInteraction?.action === 'rotate') {
-          canvas.style.cursor = ROTATE_CURSOR;
-          return;
+        if (!sideLogoLocked) {
+          const cornerInteraction = getCornerInteraction(event);
+          if (cornerInteraction?.action === 'scale') {
+            canvas.style.cursor = scaleCursorForCorner(cornerInteraction.cornerIndex);
+            return;
+          }
+          if (cornerInteraction?.action === 'rotate') {
+            canvas.style.cursor = ROTATE_CURSOR;
+            return;
+          }
         }
         const hoverSide = findClickedLogo(event);
-        canvas.style.cursor = hoverSide ? (hoverSide === selectedSideLogoRef.current ? 'move' : 'pointer') : '';
+        if (!hoverSide) {
+          canvas.style.cursor = '';
+        } else if (hoverSide === selectedSideLogoRef.current) {
+          canvas.style.cursor = sideLogoLocked ? 'pointer' : 'move';
+        } else {
+          canvas.style.cursor = 'pointer';
+        }
         return;
       }
 
@@ -2147,7 +2151,7 @@ export default function HelmetBuilder() {
         );
         placement.zNorm = THREE.MathUtils.clamp(
           (local.z - boundsModel.centerZ) / boundsModel.depth - (sideLogoFrontBack / 100) * 0.26,
-          -0.40,
+          -0.45,
           0.45,
         );
         canvas.style.cursor = 'move';
@@ -2169,6 +2173,11 @@ export default function HelmetBuilder() {
         while (delta < -Math.PI) delta += Math.PI * 2;
         placement.rotation = interaction.startRotation - delta;
         canvas.style.cursor = ROTATE_CURSOR;
+      }
+
+      if (!sideLogoIndependent) {
+        const otherSide = side === 'left' ? 'right' : 'left';
+        sideLogoPlacementRef.current[otherSide] = { ...placement };
       }
 
       rebuild();
@@ -2215,6 +2224,7 @@ export default function HelmetBuilder() {
     sideLogoStrokeThickness,
     sideLogoStrokeOpacity,
     sideLogoRevision,
+    sideLogoLocked,
   ]);
 
   // ── DECAL FINISH ────────────────────────────────────────────────────────────
@@ -2876,7 +2886,10 @@ export default function HelmetBuilder() {
                     ))}
                   </div>
 
-                  <button onClick={() => { sideLogoPlacementRef.current.left = { yNorm:0.68, zNorm:-0.10, scale:1, rotation:0 }; sideLogoPlacementRef.current.right = { yNorm:0.68, zNorm:-0.10, scale:1, rotation:0 }; setSideLogoRevision(v => v + 1); }} style={{ width:'100%', background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.10)', borderRadius:6, padding:'7px 8px', marginBottom:10, cursor:'pointer', color:'#9ca3af', fontSize:9, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.05em' }}>RESET LOGO POSITIONS</button>
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:10 }}>
+                    <button onClick={() => { sideLogoPlacementRef.current.left = cloneDefaultSideLogoPlacement(); sideLogoPlacementRef.current.right = cloneDefaultSideLogoPlacement(); setSelectedSideLogo(null); selectedSideLogoRef.current = null; setSideLogoRevision(v => v + 1); }} style={{ width:'100%', background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.10)', borderRadius:6, padding:'7px 8px', cursor:'pointer', color:'#9ca3af', fontSize:9, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.05em' }}>RESET POSITIONS</button>
+                    <button onClick={() => setSideLogoLocked(v => !v)} style={{ width:'100%', background:sideLogoLocked?'rgba(239,255,0,0.10)':'rgba(255,255,255,0.04)', border:sideLogoLocked?'1px solid rgba(239,255,0,0.35)':'1px solid rgba(255,255,255,0.10)', borderRadius:6, padding:'7px 8px', cursor:'pointer', color:sideLogoLocked?'#efff00':'#9ca3af', fontSize:9, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.05em' }}>{sideLogoLocked ? 'LOCKED' : 'UNLOCKED'}</button>
+                  </div>
 
                   <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:8 }}>
                     <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Size</span>
