@@ -231,7 +231,57 @@ function applyPanoramicShellWrapUV(model, roots) {
     mesh.geometry.attributes.helmetStripePath.needsUpdate = true;
   });
 
-  return { centerX };
+  return {
+    centerX,
+    centerZ,
+    maxY,
+    height,
+    depth,
+    stripePivotY,
+    stripeRawMin,
+    stripeRawMax,
+  };
+}
+
+function applyStripeProjectionAttributes(model, roots, projection) {
+  if (!model || !roots?.length || !projection) return;
+
+  const { centerZ, height, depth, stripePivotY, stripeRawMin, stripeRawMax } = projection;
+  const p = new THREE.Vector3();
+  const modelInverse = new THREE.Matrix4().copy(model.matrixWorld).invert();
+  const seen = new Set();
+
+  roots.forEach(root => {
+    root.traverse(obj => {
+      if (!obj.isMesh || !obj.geometry?.attributes?.position || seen.has(obj)) return;
+      seen.add(obj);
+      obj.updateWorldMatrix(true, false);
+      const localToModel = new THREE.Matrix4().multiplyMatrices(modelInverse, obj.matrixWorld);
+      const pos = obj.geometry.attributes.position;
+      const modelPositionValues = new Float32Array(pos.count * 3);
+      const stripePathValues = new Float32Array(pos.count);
+
+      for (let i = 0; i < pos.count; i++) {
+        p.fromBufferAttribute(pos, i).applyMatrix4(localToModel);
+        modelPositionValues[i * 3] = p.x;
+        modelPositionValues[i * 3 + 1] = p.y;
+        modelPositionValues[i * 3 + 2] = p.z;
+
+        const theta = Math.atan2((p.z - centerZ) / depth, (p.y - stripePivotY) / height);
+        const raw = 0.5 - theta / Math.PI;
+        stripePathValues[i] = THREE.MathUtils.clamp(
+          (raw - stripeRawMin) / Math.max(0.000001, stripeRawMax - stripeRawMin),
+          0,
+          1
+        );
+      }
+
+      obj.geometry.setAttribute('helmetModelPosition', new THREE.BufferAttribute(modelPositionValues, 3));
+      obj.geometry.setAttribute('helmetStripePath', new THREE.BufferAttribute(stripePathValues, 1));
+      obj.geometry.attributes.helmetModelPosition.needsUpdate = true;
+      obj.geometry.attributes.helmetStripePath.needsUpdate = true;
+    });
+  });
 }
 
 
@@ -911,10 +961,18 @@ export default function HelmetBuilder() {
         partObjectsRef.current[partKey('Shell')] || []
       );
 
-      // Install the stripe overlay only on Shell materials. Since bumpers are separate
-      // GLB geometry, they naturally render over these decals wherever they overlap.
+      // Top screws sit on the crown and should receive the same stripe decal projection
+      // so the stripe appears to run over them continuously.
+      applyStripeProjectionAttributes(
+        model,
+        partObjectsRef.current[partKey('Top Screws')] || [],
+        shellProjection
+      );
+
+      // Install the stripe overlay on the Shell and Top Screws. Bumpers remain separate
+      // GLB geometry, so they naturally render over these decals wherever they overlap.
       stripeUniformsRef.current.centerX.value = shellProjection?.centerX || 0;
-      (partsRef.current[partKey('Shell')] || []).forEach(mat => {
+      [...(partsRef.current[partKey('Shell')] || []), ...(partsRef.current[partKey('Top Screws')] || [])].forEach(mat => {
         installShellStripeOverlay(mat, stripeUniformsRef.current);
       });
 
