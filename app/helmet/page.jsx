@@ -1357,6 +1357,8 @@ export default function HelmetBuilder() {
   const [loaded, setLoaded]           = useState(false);
   const [showProductMenu, setShowProductMenu] = useState(false);
   const [showShadows, setShowShadows]         = useState(true);
+  const [shadowOpacity, setShadowOpacity]     = useState(0.35);
+  const [shadowSoftness, setShadowSoftness]   = useState(0.45);
   const [sparkleRotating, setSparkleRotating] = useState(true);
   const sparkleRotatingRef = useRef(sparkleRotating);
   useEffect(() => { sparkleRotatingRef.current = sparkleRotating; }, [sparkleRotating]);
@@ -1827,6 +1829,7 @@ export default function HelmetBuilder() {
     renderer.setPixelRatio(window.devicePixelRatio);
     renderer.setSize(el.clientWidth, el.clientHeight);
     renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.4;
@@ -1935,7 +1938,9 @@ export default function HelmetBuilder() {
     key.shadow.camera.right = 3;
     key.shadow.camera.top = 3;
     key.shadow.camera.bottom = -3;
+    key.shadow.radius = 0.5 + shadowSoftness * 11.5;
     scene.add(key);
+    scene.userData.keyLight = key;
     const fill = new THREE.DirectionalLight(0xffffff, 0.8);
     fill.position.set(-3, 2, -2);
     scene.add(fill);
@@ -1944,22 +1949,24 @@ export default function HelmetBuilder() {
     scene.add(rim);
     // Shadow-catching floor
     const floorGeo = new THREE.PlaneGeometry(10, 10);
-    const floorMat = new THREE.ShadowMaterial({ opacity: 0.35 });
+    const floorMat = new THREE.ShadowMaterial({ opacity: shadowOpacity });
     const floor = new THREE.Mesh(floorGeo, floorMat);
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = -0.85;
     floor.receiveShadow = true;
     scene.add(floor);
     scene.userData.floor = floor;
+    scene.userData.floorShadowMaterial = floorMat;
 
     // Optional back wall
     const wallGeo = new THREE.PlaneGeometry(10, 6);
-    const wallMat = new THREE.ShadowMaterial({ opacity: 0.15 });
+    const wallMat = new THREE.ShadowMaterial({ opacity: shadowOpacity * 0.43 });
     const wall = new THREE.Mesh(wallGeo, wallMat);
     wall.position.set(0, 1.5, -2.5);
     wall.receiveShadow = true;
     scene.add(wall);
     scene.userData.wall = wall;
+    scene.userData.wallShadowMaterial = wallMat;
 
     // Sparkle point light — close to helmet for flake catchlights
     const sparkleLight = new THREE.PointLight(0xffffff, 8.0, 8);
@@ -3195,16 +3202,33 @@ export default function HelmetBuilder() {
     ], sceneRef.current, bumperLogoFinish);
   }, [loaded, bumperLogoFinish]);
 
-  // ── SHADOW SURFACE ON/OFF ────────────────────────────────────────────────────
-  // Was previously just UI state with nothing reading it — floor/wall never actually
-  // toggled. Both are ShadowMaterial planes (invisible except where a shadow lands on
-  // them), so hiding them together is what actually makes "the shadow" disappear.
+  // ── SHADOW CONTROLS ─────────────────────────────────────────────────────────
+  // Opacity controls the receiving ShadowMaterial surfaces. Softness changes the
+  // DirectionalLight shadow-kernel radius, giving a harder contact shadow at the low
+  // end and a broader, more photographic blur at the high end.
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
+
     if (scene.userData.floor) scene.userData.floor.visible = showShadows;
     if (scene.userData.wall)  scene.userData.wall.visible  = showShadows;
-  }, [showShadows, loaded]);
+
+    if (scene.userData.floorShadowMaterial) {
+      scene.userData.floorShadowMaterial.opacity = shadowOpacity;
+      scene.userData.floorShadowMaterial.needsUpdate = true;
+    }
+    if (scene.userData.wallShadowMaterial) {
+      // Keep the back-wall shadow lighter than the floor while preserving the
+      // user's overall opacity choice.
+      scene.userData.wallShadowMaterial.opacity = shadowOpacity * 0.43;
+      scene.userData.wallShadowMaterial.needsUpdate = true;
+    }
+
+    if (scene.userData.keyLight?.shadow) {
+      scene.userData.keyLight.shadow.radius = 0.5 + shadowSoftness * 11.5;
+      scene.userData.keyLight.shadow.needsUpdate = true;
+    }
+  }, [showShadows, shadowOpacity, shadowSoftness, loaded]);
 
   // ── VISOR ON/OFF ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -3531,10 +3555,36 @@ export default function HelmetBuilder() {
 
                 </CollapsibleSection>
                 <CollapsibleSection title="BACKGROUND">
-                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:14 }}>
+                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>
                   <span style={{ fontSize:11, color:'#9ca3af' }}>Shadow Surface</span>
                   <button onClick={() => setShowShadows(s => !s)} style={{ background:showShadows?'rgba(239,255,0,0.15)':'rgba(255,255,255,0.06)', border:showShadows?'1px solid rgba(239,255,0,0.5)':'1px solid rgba(255,255,255,0.12)', borderRadius:20, padding:'3px 12px', cursor:'pointer', fontSize:9, fontWeight:700, fontFamily:"'Barlow Condensed',sans-serif", color:showShadows?'#efff00':'#6b7280', letterSpacing:'0.06em' }}>{showShadows?'ON':'OFF'}</button>
                 </div>
+                {showShadows && (
+                  <div style={{ marginBottom:14 }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:9 }}>
+                      <span style={{ width:52, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Opacity</span>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        value={Math.round(shadowOpacity * 100)}
+                        onChange={e => setShadowOpacity(parseInt(e.target.value) / 100)}
+                        style={{ flex:1, minWidth:0 }}
+                      />
+                    </div>
+                    <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                      <span style={{ width:52, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Softness</span>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        value={Math.round(shadowSoftness * 100)}
+                        onChange={e => setShadowSoftness(parseInt(e.target.value) / 100)}
+                        style={{ flex:1, minWidth:0 }}
+                      />
+                    </div>
+                  </div>
+                )}
                 <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:14 }}>
                   <span style={{ fontSize:11, color:'#9ca3af' }}>Rotating Light</span>
                   <button onClick={() => setSparkleRotating(s => !s)} title={sparkleRotating ? 'Pause rotating light' : 'Resume rotating light'} style={{ background:sparkleRotating?'rgba(239,255,0,0.15)':'rgba(255,255,255,0.06)', border:sparkleRotating?'1px solid rgba(239,255,0,0.5)':'1px solid rgba(255,255,255,0.12)', borderRadius:20, padding:'3px 12px', cursor:'pointer', fontSize:9, fontWeight:700, fontFamily:"'Barlow Condensed',sans-serif", color:sparkleRotating?'#efff00':'#6b7280', letterSpacing:'0.06em', display:'flex', alignItems:'center', gap:5 }}>
