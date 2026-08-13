@@ -27,6 +27,95 @@ const ZONES = [
   { id: 'straps',            label: 'Straps',                    parts: ['Straps'],                            defaultColor: '#eaeaea' },
 ];
 
+// Three.js sanitizes glTF node names when it loads them (for example, spaces can
+// become underscores). Compare part names through a stable key so the UI can keep
+// using the clean Blender/GLB names above while still matching the runtime objects.
+const partKey = (name = '') => name.toLowerCase().replace(/[^a-z0-9]/g, '');
+// Build part references from the loaded scene hierarchy AFTER materials have been
+// replaced. This is intentionally hierarchy-based instead of assuming the named GLB
+// node itself is always a THREE.Mesh. GLTFLoader may represent a named part as a Group
+// with one or more Mesh descendants, so indexing only child.isMesh names can miss parts.
+function indexLoadedParts(model, partsMap, objectsMap) {
+  const sceneObjects = [];
+  model.traverse(obj => sceneObjects.push(obj));
+
+  for (const zone of ZONES) {
+    for (const partName of zone.parts) {
+      const key = partKey(partName);
+      const roots = sceneObjects.filter(obj => partKey(obj.name) === key);
+      const materials = [];
+
+      roots.forEach(root => {
+        root.traverse(obj => {
+          if (!obj.isMesh || !obj.material) return;
+          const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+          mats.forEach(mat => {
+            if (mat && !materials.includes(mat)) materials.push(mat);
+          });
+        });
+      });
+
+      objectsMap[key] = roots;
+      partsMap[key] = materials;
+
+      if (roots.length === 0) {
+        console.warn(`[HelmetBuilder] Could not find GLB part: ${partName}`);
+      }
+    }
+  }
+}
+
+
+// Build a lightweight 2D guide from the Shell's real UV coordinates. This lets the
+// upload panel show users where artwork will land without needing a separate image
+// asset checked into /public. It is only a guide; the actual wrap uses the GLB UVs.
+function createUvGuideDataUrl(roots) {
+  if (typeof document === 'undefined' || !roots?.length) return null;
+  const size = 512;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+
+  ctx.clearRect(0, 0, size, size);
+  ctx.strokeStyle = 'rgba(255,255,255,0.28)';
+  ctx.lineWidth = 0.55;
+
+  roots.forEach(root => {
+    root.traverse(obj => {
+      if (!obj.isMesh || !obj.geometry?.attributes?.uv) return;
+      const geometry = obj.geometry;
+      const uv = geometry.attributes.uv;
+      const index = geometry.index;
+      const triCount = index ? Math.floor(index.count / 3) : Math.floor(uv.count / 3);
+      // Keep the preview responsive even on a very dense shell mesh.
+      const step = Math.max(1, Math.floor(triCount / 14000));
+
+      const uvAt = (vertexIndex) => ({
+        x: uv.getX(vertexIndex) * size,
+        y: uv.getY(vertexIndex) * size,
+      });
+
+      ctx.beginPath();
+      for (let tri = 0; tri < triCount; tri += step) {
+        const base = tri * 3;
+        const ia = index ? index.getX(base) : base;
+        const ib = index ? index.getX(base + 1) : base + 1;
+        const ic = index ? index.getX(base + 2) : base + 2;
+        const a = uvAt(ia), b = uvAt(ib), c = uvAt(ic);
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.lineTo(c.x, c.y);
+        ctx.closePath();
+      }
+      ctx.stroke();
+    });
+  });
+
+  return canvas.toDataURL('image/png');
+}
+
 const FINISHES = [
   { id: 'gloss',    label: 'Gloss',     roughness: 0.05, metalness: 0.1,  clearcoat: 1.0, clearcoatRoughness: 0.05, iridescence: 0.0 },
   { id: 'matte',    label: 'Matte',     roughness: 0.9,  metalness: 0.0,  clearcoat: 0.0, clearcoatRoughness: 0.0,  iridescence: 0.0 },
@@ -192,8 +281,18 @@ export default function HelmetBuilder() {
   const rendererRef = useRef(null);
   const controlsRef = useRef(null);
   const materialsRef = useRef({}); // materialName → THREE.Material[] (finish/env routing)
-  const partsRef     = useRef({}); // exact GLB part/node name → THREE.Material[] (color routing)
+  const partsRef     = useRef({}); // normalized GLB part key → THREE.Material[] (color routing)
+  const partObjectsRef = useRef({}); // normalized GLB part key → THREE.Object3D[] (visibility routing)
   const frameRef    = useRef(null);
+
+  // Full-wrap design layer. The uploaded image is composited over the current shell
+  // color onto an offscreen square canvas, then used as the Shell's color map. Because
+  // the Shell already has a proper UV layout in the GLB, the result follows the rounded
+  // helmet surface instead of behaving like a flat decal.
+  const wrapImageRef     = useRef(null);
+  const wrapCanvasRef    = useRef(null);
+  const wrapTextureRef   = useRef(null);
+  const wrapObjectUrlRef = useRef(null);
 
   const [activeTab, setActiveTab]     = useState('colors');
   const [colors, setColors]           = useState(() => Object.fromEntries(ZONES.map(z => [z.id, z.defaultColor])));
@@ -210,6 +309,19 @@ export default function HelmetBuilder() {
   const [glitter, setGlitter]               = useState(0.3);
   const [glitterColor, setGlitterColor]     = useState('#ffffff');
   const [facemaskFinish, setFacemaskFinish] = useState('gloss'); // gloss | matte
+
+  const [wrapEnabled, setWrapEnabled]       = useState(false);
+  const [wrapPreviewUrl, setWrapPreviewUrl] = useState(null);
+  const [wrapUvGuideUrl, setWrapUvGuideUrl] = useState(null);
+  const [wrapFileName, setWrapFileName]     = useState('');
+  const [wrapError, setWrapError]           = useState('');
+  const [wrapScale, setWrapScale]           = useState(1);
+  const [wrapRotation, setWrapRotation]     = useState(0);
+  const [wrapOffsetX, setWrapOffsetX]       = useState(0);
+  const [wrapOffsetY, setWrapOffsetY]       = useState(0);
+  const [wrapOpacity, setWrapOpacity]       = useState(1);
+  const [wrapRevision, setWrapRevision]     = useState(0);
+
   const finishRef = useRef(finish);
   useEffect(() => { finishRef.current = finish; }, [finish]);
   const facemaskFinishRef = useRef(facemaskFinish);
@@ -249,6 +361,72 @@ export default function HelmetBuilder() {
       }
     }
   }, [isSignedIn]);
+
+  // ── FULL WRAP UPLOAD + CONTROLS ─────────────────────────────────────────────
+  const resetWrapTransform = useCallback(() => {
+    setWrapScale(1);
+    setWrapRotation(0);
+    setWrapOffsetX(0);
+    setWrapOffsetY(0);
+    setWrapOpacity(1);
+  }, []);
+
+  const removeWrap = useCallback(() => {
+    if (wrapObjectUrlRef.current) {
+      URL.revokeObjectURL(wrapObjectUrlRef.current);
+      wrapObjectUrlRef.current = null;
+    }
+    wrapImageRef.current = null;
+    setWrapPreviewUrl(null);
+    setWrapFileName('');
+    setWrapError('');
+    setWrapEnabled(false);
+    resetWrapTransform();
+    setWrapRevision(r => r + 1);
+  }, [resetWrapTransform]);
+
+  const handleWrapUpload = useCallback((event) => {
+    const file = event.target.files?.[0];
+    // Allow the same file to be chosen again after removal or validation failure.
+    event.target.value = '';
+    if (!file) return;
+
+    if (!['image/png', 'image/jpeg'].includes(file.type)) {
+      setWrapError('Please upload a PNG or JPEG image.');
+      return;
+    }
+
+    const objectUrl = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      if (img.naturalWidth < 1080 || img.naturalHeight < 1080) {
+        URL.revokeObjectURL(objectUrl);
+        setWrapError(`Image is ${img.naturalWidth}×${img.naturalHeight}px. Please use at least 1080×1080px.`);
+        return;
+      }
+
+      if (wrapObjectUrlRef.current) URL.revokeObjectURL(wrapObjectUrlRef.current);
+      wrapObjectUrlRef.current = objectUrl;
+      wrapImageRef.current = img;
+      setWrapPreviewUrl(objectUrl);
+      setWrapFileName(file.name);
+      setWrapError('');
+      setWrapEnabled(true);
+      resetWrapTransform();
+      setWrapRevision(r => r + 1);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      setWrapError('That image could not be read. Please try another PNG or JPEG.');
+    };
+    img.src = objectUrl;
+  }, [resetWrapTransform]);
+
+  // Revoke browser object URLs and dispose the generated texture when leaving the page.
+  useEffect(() => () => {
+    if (wrapObjectUrlRef.current) URL.revokeObjectURL(wrapObjectUrlRef.current);
+    if (wrapTextureRef.current) wrapTextureRef.current.dispose();
+  }, []);
 
   // ── THREE.JS SETUP ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -414,13 +592,11 @@ export default function HelmetBuilder() {
         mats.forEach(mat => {
           if (!mat) return;
           const name = mat.name;
-          const partName = child.name;
-          // Color zones are keyed to exact exported GLB part/node names, not material names.
-          // This lets parts with a shared source material remain independently addressable.
-          const zone = ZONES.find(z => z.parts.includes(partName));
-          const color = zone ? colors[zone.id] : '#808080';
+          // Use the source material color only as a temporary value. Exact UI zone colors
+          // are applied after the entire loaded hierarchy is indexed by GLB part name below.
+          const color = mat.color ? `#${mat.color.getHexString()}` : '#808080';
 
-          const isVisor = partName === 'Visor' || name === 'visor';
+          const isVisor = name === 'visor';
           const newMat = new THREE.MeshPhysicalMaterial({
             color: new THREE.Color(color),
             roughness: isVisor ? 0.08 : finishDef.roughness,
@@ -450,9 +626,8 @@ export default function HelmetBuilder() {
           if (!materialsRef.current[name]) materialsRef.current[name] = [];
           materialsRef.current[name].push(newMat);
 
-          // Also index the cloned material by exact GLB part/node name for color controls.
-          if (!partsRef.current[partName]) partsRef.current[partName] = [];
-          partsRef.current[partName].push(newMat);
+          // Part/color references are indexed in one pass after this traversal. Doing
+          // that from the final hierarchy catches both named Mesh nodes and named Group nodes.
 
           // Replace
           if (Array.isArray(child.material)) {
@@ -463,6 +638,14 @@ export default function HelmetBuilder() {
           }
         });
       });
+
+      // Rebuild part references from the FINAL loaded hierarchy. This is the key routing
+      // step for every color control, including parts whose Blender object name differs
+      // from its material name (clips, pads, chin guards, metal parts, etc.).
+      partsRef.current = {};
+      partObjectsRef.current = {};
+      indexLoadedParts(model, partsRef.current, partObjectsRef.current);
+      setWrapUvGuideUrl(createUvGuideDataUrl(partObjectsRef.current[partKey('Shell')] || []));
 
       scene.add(model);
       // Now that all shell/facemask materials exist, route env maps per current finish
@@ -507,11 +690,93 @@ export default function HelmetBuilder() {
   useEffect(() => {
     ZONES.forEach(zone => {
       zone.parts.forEach(partName => {
-        const mats = partsRef.current[partName];
-        if (mats) mats.forEach(mat => mat.color.set(colors[zone.id]));
+        const mats = partsRef.current[partKey(partName)];
+        if (mats) mats.forEach(mat => {
+          // While a full wrap is active, the Shell map already contains the selected
+          // shell base color. Keep the material itself white so Three.js doesn't tint
+          // / multiply the uploaded artwork. Side Screws + Top Screws still use the
+          // normal Shell color because they are separate GLB parts.
+          const wrappedShell = wrapEnabled && partKey(partName) === partKey('Shell');
+          mat.color.set(wrappedShell ? '#ffffff' : colors[zone.id]);
+          mat.needsUpdate = true;
+        });
       });
     });
-  }, [colors]);
+  }, [colors, loaded, wrapEnabled]);
+
+  // ── FULL WRAP TEXTURE ───────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!loaded) return;
+
+    const shellMats = partsRef.current[partKey('Shell')] || [];
+    if (!shellMats.length) return;
+
+    // Removing / disabling the wrap restores a plain shell while preserving the
+    // linked shell color on Shell, Side Screws, and Top Screws.
+    if (!wrapEnabled || !wrapImageRef.current) {
+      shellMats.forEach(mat => {
+        if (mat.map === wrapTextureRef.current) mat.map = null;
+        mat.color.set(colors.shell);
+        mat.needsUpdate = true;
+      });
+      return;
+    }
+
+    const img = wrapImageRef.current;
+    let canvas = wrapCanvasRef.current;
+    if (!canvas) {
+      canvas = document.createElement('canvas');
+      canvas.width = 2048;
+      canvas.height = 2048;
+      wrapCanvasRef.current = canvas;
+    }
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const w = canvas.width;
+    const h = canvas.height;
+
+    // Base shell color remains visible anywhere a transparent PNG or transformed
+    // image leaves uncovered space.
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = colors.shell;
+    ctx.fillRect(0, 0, w, h);
+
+    ctx.save();
+    ctx.translate(w / 2 + (wrapOffsetX / 100) * w, h / 2 + (wrapOffsetY / 100) * h);
+    ctx.rotate((wrapRotation * Math.PI) / 180);
+    ctx.globalAlpha = wrapOpacity;
+
+    // Scale 1.0 means "cover the entire 1:1 wrap canvas" without distorting the
+    // uploaded artwork's aspect ratio.
+    const coverScale = Math.max(w / img.naturalWidth, h / img.naturalHeight);
+    const drawScale = coverScale * wrapScale;
+    const drawW = img.naturalWidth * drawScale;
+    const drawH = img.naturalHeight * drawScale;
+    ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
+    ctx.restore();
+
+    let texture = wrapTextureRef.current;
+    if (!texture) {
+      texture = new THREE.CanvasTexture(canvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      // glTF UVs use the top-left texture origin convention. CanvasTexture defaults
+      // to flipY=true, so disable the flip to keep the 2D orientation guide aligned
+      // with the exported Shell UVs.
+      texture.flipY = false;
+      texture.wrapS = THREE.ClampToEdgeWrapping;
+      texture.wrapT = THREE.ClampToEdgeWrapping;
+      wrapTextureRef.current = texture;
+    }
+    texture.needsUpdate = true;
+
+    shellMats.forEach(mat => {
+      mat.map = texture;
+      mat.color.set('#ffffff');
+      mat.needsUpdate = true;
+    });
+  }, [loaded, colors.shell, wrapEnabled, wrapRevision, wrapScale, wrapRotation, wrapOffsetX, wrapOffsetY, wrapOpacity]);
 
   // ── SHADOW SURFACE ON/OFF ────────────────────────────────────────────────────
   // Was previously just UI state with nothing reading it — floor/wall never actually
@@ -526,18 +791,17 @@ export default function HelmetBuilder() {
 
   // ── VISOR ON/OFF ──────────────────────────────────────────────────────────
   useEffect(() => {
-    // Toggle the exact Visor + Visor Clips GLB parts together.
-    if (sceneRef.current) {
-      sceneRef.current.traverse(child => {
-        if (!child.isMesh) return;
-        if (child.name === 'Visor' || child.name === 'Visor Clips') child.visible = visorOn;
-      });
-    }
-  }, [visorOn]);
+    // Toggle the exact GLB part roots. If either part is represented as a Group,
+    // hiding the root also hides all of its mesh descendants.
+    ['Visor', 'Visor Clips'].forEach(partName => {
+      const roots = partObjectsRef.current[partKey(partName)] || [];
+      roots.forEach(root => { root.visible = visorOn; });
+    });
+  }, [visorOn, loaded]);
 
   // Clear any baked texture from visor (removes Oakley logo)
   useEffect(() => {
-    (partsRef.current['Visor'] || []).forEach(mat => {
+    (partsRef.current[partKey('Visor')] || []).forEach(mat => {
       if (mat.map) { mat.map = null; mat.needsUpdate = true; }
     });
   }, [loaded]);
@@ -848,10 +1112,81 @@ export default function HelmetBuilder() {
             {/* DECALS */}
             {activeTab === 'decals' && (
               <div>
-                <SectionLabel>Decals</SectionLabel>
-                <div style={{ background: 'rgba(239,255,0,0.05)', border: '1px dashed rgba(239,255,0,0.2)', borderRadius: 8, padding: 16, textAlign: 'center', color: '#6b7280', fontSize: 11, lineHeight: 1.6 }}>
-                  🚧 Coming soon<br />
-                  Click-to-place decals that wrap to the helmet surface using Three.js DecalGeometry.
+                <SectionLabel>Full Wrap</SectionLabel>
+                <div style={{ fontSize:10, color:'#6b7280', lineHeight:1.55, marginBottom:10 }}>
+                  Upload a PNG or JPEG of at least 1080×1080px. The image is mapped directly to the Shell UVs so it follows the helmet's rounded surface.
+                </div>
+
+                <input id="helmet-wrap-upload" type="file" accept="image/png,image/jpeg" onChange={handleWrapUpload} style={{ display:'none' }} />
+                <label htmlFor="helmet-wrap-upload" style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:7, width:'100%', boxSizing:'border-box', background:'rgba(239,255,0,0.08)', border:'1px dashed rgba(239,255,0,0.35)', borderRadius:7, padding:'10px 12px', cursor:'pointer', fontSize:10, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif", color:'#efff00', letterSpacing:'0.06em' }}>
+                  <span style={{ fontSize:14 }}>＋</span>{wrapPreviewUrl ? 'REPLACE WRAP IMAGE' : 'UPLOAD WRAP IMAGE'}
+                </label>
+
+                {wrapError && (
+                  <div style={{ marginTop:8, fontSize:10, color:'#ef4444', lineHeight:1.4 }}>{wrapError}</div>
+                )}
+
+                {wrapPreviewUrl && (
+                  <div style={{ marginTop:12 }}>
+                    <div style={{ display:'flex', justifyContent:'space-between', gap:8, alignItems:'center', marginBottom:7 }}>
+                      <div style={{ minWidth:0 }}>
+                        <div style={{ fontSize:10, color:'#9ca3af', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={wrapFileName}>{wrapFileName}</div>
+                        <div style={{ fontSize:8, color:'#4b5563', marginTop:2 }}>FLAT WRAP CANVAS</div>
+                      </div>
+                      <div style={{ display:'flex', gap:5, flexShrink:0 }}>
+                        <button onClick={() => setWrapEnabled(v => !v)} style={{ background:wrapEnabled?'rgba(239,255,0,0.1)':'rgba(255,255,255,0.04)', border:wrapEnabled?'1px solid rgba(239,255,0,0.35)':'1px solid rgba(255,255,255,0.1)', borderRadius:5, padding:'4px 7px', cursor:'pointer', color:wrapEnabled?'#efff00':'#6b7280', fontSize:8, fontWeight:700, fontFamily:"'Barlow Condensed',sans-serif" }}>{wrapEnabled?'ON':'OFF'}</button>
+                        <button onClick={removeWrap} style={{ background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:5, padding:'4px 7px', cursor:'pointer', color:'#ef4444', fontSize:8, fontWeight:700, fontFamily:"'Barlow Condensed',sans-serif" }}>REMOVE</button>
+                      </div>
+                    </div>
+
+                    {/* 2D orientation preview. Front of the helmet is to the right in the Shell UV layout. */}
+                    <div style={{ position:'relative', width:'100%', aspectRatio:'1 / 1', overflow:'hidden', borderRadius:8, border:'1px solid rgba(255,255,255,0.12)', background:colors.shell }}>
+                      <img
+                        src={wrapPreviewUrl}
+                        alt="Uploaded helmet wrap preview"
+                        style={{ position:'absolute', width:'100%', height:'100%', objectFit:'cover', left:`calc(50% + ${wrapOffsetX}%)`, top:`calc(50% + ${wrapOffsetY}%)`, transform:`translate(-50%,-50%) rotate(${wrapRotation}deg) scale(${wrapScale})`, transformOrigin:'center', opacity:wrapEnabled?wrapOpacity:0.2, filter:wrapEnabled?'none':'grayscale(1)', pointerEvents:'none', userSelect:'none' }}
+                      />
+                      {wrapUvGuideUrl && <img src={wrapUvGuideUrl} alt="Helmet shell UV placement guide" style={{ position:'absolute', inset:0, width:'100%', height:'100%', objectFit:'fill', opacity:0.55, pointerEvents:'none' }} />}
+                      <div style={{ position:'absolute', inset:0, pointerEvents:'none', background:'linear-gradient(to right, transparent 49.7%, rgba(255,255,255,0.18) 50%, transparent 50.3%), linear-gradient(to bottom, transparent 49.7%, rgba(255,255,255,0.18) 50%, transparent 50.3%)' }} />
+                      <div style={{ position:'absolute', top:6, left:6, background:'rgba(0,0,0,0.58)', borderRadius:4, padding:'2px 5px', color:'#fff', fontSize:8, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.06em', pointerEvents:'none' }}>SHELL UV GUIDE</div>
+                      <div style={{ position:'absolute', left:6, right:6, bottom:6, background:'rgba(0,0,0,0.58)', borderRadius:4, padding:'3px 5px', color:'#d1d5db', fontSize:8, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.03em', textAlign:'center', pointerEvents:'none' }}>ADJUST HERE · CONFIRM PLACEMENT ON THE 3D HELMET</div>
+                    </div>
+
+                    <div style={{ marginTop:11 }}>
+                      <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
+                        <span style={{ width:48, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Scale</span>
+                        <input type="range" min="25" max="300" value={Math.round(wrapScale*100)} onChange={e => setWrapScale(parseInt(e.target.value)/100)} style={{ flex:1 }} />
+                        <span style={{ width:34, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{Math.round(wrapScale*100)}%</span>
+                      </div>
+                      <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
+                        <span style={{ width:48, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Rotate</span>
+                        <input type="range" min="-180" max="180" value={wrapRotation} onChange={e => setWrapRotation(parseInt(e.target.value))} style={{ flex:1 }} />
+                        <span style={{ width:34, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{wrapRotation}°</span>
+                      </div>
+                      <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
+                        <span style={{ width:48, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Left/Right</span>
+                        <input type="range" min="-50" max="50" value={wrapOffsetX} onChange={e => setWrapOffsetX(parseInt(e.target.value))} style={{ flex:1 }} />
+                        <span style={{ width:34, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{wrapOffsetX}</span>
+                      </div>
+                      <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
+                        <span style={{ width:48, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Up/Down</span>
+                        <input type="range" min="-50" max="50" value={wrapOffsetY} onChange={e => setWrapOffsetY(parseInt(e.target.value))} style={{ flex:1 }} />
+                        <span style={{ width:34, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{wrapOffsetY}</span>
+                      </div>
+                      <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
+                        <span style={{ width:48, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Opacity</span>
+                        <input type="range" min="0" max="100" value={Math.round(wrapOpacity*100)} onChange={e => setWrapOpacity(parseInt(e.target.value)/100)} style={{ flex:1 }} />
+                        <span style={{ width:34, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{Math.round(wrapOpacity*100)}%</span>
+                      </div>
+                      <button onClick={resetWrapTransform} style={{ width:'100%', background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:6, padding:'7px 8px', cursor:'pointer', color:'#9ca3af', fontSize:9, fontWeight:700, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.05em' }}>RESET POSITION</button>
+                    </div>
+                  </div>
+                )}
+
+                <div style={{ height:1, background:'rgba(255,255,255,0.06)', margin:'16px 0 14px' }} />
+                <SectionLabel>Individual Decals</SectionLabel>
+                <div style={{ background:'rgba(255,255,255,0.03)', border:'1px dashed rgba(255,255,255,0.1)', borderRadius:8, padding:12, textAlign:'center', color:'#4b5563', fontSize:10, lineHeight:1.5 }}>
+                  Coming next: click-to-place logos, stripes and number decals on top of the wrap.
                 </div>
               </div>
             )}
