@@ -896,6 +896,7 @@ export default function HelmetBuilder() {
   const materialsRef = useRef({}); // materialName → THREE.Material[] (finish/env routing)
   const partsRef     = useRef({}); // normalized GLB part key → THREE.Material[] (color routing)
   const partObjectsRef = useRef({}); // normalized GLB part key → THREE.Object3D[] (visibility routing)
+  const decalSurfaceObjectsRef = useRef([]); // hidden Decal Surface carrier mesh(es)
   const frameRef    = useRef(null);
 
   // Full-wrap design layer. The uploaded image is composited over the current shell
