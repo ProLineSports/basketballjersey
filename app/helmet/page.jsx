@@ -1469,6 +1469,7 @@ export default function HelmetBuilder() {
     loader.load('/SpeedFlex.glb', (gltf) => {
       const model = gltf.scene;
       modelRef.current = model;
+      decalSurfaceObjectsRef.current = [];
 
       // Smooth normals + enable shadows
       model.traverse(child => {
@@ -1548,6 +1549,37 @@ export default function HelmetBuilder() {
         });
       });
 
+      // Collect the hidden carrier shell used only for decal-related rendering and
+      // interaction. This duplicates the shell curvature but fills the cutouts so decals
+      // can hug the helmet while bridging across vents / holes cleanly.
+      decalSurfaceObjectsRef.current = [];
+      model.traverse(child => {
+        if (child.name === 'Decal Surface') {
+          decalSurfaceObjectsRef.current.push(child);
+          child.userData.decalSurfaceRoot = true;
+        }
+      });
+      decalSurfaceObjectsRef.current.forEach(root => {
+        root.traverse(obj => {
+          if (!obj.isMesh) return;
+          obj.userData.decalSurfaceMesh = true;
+          obj.castShadow = false;
+          obj.receiveShadow = false;
+          obj.visible = true; // keep raycasting alive
+          const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+          mats.forEach(mat => {
+            if (!mat) return;
+            mat.transparent = true;
+            mat.opacity = 0;
+            mat.colorWrite = false;
+            mat.depthWrite = false;
+            mat.depthTest = true;
+            mat.side = THREE.DoubleSide;
+            mat.needsUpdate = true;
+          });
+        });
+      });
+
       // Rebuild part references from the FINAL loaded hierarchy. This is the key routing
       // step for every color control, including parts whose Blender object name differs
       // from its material name (clips, pads, chin guards, metal parts, etc.).
@@ -1557,9 +1589,12 @@ export default function HelmetBuilder() {
       // Ignore the source Shell UV islands for full wraps. Generate one panoramic
       // projection instead: FRONT at texture center, one seam at center BACK. The same
       // pass also creates model-space/path attributes used by surface-hugging stripe decals.
+      const decalProjectionRoots = decalSurfaceObjectsRef.current.length
+        ? decalSurfaceObjectsRef.current
+        : (partObjectsRef.current[partKey('Shell')] || []);
       const shellProjection = applyPanoramicShellWrapUV(
         model,
-        partObjectsRef.current[partKey('Shell')] || []
+        decalProjectionRoots
       );
 
       // Build a second, coincident Shell surface used only for decal layers. Because
@@ -1567,7 +1602,7 @@ export default function HelmetBuilder() {
       // an opaque wrap or stripe. Polygon offset keeps it visually flush without floating.
       stripeUniformsRef.current.centerX.value = shellProjection?.centerX || 0;
       const decalOverlays = createShellDecalOverlays(
-        partObjectsRef.current[partKey('Shell')] || [],
+        decalProjectionRoots,
         stripeUniformsRef.current
       );
       decalOverlayMeshesRef.current = decalOverlays.overlays;
@@ -1612,6 +1647,7 @@ export default function HelmetBuilder() {
       decalOverlayMaterialsRef.current.forEach(mat => mat.dispose());
       decalOverlayMeshesRef.current = [];
       decalOverlayMaterialsRef.current = [];
+      decalSurfaceObjectsRef.current = [];
       sideLogoMeshesRef.current.forEach(mesh => mesh.parent?.remove(mesh));
       sideLogoMaterialsRef.current.forEach(mat => mat.dispose());
       sideLogoTexturesRef.current.forEach(tex => tex.dispose?.());
@@ -1780,10 +1816,12 @@ export default function HelmetBuilder() {
     const model = modelRef.current;
     if (!loaded || !scene || !renderer || !camera || !model) return;
 
-    const shellRoots = partObjectsRef.current[partKey('Shell')] || [];
-    const shellMeshes = collectMeshDescendants(shellRoots);
-    const boundsWorld = getWorldBoundsForRoots(shellRoots);
-    const boundsModel = computeRootsBoundsInModelSpace(model, shellRoots);
+    const decalRoots = decalSurfaceObjectsRef.current.length
+      ? decalSurfaceObjectsRef.current
+      : (partObjectsRef.current[partKey('Shell')] || []);
+    const shellMeshes = collectMeshDescendants(decalRoots);
+    const boundsWorld = getWorldBoundsForRoots(decalRoots);
+    const boundsModel = computeRootsBoundsInModelSpace(model, decalRoots);
     if (!shellMeshes.length || !boundsWorld || !boundsModel) return;
 
     const cleanupMeshes = () => {
