@@ -320,6 +320,15 @@ function applyStripeProjectionAttributes(model, roots, projection, xCompression 
 // is sampled. Result: it is exactly on the helmet surface, always above a wrap, naturally
 // below separate bumper geometry, and its rear endpoint can move forward without
 // deforming the stripe thickness.
+function applyAlphaEdgeQuality(material) {
+  if (!material) return material;
+  // Helps transparent decal edges read cleaner when antialiasing/MSAA is available.
+  material.alphaToCoverage = true;
+  material.premultipliedAlpha = true;
+  material.needsUpdate = true;
+  return material;
+}
+
 function installDecalOverlayShader(material, decalUniforms) {
   if (!material || material.userData?.helmetDecalOverlayInstalled) return;
   material.userData.helmetDecalOverlayInstalled = true;
@@ -397,7 +406,7 @@ if (uHelmetStripesEnabled > 0.5) {
   float stripeW = 0.020 * uHelmetStripeWidthScale;
   float stripeX = vHelmetModelPosition.x - uHelmetStripeCenterX;
   float absStripeX = abs(stripeX);
-  float edgeAA = max(fwidth(stripeX) * 1.5, 0.00030);
+  float edgeAA = max(fwidth(stripeX) * 2.0, 0.00045);
 
   float totalHalfWidth = stripeW * 1.5;
   vec3 stripeColor = uHelmetStripeCenterColor;
@@ -428,7 +437,7 @@ if (uHelmetStripesEnabled > 0.5) {
     else stripeColor = uHelmetStripeLeftColor;
   }
 
-  float pathAA = max(fwidth(vHelmetStripePath) * 1.5, 0.0020);
+  float pathAA = max(fwidth(vHelmetStripePath) * 1.9, 0.0025);
   float lengthMask = 1.0 - smoothstep(
     uHelmetStripeLength - pathAA,
     uHelmetStripeLength + pathAA,
@@ -498,6 +507,7 @@ function createShellDecalOverlays(roots, decalUniforms) {
       polygonOffsetFactor: -1,
       polygonOffsetUnits: -1,
     });
+    applyAlphaEdgeQuality(material);
     installDecalOverlayShader(material, decalUniforms);
 
     const overlay = new THREE.Mesh(source.geometry, material);
@@ -553,6 +563,7 @@ function createWorldSpaceDecalOverlays(scene, roots, decalUniforms, options = {}
         polygonOffsetFactor: -1,
         polygonOffsetUnits: -1,
       });
+      applyAlphaEdgeQuality(material);
       installDecalOverlayShader(material, decalUniforms);
 
       const overlay = new THREE.Mesh(geometry, material);
@@ -791,7 +802,7 @@ function createSideLogoTexturePack(image, options = {}) {
     strokeColor = '#ffffff',
     strokeThickness = 8,
     strokeOpacity = 1,
-    textureSize = 1024,
+    textureSize = 2048,
     textureWidth = null,
     textureHeight = null,
     arcCompensation = 0,
@@ -805,6 +816,8 @@ function createSideLogoTexturePack(image, options = {}) {
   baseCanvas.height = canvasHeight;
   const baseCtx = baseCanvas.getContext('2d');
   if (!baseCtx) return null;
+  baseCtx.imageSmoothingEnabled = true;
+  baseCtx.imageSmoothingQuality = 'high';
 
   // Keep the base logo footprint fixed so increasing the stroke does not make
   // the logo itself shrink. We reserve a generous constant margin instead.
@@ -829,6 +842,8 @@ function createSideLogoTexturePack(image, options = {}) {
     out.height = canvasHeight;
     const ctx = out.getContext('2d');
     if (!ctx) return out;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
     const radius = Math.max(0, radiusPx);
     const steps = Math.max(12, Math.ceil(radius * 12));
     for (let i = 0; i < steps; i++) {
@@ -855,6 +870,8 @@ function createSideLogoTexturePack(image, options = {}) {
   finalCanvas.height = canvasHeight;
   const finalCtx = finalCanvas.getContext('2d');
   if (!finalCtx) return null;
+  finalCtx.imageSmoothingEnabled = true;
+  finalCtx.imageSmoothingQuality = 'high';
   if (strokeEnabled && strokeThickness > 0 && strokeOpacity > 0) {
     const strokeCanvas = makeExpandedAlphaCanvas(strokeThickness, strokeColor, strokeOpacity, true);
     finalCtx.drawImage(strokeCanvas, 0, 0);
@@ -2284,7 +2301,7 @@ export default function HelmetBuilder() {
           scene,
           decalSurfaceObjectsRef.current,
           stripeUniformsRef.current,
-          { normalLift: 0.00042, renderOrder: 28, namePrefix: 'HelmetStripeCarrier', subdivisionLevels: 1 }
+          { normalLift: 0.00042, renderOrder: 28, namePrefix: 'HelmetStripeCarrier', subdivisionLevels: 2 }
         );
         stripeCarrierOverlayMeshesRef.current = stripeCarrier.overlays;
         stripeCarrierOverlayMaterialsRef.current = stripeCarrier.materials;
@@ -2295,7 +2312,7 @@ export default function HelmetBuilder() {
           scene,
           shellRoots,
           stripeUniformsRef.current,
-          { normalLift: 0.00042, renderOrder: 28, namePrefix: 'HelmetStripeFallback', subdivisionLevels: 1 }
+          { normalLift: 0.00042, renderOrder: 28, namePrefix: 'HelmetStripeFallback', subdivisionLevels: 2 }
         );
         stripeCarrierOverlayMeshesRef.current = stripeFallback.overlays;
         stripeCarrierOverlayMaterialsRef.current = stripeFallback.materials;
@@ -2711,6 +2728,8 @@ export default function HelmetBuilder() {
       const frame = getSideFrame(side);
       if (!frame) return;
 
+      const maxTextureSize = rendererRef.current?.capabilities?.maxTextureSize || 4096;
+      const sideTextureSize = Math.min(2048, maxTextureSize);
       const pack = createSideLogoTexturePack(image, {
         mirror: side === 'left' ? sideLogoLeftMirror : sideLogoRightMirror,
         rotate180: side === 'left' ? sideLogoLeftRotate180 : sideLogoRightRotate180,
@@ -2718,6 +2737,7 @@ export default function HelmetBuilder() {
         strokeColor: sideLogoStrokeColor,
         strokeThickness: sideLogoStrokeThickness,
         strokeOpacity: sideLogoStrokeOpacity,
+        textureSize: sideTextureSize,
       });
       if (!pack) return;
 
@@ -2767,6 +2787,7 @@ export default function HelmetBuilder() {
         roughness: 0.95,
         metalness: 0.0,
       });
+      applyAlphaEdgeQuality(shadowMat);
       installSideLogoSurfaceProjection(shadowMat, shadowUniforms, `side-logo-shadow-v2-${side}`);
 
       const mainMat = new THREE.MeshPhysicalMaterial({
@@ -2783,6 +2804,7 @@ export default function HelmetBuilder() {
         polygonOffsetUnits: -2,
       });
       mainMat.userData.sideLogoMainMaterial = true;
+      applyAlphaEdgeQuality(mainMat);
       installSideLogoSurfaceProjection(mainMat, mainUniforms, `side-logo-main-v2-${side}`);
       applyDecalFinishToMaterials([mainMat], scene, decalFinishRef.current);
 
@@ -3185,8 +3207,8 @@ export default function HelmetBuilder() {
           strokeEnabled:false,
           // A wide canvas gives wordmarks far more useful horizontal pixels than a
           // giant square texture and is cheaper to regenerate.
-          textureWidth: isFront ? 3072 : 4096,
-          textureHeight: isFront ? 1536 : 1024,
+          textureWidth: Math.min(isFront ? 4096 : 6144, rendererRef.current?.capabilities?.maxTextureSize || 4096),
+          textureHeight: Math.min(isFront ? 2048 : 1536, rendererRef.current?.capabilities?.maxTextureSize || 4096),
           arcCompensation: isFront ? 0 : bumperLogoRearCurve,
         });
         cache = { key:cacheKey, pack:nextPack };
@@ -3238,6 +3260,7 @@ export default function HelmetBuilder() {
           side:THREE.DoubleSide, depthWrite:false, depthTest:true, roughness:0.95, metalness:0,
           polygonOffset:true, polygonOffsetFactor:-1, polygonOffsetUnits:-1,
         });
+        applyAlphaEdgeQuality(shadowMat);
         installSideLogoSurfaceProjection(shadowMat, shadowUniforms, 'bumper-logo-front-shadow-surface-v2');
 
         const mainMat = new THREE.MeshPhysicalMaterial({
@@ -3246,6 +3269,7 @@ export default function HelmetBuilder() {
           polygonOffset:true, polygonOffsetFactor:-2, polygonOffsetUnits:-2,
         });
         mainMat.userData.bumperLogoMainMaterial = true;
+        applyAlphaEdgeQuality(mainMat);
         installSideLogoSurfaceProjection(mainMat, mainUniforms, 'bumper-logo-front-main-surface-v2');
         applyDecalFinishToMaterials([mainMat], scene, bumperLogoFinishRef.current);
 
@@ -3297,6 +3321,8 @@ export default function HelmetBuilder() {
       mainMat.userData.bumperLogoMainMaterial = true;
       applyDecalFinishToMaterials([mainMat], scene, bumperLogoFinishRef.current);
 
+      applyAlphaEdgeQuality(shadowMat);
+      applyAlphaEdgeQuality(mainMat);
       const shadowMesh = new THREE.Mesh(shadowGeo, shadowMat);
       shadowMesh.name = `BumperLogo_${slot}_Shadow`;
       shadowMesh.renderOrder = 34;
@@ -4535,7 +4561,7 @@ export default function HelmetBuilder() {
                 </div>
               </div>
               <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.45 }}>
-                Exports now render offscreen at a higher resolution, then downsample for cleaner edges and a more polished final PNG. Higher settings look better but take longer.
+                Exports now render offscreen at a higher resolution, then downsample for cleaner edges and a more polished final PNG. Higher settings look better but take longer. Decal and logo textures also render at higher quality for cleaner edges.
               </div>
             </div>
 
