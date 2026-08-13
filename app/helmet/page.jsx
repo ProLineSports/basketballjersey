@@ -742,7 +742,10 @@ function subdivideGeometryWithAttributes(geometry, iterations = 1) {
 
     out.computeBoundingBox();
     out.computeBoundingSphere();
-    if (out.getAttribute('position')) out.computeVertexNormals();
+    // IMPORTANT: do not recompute normals here. The subdivision routine already
+    // interpolates and normalizes the source normals. Recomputing normals on this
+    // non-indexed geometry produces one face normal per tiny triangle, which is what
+    // caused the visible grid/triangulation pattern across the stripe carrier.
     working.dispose?.();
     working = out;
   }
@@ -2465,11 +2468,21 @@ export default function HelmetBuilder() {
 
     const img = stripeDesignImageRef.current;
     let canvas = stripeDesignCanvasRef.current;
+
+    // Custom stripe artwork was previously rasterized to only 1024×3072, which became
+    // visibly stair-stepped during close-up views. Use the highest practical 1:3 canvas
+    // supported by the current GPU, up to 2048×6144.
+    const maxTextureSize = rendererRef.current?.capabilities?.maxTextureSize || 4096;
+    const targetHeight = Math.min(6144, maxTextureSize);
+    const targetWidth = Math.min(2048, Math.max(1024, Math.floor(targetHeight / 3)));
+
     if (!canvas) {
       canvas = document.createElement('canvas');
-      canvas.width = 1024;
-      canvas.height = 3072;
       stripeDesignCanvasRef.current = canvas;
+    }
+    if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
     }
 
     const ctx = canvas.getContext('2d');
@@ -2478,6 +2491,8 @@ export default function HelmetBuilder() {
     const w = canvas.width;
     const h = canvas.height;
     ctx.clearRect(0, 0, w, h);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
 
     // Fit inside the available stripe zone by default so the full uploaded design is visible.
     const containScale = Math.min(w / img.naturalWidth, h / img.naturalHeight);
@@ -2500,6 +2515,13 @@ export default function HelmetBuilder() {
       texture.colorSpace = THREE.SRGBColorSpace;
       texture.wrapS = THREE.ClampToEdgeWrapping;
       texture.wrapT = THREE.ClampToEdgeWrapping;
+      texture.magFilter = THREE.LinearFilter;
+      texture.minFilter = THREE.LinearMipmapLinearFilter;
+      texture.generateMipmaps = true;
+      texture.anisotropy = Math.min(
+        16,
+        rendererRef.current?.capabilities?.getMaxAnisotropy?.() || 8
+      );
       stripeDesignTextureRef.current = texture;
     }
     texture.needsUpdate = true;
@@ -3959,7 +3981,7 @@ export default function HelmetBuilder() {
                   </div>
 
                   <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.5 }}>
-                    Choose a preset stripe layout and adjust its width, length, and colors. Stripes use a dedicated decal surface above any full wrap and beneath the bumpers, so Shell glitter and Car Paint effects cannot show through. Crown screw hardware is hidden while stripes are active, and the stripe carrier is subdivided for smoother, more vector-like edges.
+                    Choose a preset stripe layout and adjust its width, length, and colors. Stripes use a dedicated decal surface above any full wrap and beneath the bumpers, so Shell glitter and Car Paint effects cannot show through. Crown screw hardware is hidden while stripes are active. Preset patterns are generated procedurally in the shader, while uploaded stripe artwork is rendered to a high-resolution GPU-aware texture for cleaner close-up edges.
                   </div>
 
                   <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:10 }}>
