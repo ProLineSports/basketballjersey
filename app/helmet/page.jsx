@@ -520,7 +520,7 @@ function createShellDecalOverlays(roots, decalUniforms) {
 
 
 function createWorldSpaceDecalOverlays(scene, roots, decalUniforms, options = {}) {
-  const { normalLift = 0, renderOrder = 20, namePrefix = 'CarrierStripe' } = options;
+  const { normalLift = 0, renderOrder = 20, namePrefix = 'CarrierStripe', subdivisionLevels = 0 } = options;
   const overlays = [];
   const materials = [];
   const seen = new Set();
@@ -531,7 +531,8 @@ function createWorldSpaceDecalOverlays(scene, roots, decalUniforms, options = {}
       seen.add(source);
       source.updateWorldMatrix(true, false);
 
-      const geometry = source.geometry.clone();
+      let geometry = source.geometry.clone();
+      if (subdivisionLevels > 0) geometry = subdivideGeometryWithAttributes(geometry, subdivisionLevels);
       if (normalLift) offsetGeometryAlongNormals(geometry, normalLift);
       const material = new THREE.MeshPhysicalMaterial({
         color: 0xffffff,
@@ -667,6 +668,86 @@ function offsetGeometryAlongNormals(geometry, amount) {
   geometry.computeBoundingBox();
   geometry.computeBoundingSphere();
   return geometry;
+}
+
+
+function subdivideGeometryWithAttributes(geometry, iterations = 1) {
+  if (!geometry || iterations <= 0) return geometry;
+  let working = geometry.index ? geometry.toNonIndexed() : geometry.clone();
+
+  for (let iter = 0; iter < iterations; iter++) {
+    const attrNames = Object.keys(working.attributes);
+    const attrMeta = attrNames.map(name => {
+      const attr = working.getAttribute(name);
+      return { name, itemSize: attr.itemSize };
+    });
+
+    const out = new THREE.BufferGeometry();
+    const buffers = {};
+    attrMeta.forEach(meta => { buffers[meta.name] = []; });
+
+    const pushVertex = (storage, values) => {
+      for (let i = 0; i < values.length; i++) storage.push(values[i]);
+    };
+
+    const readVertex = (attr, index) => {
+      const outVals = [];
+      for (let k = 0; k < attr.itemSize; k++) outVals.push(attr.array[index * attr.itemSize + k]);
+      return outVals;
+    };
+
+    const midpoint = (a, b, name) => {
+      const m = a.map((v, i) => (v + b[i]) * 0.5);
+      if (name === 'normal' && m.length >= 3) {
+        const len = Math.hypot(m[0], m[1], m[2]) || 1;
+        m[0] /= len; m[1] /= len; m[2] /= len;
+      }
+      return m;
+    };
+
+    const triPatterns = [
+      [0, 3, 5], // a, ab, ca
+      [3, 1, 4], // ab, b, bc
+      [5, 4, 2], // ca, bc, c
+      [3, 4, 5], // ab, bc, ca
+    ];
+
+    const position = working.getAttribute('position');
+    const triCount = Math.floor(position.count / 3);
+
+    for (let tri = 0; tri < triCount; tri++) {
+      const ia = tri * 3;
+      const ib = ia + 1;
+      const ic = ia + 2;
+
+      attrMeta.forEach(({ name }) => {
+        const attr = working.getAttribute(name);
+        const a = readVertex(attr, ia);
+        const b = readVertex(attr, ib);
+        const c = readVertex(attr, ic);
+        const ab = midpoint(a, b, name);
+        const bc = midpoint(b, c, name);
+        const ca = midpoint(c, a, name);
+        const verts = [a, b, c, ab, bc, ca];
+
+        triPatterns.forEach(pattern => {
+          pattern.forEach(idx => pushVertex(buffers[name], verts[idx]));
+        });
+      });
+    }
+
+    attrMeta.forEach(({ name, itemSize }) => {
+      out.setAttribute(name, new THREE.Float32BufferAttribute(buffers[name], itemSize));
+    });
+
+    out.computeBoundingBox();
+    out.computeBoundingSphere();
+    if (out.getAttribute('position')) out.computeVertexNormals();
+    working.dispose?.();
+    working = out;
+  }
+
+  return working;
 }
 
 function createSelectionBoxTexture() {
@@ -2198,14 +2279,19 @@ export default function HelmetBuilder() {
           scene,
           decalSurfaceObjectsRef.current,
           stripeUniformsRef.current,
-          { normalLift: 0.00042, renderOrder: 28, namePrefix: 'HelmetStripeCarrier' }
+          { normalLift: 0.00042, renderOrder: 28, namePrefix: 'HelmetStripeCarrier', subdivisionLevels: 1 }
         );
         stripeCarrierOverlayMeshesRef.current = stripeCarrier.overlays;
         stripeCarrierOverlayMaterialsRef.current = stripeCarrier.materials;
       } else {
         // Fallback for an older GLB: put stripes back on the visible shell overlay.
         stripeUniformsRef.current.centerX.value = shellProjection?.centerX || 0;
-        const stripeFallback = createShellDecalOverlays(shellRoots, stripeUniformsRef.current);
+        const stripeFallback = createWorldSpaceDecalOverlays(
+          scene,
+          shellRoots,
+          stripeUniformsRef.current,
+          { normalLift: 0.00042, renderOrder: 28, namePrefix: 'HelmetStripeFallback', subdivisionLevels: 1 }
+        );
         stripeCarrierOverlayMeshesRef.current = stripeFallback.overlays;
         stripeCarrierOverlayMaterialsRef.current = stripeFallback.materials;
       }
@@ -3873,7 +3959,7 @@ export default function HelmetBuilder() {
                   </div>
 
                   <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.5 }}>
-                    Choose a preset stripe layout and adjust its width, length, and colors. Stripes use a dedicated decal surface above any full wrap and beneath the bumpers, so Shell glitter and Car Paint effects cannot show through. Crown screw hardware is hidden while stripes are active.
+                    Choose a preset stripe layout and adjust its width, length, and colors. Stripes use a dedicated decal surface above any full wrap and beneath the bumpers, so Shell glitter and Car Paint effects cannot show through. Crown screw hardware is hidden while stripes are active, and the stripe carrier is subdivided for smoother, more vector-like edges.
                   </div>
 
                   <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:10 }}>
