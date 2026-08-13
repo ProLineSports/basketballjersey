@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { DecalGeometry } from 'three/addons/geometries/DecalGeometry.js';
 
 // ── PART / COLOR ZONES ───────────────────────────────────────────────────────
 // `parts` uses the exact mesh/node names exported in SpeedFlex.glb.
@@ -495,14 +496,13 @@ function createWorldSpaceDecalOverlays(scene, roots, decalUniforms, options = {}
         alphaTest: 0.001,
         side: THREE.DoubleSide,
         depthTest: true,
-        // Do not let the transparent stripe carrier establish depth in front of
-        // physical helmet parts such as the bumpers.
-        depthWrite: false,
+        // Restore the stripe decal so it reads clearly above the shell again.
+        // The bumpers still win visually because the stripe lives on the shell carrier
+        // while the real bumper geometry remains physically in front.
+        depthWrite: true,
         polygonOffset: true,
-        // Positive offset biases the stripe layer slightly back in the depth buffer.
-        // This preserves the simulated vinyl lift while ensuring real bumpers win.
-        polygonOffsetFactor: 2,
-        polygonOffsetUnits: 2,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1,
       });
       installDecalOverlayShader(material, decalUniforms);
 
@@ -659,9 +659,10 @@ function createSideLogoTexturePack(image, options = {}) {
     strokeColor = '#ffffff',
     strokeThickness = 8,
     strokeOpacity = 1,
+    textureSize = 1024,
   } = options;
 
-  const size = 1024;
+  const size = Math.max(512, textureSize | 0);
   const baseCanvas = document.createElement('canvas');
   baseCanvas.width = size;
   baseCanvas.height = size;
@@ -1899,7 +1900,7 @@ export default function HelmetBuilder() {
           scene,
           decalSurfaceObjectsRef.current,
           stripeUniformsRef.current,
-          { normalLift: 0.00012, renderOrder: 18, namePrefix: 'HelmetStripeCarrier' }
+          { normalLift: 0.00042, renderOrder: 28, namePrefix: 'HelmetStripeCarrier' }
         );
         stripeCarrierOverlayMeshesRef.current = stripeCarrier.overlays;
         stripeCarrierOverlayMaterialsRef.current = stripeCarrier.materials;
@@ -2752,14 +2753,13 @@ export default function HelmetBuilder() {
       const hit = getBumperHit(slot, acrossValue, verticalValue);
       if (!hit) return;
 
-      const pack = createSideLogoTexturePack(image, { strokeEnabled:false });
+      const pack = createSideLogoTexturePack(image, { strokeEnabled:false, textureSize:2048 });
       if (!pack) return;
 
       let baseHeight = boundsModel.width * 0.060 * scaleValue;
       let baseWidth = baseHeight * THREE.MathUtils.clamp(pack.aspect, 0.55, 5.0);
       // Bumper marks are commonly wide wordmarks. Allow artwork to span almost the
-      // full physical bumper width; the surface shader still clips it strictly to the
-      // bumper geometry, so it cannot spill onto the shell.
+      // full physical bumper width while still clipping to the bumper mesh itself.
       const maxWidth = boundsModel.width * 0.98;
       if (baseWidth > maxWidth) {
         const k = maxWidth / baseWidth;
@@ -2770,32 +2770,35 @@ export default function HelmetBuilder() {
       const normalMatrix = new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld);
       const fallback = new THREE.Vector3(0, 0, isFront ? 1 : -1).transformDirection(model.matrixWorld).normalize();
       const worldNormal = hit.face?.normal?.clone().applyMatrix3(normalMatrix).normalize() || fallback;
-      const center = hit.point.clone();
+      const projectorPosition = hit.point.clone().addScaledVector(worldNormal, 0.00045);
       const helper = new THREE.Object3D();
-      helper.position.copy(center);
-      helper.lookAt(center.clone().add(worldNormal));
+      helper.position.copy(projectorPosition);
+      helper.lookAt(projectorPosition.clone().add(worldNormal));
       helper.rotateZ(rotationValue * Math.PI / 180);
-      const quat = helper.quaternion.clone();
-      const right = new THREE.Vector3(1,0,0).applyQuaternion(quat).normalize();
-      const up = new THREE.Vector3(0,1,0).applyQuaternion(quat).normalize();
-      const depth = Math.max(baseHeight * 0.6, boundsModel.depth * 0.045);
-      const lift = Math.max(boundsModel.width * 0.00045, 0.00018);
+      const orientation = new THREE.Euler().setFromQuaternion(helper.quaternion, 'XYZ');
+      const projectorDepth = Math.max(boundsModel.depth * 0.20, baseHeight * 0.90, 0.06);
 
-      const shadowUniforms = {
-        center:{ value:center }, right:{ value:right }, up:{ value:up }, normal:{ value:worldNormal },
-        width:{ value:baseWidth * 1.02 }, height:{ value:baseHeight * 1.02 }, depth:{ value:depth }, lift:{ value:lift * 0.25 },
-      };
-      const mainUniforms = {
-        center:{ value:center }, right:{ value:right }, up:{ value:up }, normal:{ value:worldNormal },
-        width:{ value:baseWidth }, height:{ value:baseHeight }, depth:{ value:depth }, lift:{ value:lift * 0.65 },
-      };
+      const shadowGeo = new DecalGeometry(
+        hit.object,
+        projectorPosition,
+        orientation,
+        new THREE.Vector3(baseWidth * 1.018, baseHeight * 1.018, projectorDepth),
+      );
+      const mainGeo = new DecalGeometry(
+        hit.object,
+        projectorPosition,
+        orientation,
+        new THREE.Vector3(baseWidth, baseHeight, projectorDepth),
+      );
+      const lift = Math.max(boundsModel.width * 0.00085, 0.00030);
+      offsetGeometryAlongNormals(shadowGeo, lift * 0.25);
+      offsetGeometryAlongNormals(mainGeo, lift * 0.85);
 
       const shadowMat = new THREE.MeshPhysicalMaterial({
-        color:0x000000, map:pack.rimTexture, transparent:true, alphaTest:0.01, opacity:0.32,
+        color:0x000000, map:pack.rimTexture, transparent:true, alphaTest:0.01, opacity:0.28,
         side:THREE.DoubleSide, depthWrite:false, depthTest:true, roughness:0.95, metalness:0,
         polygonOffset:true, polygonOffsetFactor:-1, polygonOffsetUnits:-1,
       });
-      installSideLogoSurfaceProjection(shadowMat, shadowUniforms, `bumper-logo-shadow-${slot}`);
 
       const mainMat = new THREE.MeshPhysicalMaterial({
         color:0xffffff, map:pack.mainTexture, transparent:true, alphaTest:0.01, opacity:1,
@@ -2803,12 +2806,23 @@ export default function HelmetBuilder() {
         polygonOffset:true, polygonOffsetFactor:-2, polygonOffsetUnits:-2,
       });
       mainMat.userData.bumperLogoMainMaterial = true;
-      installSideLogoSurfaceProjection(mainMat, mainUniforms, `bumper-logo-main-${slot}`);
       applyDecalFinishToMaterials([mainMat], scene, decalFinishRef.current);
 
-      const shadowMeshes = createCarrierSurfaceLogoMeshes(scene, bumperMeshes, shadowMat, `bumper-${slot}`, 'Shadow', 34);
-      const mainMeshes = createCarrierSurfaceLogoMeshes(scene, bumperMeshes, mainMat, `bumper-${slot}`, 'Artwork', 35);
-      bumperLogoMeshesRef.current.push(...shadowMeshes, ...mainMeshes);
+      const shadowMesh = new THREE.Mesh(shadowGeo, shadowMat);
+      shadowMesh.name = `BumperLogo_${slot}_Shadow`;
+      shadowMesh.renderOrder = 34;
+      shadowMesh.castShadow = false;
+      shadowMesh.receiveShadow = false;
+      scene.add(shadowMesh);
+
+      const mainMesh = new THREE.Mesh(mainGeo, mainMat);
+      mainMesh.name = `BumperLogo_${slot}_Artwork`;
+      mainMesh.renderOrder = 35;
+      mainMesh.castShadow = false;
+      mainMesh.receiveShadow = false;
+      scene.add(mainMesh);
+
+      bumperLogoMeshesRef.current.push(shadowMesh, mainMesh);
       bumperLogoMaterialsRef.current.push(shadowMat, mainMat);
       bumperLogoTexturesRef.current.push(pack.rimTexture, pack.mainTexture);
     };
@@ -3324,7 +3338,7 @@ export default function HelmetBuilder() {
                   </div>
 
                   <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.5 }}>
-                    This preset uses three equal-width stripes with no gaps. Stripes use a dedicated decal surface above any full wrap and beneath the bumpers, so Shell glitter and Car Paint effects cannot show through. Crown screw hardware remains visible.
+                    This preset uses three equal-width stripes with no gaps. Stripes use a dedicated decal surface above any full wrap and beneath the bumpers, so Shell glitter and Car Paint effects cannot show through. Crown screw hardware is hidden while stripes are active, and the stripe sits beneath the physical bumpers.
                   </div>
 
                   <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:10 }}>
@@ -3545,7 +3559,7 @@ export default function HelmetBuilder() {
 
                 <CollapsibleSection title="BUMPER LOGOS">
                   <div style={{ fontSize:10, color:'#6b7280', lineHeight:1.5, marginBottom:10 }}>
-                    Add independent logos to the front and rear bumpers. Artwork starts large and can span nearly the full bumper width. It is clipped by the actual bumper geometry so it cannot extend onto the shell. Bumper logos use the active Decal Finish and include the same subtle raised-vinyl effect.
+                    Add independent logos to the front and rear bumpers. Artwork starts large and can span nearly the full bumper width. It wraps directly to the 3D bumper geometry, stays clipped to the bumper itself, uses the active Decal Finish, and includes the same subtle raised-vinyl effect.
                   </div>
                   {bumperLogoError && <div style={{ marginBottom:10, fontSize:10, color:'#ef4444', lineHeight:1.4 }}>{bumperLogoError}</div>}
                   <input id="front-bumper-logo-upload" type="file" accept="image/png,image/jpeg" onChange={handleFrontBumperLogoUpload} style={{ display:'none' }} />
