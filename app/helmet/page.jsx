@@ -1554,12 +1554,19 @@ export default function HelmetBuilder() {
       // interaction. This duplicates the shell curvature but fills the cutouts so decals
       // can hug the helmet while bridging across vents / holes cleanly.
       decalSurfaceObjectsRef.current = [];
+      const decalSurfaceKey = partKey('Decal Surface');
       model.traverse(child => {
-        if (child.name === 'Decal Surface') {
+        // GLTFLoader sanitizes Blender node names (for example "Decal Surface" can
+        // become "Decal_Surface"). Always compare through partKey instead of relying
+        // on the literal exported name.
+        if (partKey(child.name) === decalSurfaceKey) {
           decalSurfaceObjectsRef.current.push(child);
           child.userData.decalSurfaceRoot = true;
         }
       });
+      if (!decalSurfaceObjectsRef.current.length) {
+        console.warn('[HelmetBuilder] Decal Surface carrier was not found. Main logos will fall back to the visible Shell.');
+      }
       decalSurfaceObjectsRef.current.forEach(root => {
         // Hidden carrier only: never draw it, never write depth, never cast/receive shadows.
         // It exists strictly for raycasting + DecalGeometry projection.
@@ -1823,7 +1830,7 @@ export default function HelmetBuilder() {
 
     const decalRoots = decalSurfaceObjectsRef.current.length
       ? decalSurfaceObjectsRef.current
-      : (partObjectsRef.current[partKey('Shell')] || []);
+      : (partObjectsRef.current[partKey('Shell')] || []); // fallback only if carrier is genuinely missing
     const shellMeshes = collectMeshDescendants(decalRoots);
     const boundsWorld = getWorldBoundsForRoots(decalRoots);
     const boundsModel = computeRootsBoundsInModelSpace(model, decalRoots);
