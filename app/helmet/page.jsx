@@ -469,6 +469,151 @@ function createShellDecalOverlays(roots, decalUniforms) {
   return { overlays, materials };
 }
 
+
+function findFirstProjectableMesh(roots) {
+  for (const root of roots || []) {
+    let found = null;
+    root.traverse(obj => {
+      if (!found && obj.isMesh && obj.geometry?.attributes?.position) found = obj;
+    });
+    if (found) return found;
+  }
+  return null;
+}
+
+function computeRootsBoundsInModelSpace(model, roots) {
+  if (!model || !roots?.length) return null;
+  const p = new THREE.Vector3();
+  const modelInverse = new THREE.Matrix4().copy(model.matrixWorld).invert();
+  let minX = Infinity, maxX = -Infinity;
+  let minY = Infinity, maxY = -Infinity;
+  let minZ = Infinity, maxZ = -Infinity;
+  const seen = new Set();
+
+  roots.forEach(root => {
+    root.traverse(obj => {
+      if (!obj.isMesh || !obj.geometry?.attributes?.position || seen.has(obj)) return;
+      seen.add(obj);
+      obj.updateWorldMatrix(true, false);
+      const localToModel = new THREE.Matrix4().multiplyMatrices(modelInverse, obj.matrixWorld);
+      const pos = obj.geometry.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        p.fromBufferAttribute(pos, i).applyMatrix4(localToModel);
+        minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+        minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+        minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z);
+      }
+    });
+  });
+
+  if (!Number.isFinite(minX)) return null;
+  return {
+    minX, maxX, minY, maxY, minZ, maxZ,
+    width: Math.max(0.000001, maxX - minX),
+    height: Math.max(0.000001, maxY - minY),
+    depth: Math.max(0.000001, maxZ - minZ),
+    centerX: (minX + maxX) / 2,
+    centerY: (minY + maxY) / 2,
+    centerZ: (minZ + maxZ) / 2,
+  };
+}
+
+function createSideLogoTexturePack(image, options = {}) {
+  if (!image) return null;
+  const {
+    mirror = false,
+    rotate180 = false,
+    strokeEnabled = false,
+    strokeColor = '#ffffff',
+    strokeThickness = 8,
+    strokeOpacity = 1,
+  } = options;
+
+  const size = 1024;
+  const baseCanvas = document.createElement('canvas');
+  baseCanvas.width = size;
+  baseCanvas.height = size;
+  const baseCtx = baseCanvas.getContext('2d');
+  if (!baseCtx) return null;
+
+  const maxStrokePad = strokeEnabled ? Math.max(0, strokeThickness) * 4 : 0;
+  const pad = 90 + maxStrokePad;
+  const fitW = size - pad * 2;
+  const fitH = size - pad * 2;
+  const scale = Math.min(fitW / image.naturalWidth, fitH / image.naturalHeight);
+  const drawW = image.naturalWidth * scale;
+  const drawH = image.naturalHeight * scale;
+
+  baseCtx.clearRect(0, 0, size, size);
+  baseCtx.save();
+  baseCtx.translate(size / 2, size / 2);
+  if (rotate180) baseCtx.rotate(Math.PI);
+  baseCtx.scale(mirror ? -1 : 1, 1);
+  baseCtx.drawImage(image, -drawW / 2, -drawH / 2, drawW, drawH);
+  baseCtx.restore();
+
+  const makeExpandedAlphaCanvas = (radiusPx, colorHex, opacityValue, cutCenter = false) => {
+    const out = document.createElement('canvas');
+    out.width = size;
+    out.height = size;
+    const ctx = out.getContext('2d');
+    if (!ctx) return out;
+    const radius = Math.max(0, radiusPx);
+    const steps = Math.max(12, Math.ceil(radius * 12));
+    for (let i = 0; i < steps; i++) {
+      const angle = (i / steps) * Math.PI * 2;
+      const dx = Math.cos(angle) * radius;
+      const dy = Math.sin(angle) * radius;
+      ctx.drawImage(baseCanvas, dx, dy);
+    }
+    ctx.globalCompositeOperation = 'source-in';
+    ctx.globalAlpha = opacityValue;
+    ctx.fillStyle = colorHex;
+    ctx.fillRect(0, 0, size, size);
+    ctx.globalAlpha = 1;
+    if (cutCenter) {
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.drawImage(baseCanvas, 0, 0);
+    }
+    ctx.globalCompositeOperation = 'source-over';
+    return out;
+  };
+
+  const finalCanvas = document.createElement('canvas');
+  finalCanvas.width = size;
+  finalCanvas.height = size;
+  const finalCtx = finalCanvas.getContext('2d');
+  if (!finalCtx) return null;
+  if (strokeEnabled && strokeThickness > 0 && strokeOpacity > 0) {
+    const strokeCanvas = makeExpandedAlphaCanvas(strokeThickness, strokeColor, strokeOpacity, true);
+    finalCtx.drawImage(strokeCanvas, 0, 0);
+  }
+  finalCtx.drawImage(baseCanvas, 0, 0);
+
+  const rimCanvas = makeExpandedAlphaCanvas(
+    Math.max(2, strokeEnabled ? strokeThickness * 0.65 : 4),
+    '#000000',
+    strokeEnabled ? 0.16 : 0.12,
+    true
+  );
+
+  const mainTexture = new THREE.CanvasTexture(finalCanvas);
+  mainTexture.colorSpace = THREE.SRGBColorSpace;
+  mainTexture.wrapS = mainTexture.wrapT = THREE.ClampToEdgeWrapping;
+  mainTexture.needsUpdate = true;
+
+  const rimTexture = new THREE.CanvasTexture(rimCanvas);
+  rimTexture.colorSpace = THREE.SRGBColorSpace;
+  rimTexture.wrapS = rimTexture.wrapT = THREE.ClampToEdgeWrapping;
+  rimTexture.needsUpdate = true;
+
+  return {
+    aspect: image.naturalWidth / Math.max(1, image.naturalHeight),
+    mainTexture,
+    rimTexture,
+  };
+}
+
 const FINISHES = [
   { id: 'gloss',    label: 'Gloss',     roughness: 0.05, metalness: 0.1,  clearcoat: 1.0, clearcoatRoughness: 0.05, iridescence: 0.0 },
   { id: 'matte',    label: 'Matte',     roughness: 0.9,  metalness: 0.0,  clearcoat: 0.0, clearcoatRoughness: 0.0,  iridescence: 0.0 },
@@ -684,6 +829,15 @@ export default function HelmetBuilder() {
   const stripeDesignObjectUrlRef = useRef(null);
   const decalOverlayMeshesRef    = useRef([]);
   const decalOverlayMaterialsRef = useRef([]);
+  const sideLogoMeshesRef        = useRef([]);
+  const sideLogoMaterialsRef     = useRef([]);
+  const sideLogoTexturesRef      = useRef([]);
+  const sideLogoSharedImageRef   = useRef(null);
+  const sideLogoLeftImageRef     = useRef(null);
+  const sideLogoRightImageRef    = useRef(null);
+  const sideLogoSharedObjectUrlRef = useRef(null);
+  const sideLogoLeftObjectUrlRef   = useRef(null);
+  const sideLogoRightObjectUrlRef  = useRef(null);
 
   // Shared shader-uniform objects for Shell stripe decals. The renderer keeps references
   // to these objects across material recompiles (wrap on/off, finish changes, etc.).
@@ -747,6 +901,29 @@ export default function HelmetBuilder() {
   const [helmetStripeDesignRevision, setHelmetStripeDesignRevision] = useState(0);
   const [activeViewPreset, setActiveViewPreset] = useState('sideA');
   const [decalFinish, setDecalFinish] = useState('gloss');
+
+  const [sideLogoIndependent, setSideLogoIndependent] = useState(false);
+  const [sideLogoError, setSideLogoError] = useState('');
+  const [sideLogoSharedPreviewUrl, setSideLogoSharedPreviewUrl] = useState(null);
+  const [sideLogoSharedFileName, setSideLogoSharedFileName] = useState('');
+  const [sideLogoLeftPreviewUrl, setSideLogoLeftPreviewUrl] = useState(null);
+  const [sideLogoLeftFileName, setSideLogoLeftFileName] = useState('');
+  const [sideLogoRightPreviewUrl, setSideLogoRightPreviewUrl] = useState(null);
+  const [sideLogoRightFileName, setSideLogoRightFileName] = useState('');
+  const [sideLogoLeftVisible, setSideLogoLeftVisible] = useState(true);
+  const [sideLogoRightVisible, setSideLogoRightVisible] = useState(true);
+  const [sideLogoLeftMirror, setSideLogoLeftMirror] = useState(false);
+  const [sideLogoRightMirror, setSideLogoRightMirror] = useState(true);
+  const [sideLogoLeftRotate180, setSideLogoLeftRotate180] = useState(false);
+  const [sideLogoRightRotate180, setSideLogoRightRotate180] = useState(false);
+  const [sideLogoScale, setSideLogoScale] = useState(1);
+  const [sideLogoFrontBack, setSideLogoFrontBack] = useState(0);
+  const [sideLogoUpDown, setSideLogoUpDown] = useState(0);
+  const [sideLogoStrokeEnabled, setSideLogoStrokeEnabled] = useState(false);
+  const [sideLogoStrokeColor, setSideLogoStrokeColor] = useState('#ffffff');
+  const [sideLogoStrokeThickness, setSideLogoStrokeThickness] = useState(8);
+  const [sideLogoStrokeOpacity, setSideLogoStrokeOpacity] = useState(1);
+  const [sideLogoRevision, setSideLogoRevision] = useState(0);
 
   const finishRef = useRef(finish);
   useEffect(() => { finishRef.current = finish; }, [finish]);
@@ -912,6 +1089,80 @@ export default function HelmetBuilder() {
   useEffect(() => () => {
     if (stripeDesignObjectUrlRef.current) URL.revokeObjectURL(stripeDesignObjectUrlRef.current);
     if (stripeDesignTextureRef.current) stripeDesignTextureRef.current.dispose();
+  }, []);
+
+  const assignSideLogoFile = useCallback((slot, file) => {
+    if (!file) return;
+    if (!['image/png', 'image/jpeg'].includes(file.type)) {
+      setSideLogoError('Please upload a PNG or JPEG for the side logo decal.');
+      return;
+    }
+
+    const objectUrl = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const slotMap = {
+        shared: { ref: sideLogoSharedImageRef, urlRef: sideLogoSharedObjectUrlRef, setPreview: setSideLogoSharedPreviewUrl, setName: setSideLogoSharedFileName },
+        left: { ref: sideLogoLeftImageRef, urlRef: sideLogoLeftObjectUrlRef, setPreview: setSideLogoLeftPreviewUrl, setName: setSideLogoLeftFileName },
+        right: { ref: sideLogoRightImageRef, urlRef: sideLogoRightObjectUrlRef, setPreview: setSideLogoRightPreviewUrl, setName: setSideLogoRightFileName },
+      };
+      const target = slotMap[slot];
+      if (!target) return;
+      if (target.urlRef.current) URL.revokeObjectURL(target.urlRef.current);
+      target.urlRef.current = objectUrl;
+      target.ref.current = img;
+      target.setPreview(objectUrl);
+      target.setName(file.name);
+      setSideLogoError('');
+      setSideLogoRevision(v => v + 1);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      setSideLogoError('That side logo file could not be read. Please try another PNG or JPEG.');
+    };
+    img.src = objectUrl;
+  }, []);
+
+  const handleSharedSideLogoUpload = useCallback((event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (file) assignSideLogoFile('shared', file);
+  }, [assignSideLogoFile]);
+
+  const handleLeftSideLogoUpload = useCallback((event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (file) assignSideLogoFile('left', file);
+  }, [assignSideLogoFile]);
+
+  const handleRightSideLogoUpload = useCallback((event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (file) assignSideLogoFile('right', file);
+  }, [assignSideLogoFile]);
+
+  const removeSideLogoUpload = useCallback((slot) => {
+    const slotMap = {
+      shared: { ref: sideLogoSharedImageRef, urlRef: sideLogoSharedObjectUrlRef, setPreview: setSideLogoSharedPreviewUrl, setName: setSideLogoSharedFileName },
+      left: { ref: sideLogoLeftImageRef, urlRef: sideLogoLeftObjectUrlRef, setPreview: setSideLogoLeftPreviewUrl, setName: setSideLogoLeftFileName },
+      right: { ref: sideLogoRightImageRef, urlRef: sideLogoRightObjectUrlRef, setPreview: setSideLogoRightPreviewUrl, setName: setSideLogoRightFileName },
+    };
+    const target = slotMap[slot];
+    if (!target) return;
+    if (target.urlRef.current) {
+      URL.revokeObjectURL(target.urlRef.current);
+      target.urlRef.current = null;
+    }
+    target.ref.current = null;
+    target.setPreview(null);
+    target.setName('');
+    setSideLogoRevision(v => v + 1);
+  }, []);
+
+  useEffect(() => () => {
+    [sideLogoSharedObjectUrlRef, sideLogoLeftObjectUrlRef, sideLogoRightObjectUrlRef].forEach(ref => {
+      if (ref.current) URL.revokeObjectURL(ref.current);
+    });
   }, []);
 
   const applyViewPreset = useCallback((presetId) => {
@@ -1385,9 +1636,132 @@ export default function HelmetBuilder() {
     uniforms.designEnabled.value = helmetStripeDesignEnabled && hasDesign ? 1 : 0;
   }, [loaded, helmetStripesEnabled, helmetStripeWidth, helmetStripeLength, helmetStripeLeftColor, helmetStripeCenterColor, helmetStripeRightColor, helmetStripeDesignEnabled, helmetStripeDesignRevision]);
 
+  // ── MAIN SIDE LOGO DECALS ───────────────────────────────────────────────
+  useEffect(() => {
+    const cleanupSideLogos = () => {
+      sideLogoMeshesRef.current.forEach(mesh => mesh.parent?.remove(mesh));
+      sideLogoMeshesRef.current = [];
+      sideLogoMaterialsRef.current.forEach(mat => mat.dispose());
+      sideLogoMaterialsRef.current = [];
+      sideLogoTexturesRef.current.forEach(tex => tex.dispose?.());
+      sideLogoTexturesRef.current = [];
+    };
+
+    cleanupSideLogos();
+    if (!loaded || !sceneRef.current || !modelRef.current) return cleanupSideLogos;
+
+    const shellRoots = partObjectsRef.current[partKey('Shell')] || [];
+    const targetMesh = findFirstProjectableMesh(shellRoots);
+    const bounds = computeRootsBoundsInModelSpace(modelRef.current, shellRoots);
+    if (!targetMesh || !bounds) return cleanupSideLogos;
+
+    const resolveImageForSide = (side) => {
+      if (sideLogoIndependent) return side === 'left' ? sideLogoLeftImageRef.current : sideLogoRightImageRef.current;
+      return sideLogoSharedImageRef.current;
+    };
+
+    const makeSide = (side) => {
+      const show = side === 'left' ? sideLogoLeftVisible : sideLogoRightVisible;
+      const image = resolveImageForSide(side);
+      if (!show || !image) return;
+
+      const pack = createSideLogoTexturePack(image, {
+        mirror: side === 'left' ? sideLogoLeftMirror : sideLogoRightMirror,
+        rotate180: side === 'left' ? sideLogoLeftRotate180 : sideLogoRightRotate180,
+        strokeEnabled: sideLogoStrokeEnabled,
+        strokeColor: sideLogoStrokeColor,
+        strokeThickness: sideLogoStrokeThickness,
+        strokeOpacity: sideLogoStrokeOpacity,
+      });
+      if (!pack) return;
+
+      const baseHeight = bounds.height * 0.20 * sideLogoScale;
+      const baseWidth = baseHeight * THREE.MathUtils.clamp(pack.aspect, 0.55, 2.6);
+      const depth = bounds.width * 0.36;
+      const x = side === 'left' ? bounds.minX - bounds.width * 0.035 : bounds.maxX + bounds.width * 0.035;
+      const y = bounds.minY + bounds.height * 0.54 + (sideLogoUpDown / 100) * bounds.height * 0.22;
+      const z = bounds.centerZ + bounds.depth * 0.04 + (sideLogoFrontBack / 100) * bounds.depth * 0.26;
+      const position = new THREE.Vector3(x, y, z);
+      modelRef.current.localToWorld(position);
+
+      const orientation = new THREE.Euler(0, side === 'left' ? Math.PI / 2 : -Math.PI / 2, 0, 'XYZ');
+      const shadowGeo = new DecalGeometry(targetMesh, position, orientation, new THREE.Vector3(baseWidth * 1.04, baseHeight * 1.04, depth));
+      const mainGeo = new DecalGeometry(targetMesh, position, orientation, new THREE.Vector3(baseWidth, baseHeight, depth));
+
+      const shadowMat = new THREE.MeshPhysicalMaterial({
+        color: 0x000000,
+        map: pack.rimTexture,
+        transparent: true,
+        alphaTest: 0.01,
+        opacity: 0.45,
+        side: THREE.FrontSide,
+        depthWrite: false,
+        depthTest: true,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1,
+        roughness: 0.95,
+        metalness: 0.0,
+      });
+
+      const mainMat = new THREE.MeshPhysicalMaterial({
+        color: 0xffffff,
+        map: pack.mainTexture,
+        transparent: true,
+        alphaTest: 0.01,
+        opacity: 1,
+        side: THREE.FrontSide,
+        depthWrite: false,
+        depthTest: true,
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -2,
+      });
+      applyDecalFinishToMaterials([mainMat], sceneRef.current, decalFinishRef.current);
+
+      const shadowMesh = new THREE.Mesh(shadowGeo, shadowMat);
+      shadowMesh.name = `SideLogo_${side}_Shadow`;
+      shadowMesh.renderOrder = 29;
+      modelRef.current.add(shadowMesh);
+
+      const mainMesh = new THREE.Mesh(mainGeo, mainMat);
+      mainMesh.name = `SideLogo_${side}`;
+      mainMesh.renderOrder = 30;
+      modelRef.current.add(mainMesh);
+
+      sideLogoMeshesRef.current.push(shadowMesh, mainMesh);
+      sideLogoMaterialsRef.current.push(shadowMat, mainMat);
+      sideLogoTexturesRef.current.push(pack.rimTexture, pack.mainTexture);
+    };
+
+    makeSide('left');
+    makeSide('right');
+    return cleanupSideLogos;
+  }, [
+    loaded,
+    sideLogoIndependent,
+    sideLogoLeftVisible,
+    sideLogoRightVisible,
+    sideLogoLeftMirror,
+    sideLogoRightMirror,
+    sideLogoLeftRotate180,
+    sideLogoRightRotate180,
+    sideLogoScale,
+    sideLogoFrontBack,
+    sideLogoUpDown,
+    sideLogoStrokeEnabled,
+    sideLogoStrokeColor,
+    sideLogoStrokeThickness,
+    sideLogoStrokeOpacity,
+    sideLogoRevision,
+  ]);
+
   // ── DECAL FINISH ────────────────────────────────────────────────────────────
   useEffect(() => {
-    applyDecalFinishToMaterials(decalOverlayMaterialsRef.current, sceneRef.current, decalFinish);
+    applyDecalFinishToMaterials([
+      ...decalOverlayMaterialsRef.current,
+      ...sideLogoMaterialsRef.current.filter((_, idx) => idx % 2 === 1),
+    ], sceneRef.current, decalFinish);
   }, [loaded, decalFinish]);
 
   // ── SHADOW SURFACE ON/OFF ────────────────────────────────────────────────────
@@ -1965,11 +2339,118 @@ export default function HelmetBuilder() {
                     100% reaches the full rear extent below the bumper. Reducing Length moves only the rear ends forward toward the crown while keeping the front aligned.
                   </div>
                 </div>
-
                 <div style={{ height:1, background:'rgba(255,255,255,0.06)', margin:'16px 0 14px' }} />
-                <SectionLabel>Other Decals</SectionLabel>
-                <div style={{ background:'rgba(255,255,255,0.03)', border:'1px dashed rgba(255,255,255,0.1)', borderRadius:8, padding:12, textAlign:'center', color:'#4b5563', fontSize:10, lineHeight:1.5 }}>
-                  Coming next: click-to-place logos and number decals on top of the shell or wrap.
+                <SectionLabel>Main Side Logos</SectionLabel>
+                <div style={{ background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.04)', borderRadius:10, padding:12 }}>
+                  <div style={{ fontSize:10, color:'#6b7280', lineHeight:1.5, marginBottom:10 }}>
+                    Upload the main side logo decal. By default one upload appears on both sides, with the right side mirrored. You can hide either side, rotate either side 180°, or switch to fully independent left/right logo uploads.
+                  </div>
+                  <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, marginBottom:10 }}>
+                    <div style={{ fontSize:10, color:'#9ca3af' }}>Independent left / right logos</div>
+                    <button onClick={() => setSideLogoIndependent(v => !v)} style={{ background:sideLogoIndependent?'rgba(239,255,0,0.10)':'rgba(255,255,255,0.04)', border:sideLogoIndependent?'1px solid rgba(239,255,0,0.35)':'1px solid rgba(255,255,255,0.10)', borderRadius:6, padding:'5px 9px', cursor:'pointer', color:sideLogoIndependent?'#efff00':'#9ca3af', fontSize:9, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.06em' }}>{sideLogoIndependent?'ON':'OFF'}</button>
+                  </div>
+
+                  <input id="side-logo-shared-upload" type="file" accept="image/png,image/jpeg" onChange={handleSharedSideLogoUpload} style={{ display:'none' }} />
+                  <input id="side-logo-left-upload" type="file" accept="image/png,image/jpeg" onChange={handleLeftSideLogoUpload} style={{ display:'none' }} />
+                  <input id="side-logo-right-upload" type="file" accept="image/png,image/jpeg" onChange={handleRightSideLogoUpload} style={{ display:'none' }} />
+
+                  {!sideLogoIndependent ? (
+                    <div style={{ marginBottom:12 }}>
+                      <label htmlFor="side-logo-shared-upload" style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:7, width:'100%', boxSizing:'border-box', background:'rgba(239,255,0,0.08)', border:'1px dashed rgba(239,255,0,0.35)', borderRadius:7, padding:'10px 12px', cursor:'pointer', fontSize:10, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif", color:'#efff00', letterSpacing:'0.06em' }}>
+                        <span style={{ fontSize:14 }}>＋</span>{sideLogoSharedPreviewUrl ? 'REPLACE SIDE LOGO' : 'UPLOAD SIDE LOGO'}
+                      </label>
+                      {sideLogoSharedPreviewUrl && (
+                        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, marginTop:8 }}>
+                          <div style={{ fontSize:9, color:'#9ca3af', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={sideLogoSharedFileName}>{sideLogoSharedFileName}</div>
+                          <button onClick={() => removeSideLogoUpload('shared')} style={{ background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:5, padding:'4px 7px', cursor:'pointer', color:'#ef4444', fontSize:8, fontWeight:700, fontFamily:"'Barlow Condensed',sans-serif" }}>REMOVE</button>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:12 }}>
+                      <div>
+                        <label htmlFor="side-logo-left-upload" style={{ display:'flex', alignItems:'center', justifyContent:'center', width:'100%', boxSizing:'border-box', background:'rgba(239,255,0,0.08)', border:'1px dashed rgba(239,255,0,0.35)', borderRadius:7, padding:'9px 10px', cursor:'pointer', fontSize:9, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif", color:'#efff00', letterSpacing:'0.06em' }}>UPLOAD LEFT</label>
+                        {sideLogoLeftPreviewUrl && (
+                          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:6, marginTop:8 }}>
+                            <div style={{ fontSize:8, color:'#9ca3af', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={sideLogoLeftFileName}>{sideLogoLeftFileName}</div>
+                            <button onClick={() => removeSideLogoUpload('left')} style={{ background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:5, padding:'3px 6px', cursor:'pointer', color:'#ef4444', fontSize:8, fontWeight:700, fontFamily:"'Barlow Condensed',sans-serif" }}>✕</button>
+                          </div>
+                        )}
+                      </div>
+                      <div>
+                        <label htmlFor="side-logo-right-upload" style={{ display:'flex', alignItems:'center', justifyContent:'center', width:'100%', boxSizing:'border-box', background:'rgba(239,255,0,0.08)', border:'1px dashed rgba(239,255,0,0.35)', borderRadius:7, padding:'9px 10px', cursor:'pointer', fontSize:9, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif", color:'#efff00', letterSpacing:'0.06em' }}>UPLOAD RIGHT</label>
+                        {sideLogoRightPreviewUrl && (
+                          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:6, marginTop:8 }}>
+                            <div style={{ fontSize:8, color:'#9ca3af', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={sideLogoRightFileName}>{sideLogoRightFileName}</div>
+                            <button onClick={() => removeSideLogoUpload('right')} style={{ background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:5, padding:'3px 6px', cursor:'pointer', color:'#ef4444', fontSize:8, fontWeight:700, fontFamily:"'Barlow Condensed',sans-serif" }}>✕</button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {sideLogoError && <div style={{ marginBottom:10, fontSize:10, color:'#ef4444', lineHeight:1.4 }}>{sideLogoError}</div>}
+
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:12 }}>
+                    {[
+                      { side:'left', title:'LEFT SIDE', preview: sideLogoIndependent ? sideLogoLeftPreviewUrl : sideLogoSharedPreviewUrl, visible: sideLogoLeftVisible, setVisible: setSideLogoLeftVisible, mirrored: sideLogoLeftMirror, setMirrored: setSideLogoLeftMirror, rotated: sideLogoLeftRotate180, setRotated: setSideLogoLeftRotate180 },
+                      { side:'right', title:'RIGHT SIDE', preview: sideLogoIndependent ? sideLogoRightPreviewUrl : sideLogoSharedPreviewUrl, visible: sideLogoRightVisible, setVisible: setSideLogoRightVisible, mirrored: sideLogoRightMirror, setMirrored: setSideLogoRightMirror, rotated: sideLogoRightRotate180, setRotated: setSideLogoRightRotate180 },
+                    ].map(card => (
+                      <div key={card.side} style={{ background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.05)', borderRadius:8, padding:8 }}>
+                        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:7 }}>
+                          <div style={{ fontSize:9, color:'#9ca3af', letterSpacing:'0.06em' }}>{card.title}</div>
+                          <button onClick={() => card.setVisible(v => !v)} style={{ background:card.visible?'rgba(239,255,0,0.10)':'rgba(255,255,255,0.04)', border:card.visible?'1px solid rgba(239,255,0,0.35)':'1px solid rgba(255,255,255,0.10)', borderRadius:5, padding:'4px 6px', cursor:'pointer', color:card.visible?'#efff00':'#9ca3af', fontSize:8, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif" }}>{card.visible?'SHOWING':'HIDDEN'}</button>
+                        </div>
+                        <div style={{ position:'relative', width:'100%', aspectRatio:'1 / 1', overflow:'hidden', borderRadius:6, border:'1px solid rgba(255,255,255,0.08)', backgroundColor:'#c8cdd4', backgroundImage:'linear-gradient(45deg, rgba(255,255,255,0.95) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.95) 75%, rgba(255,255,255,0.95)), linear-gradient(45deg, rgba(255,255,255,0.95) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.95) 75%, rgba(255,255,255,0.95))', backgroundSize:'16px 16px', backgroundPosition:'0 0, 8px 8px', marginBottom:8 }}>
+                          {card.preview ? <img src={card.preview} alt={`${card.title} preview`} style={{ position:'absolute', inset:0, width:'100%', height:'100%', objectFit:'contain', transform:`${card.mirrored ? 'scaleX(-1)' : ''}${card.rotated ? ' rotate(180deg)' : ''}`.trim() || 'none', opacity:card.visible ? 1 : 0.35 }} /> : <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', color:'#6b7280', fontSize:9 }}>NO LOGO</div>}
+                        </div>
+                        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:6 }}>
+                          <button onClick={() => card.setMirrored(v => !v)} style={{ background:card.mirrored?'rgba(239,255,0,0.10)':'rgba(255,255,255,0.04)', border:card.mirrored?'1px solid rgba(239,255,0,0.35)':'1px solid rgba(255,255,255,0.10)', borderRadius:5, padding:'5px 6px', cursor:'pointer', color:card.mirrored?'#efff00':'#9ca3af', fontSize:8, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif" }}>MIRROR</button>
+                          <button onClick={() => card.setRotated(v => !v)} style={{ background:card.rotated?'rgba(239,255,0,0.10)':'rgba(255,255,255,0.04)', border:card.rotated?'1px solid rgba(239,255,0,0.35)':'1px solid rgba(255,255,255,0.10)', borderRadius:5, padding:'5px 6px', cursor:'pointer', color:card.rotated?'#efff00':'#9ca3af', fontSize:8, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif" }}>ROTATE 180°</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:8 }}>
+                    <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Size</span>
+                    <input type="range" min="40" max="180" value={Math.round(sideLogoScale*100)} onChange={e => setSideLogoScale(parseInt(e.target.value)/100)} style={{ flex:1 }} />
+                    <span style={{ width:42, flexShrink:0, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{Math.round(sideLogoScale*100)}%</span>
+                  </div>
+                  <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:8 }}>
+                    <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>F / B</span>
+                    <input type="range" min="-50" max="50" value={sideLogoFrontBack} onChange={e => setSideLogoFrontBack(parseInt(e.target.value))} style={{ flex:1 }} />
+                    <span style={{ width:42, flexShrink:0, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{sideLogoFrontBack}</span>
+                  </div>
+                  <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:12 }}>
+                    <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Up / Down</span>
+                    <input type="range" min="-50" max="50" value={sideLogoUpDown} onChange={e => setSideLogoUpDown(parseInt(e.target.value))} style={{ flex:1 }} />
+                    <span style={{ width:42, flexShrink:0, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{sideLogoUpDown}</span>
+                  </div>
+
+                  <div style={{ height:1, background:'rgba(255,255,255,0.06)', margin:'10px 0 10px' }} />
+                  <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, marginBottom:10 }}>
+                    <div>
+                      <SectionLabel>Logo Stroke</SectionLabel>
+                      <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.4, marginTop:-4 }}>Outside-aligned stroke for thicker decal builds.</div>
+                    </div>
+                    <button onClick={() => setSideLogoStrokeEnabled(v => !v)} style={{ background:sideLogoStrokeEnabled?'rgba(239,255,0,0.10)':'rgba(255,255,255,0.04)', border:sideLogoStrokeEnabled?'1px solid rgba(239,255,0,0.35)':'1px solid rgba(255,255,255,0.10)', borderRadius:6, padding:'5px 9px', cursor:'pointer', color:sideLogoStrokeEnabled?'#efff00':'#9ca3af', fontSize:9, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.06em' }}>{sideLogoStrokeEnabled?'ON':'OFF'}</button>
+                  </div>
+                  {sideLogoStrokeEnabled && (
+                    <>
+                      <ColorSwatch color={sideLogoStrokeColor} onChange={setSideLogoStrokeColor} label="Stroke Color" />
+                      <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:8 }}>
+                        <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Thickness</span>
+                        <input type="range" min="0" max="30" value={sideLogoStrokeThickness} onChange={e => setSideLogoStrokeThickness(parseInt(e.target.value))} style={{ flex:1 }} />
+                        <span style={{ width:42, flexShrink:0, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{sideLogoStrokeThickness}px</span>
+                      </div>
+                      <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                        <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Opacity</span>
+                        <input type="range" min="0" max="100" value={Math.round(sideLogoStrokeOpacity*100)} onChange={e => setSideLogoStrokeOpacity(parseInt(e.target.value)/100)} style={{ flex:1 }} />
+                        <span style={{ width:42, flexShrink:0, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{Math.round(sideLogoStrokeOpacity*100)}%</span>
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
             )}
