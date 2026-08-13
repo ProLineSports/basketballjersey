@@ -1484,6 +1484,8 @@ export default function HelmetBuilder() {
   useEffect(() => { sparkleRotatingRef.current = sparkleRotating; }, [sparkleRotating]);
   const [exporting, setExporting]             = useState(false);
   const [exported, setExported]               = useState(false);
+  const [exportResolution, setExportResolution] = useState(2048);
+  const [exportSupersample, setExportSupersample] = useState(2);
   const [viewportBgColor, setViewportBgColor] = useState('#1f1c1e');
   const [transparentBg, setTransparentBg]     = useState(false);
   const [visorOn, setVisorOn]               = useState(true);
@@ -3546,84 +3548,175 @@ export default function HelmetBuilder() {
     if (!isUnlimited && credits <= 0) { setShowUpgrade(true); return; }
     setExporting(true);
 
-    // Validate + deduct credit server-side — same endpoint /jersey uses (shared credit pool)
-    const exportRes = await fetch('/api/user/export', { method: 'POST' });
-    const exportData = await exportRes.json();
-    if (!exportData.allowed) {
-      setExporting(false);
-      setShowUpgrade(true);
-      return;
-    }
-    const useWatermark = exportData.hasWatermark;
-    setCredits(isUnlimited ? 999 : (exportData.freeCredits || 0) + (exportData.paidCredits || 0));
-    setPaidCredits(exportData.paidCredits || 0);
-    setHasWatermark(exportData.hasWatermark);
+    try {
+      // Validate + deduct credit server-side — same endpoint /jersey uses (shared credit pool)
+      const exportRes = await fetch('/api/user/export', { method: 'POST' });
+      const exportData = await exportRes.json();
+      if (!exportData.allowed) {
+        setExporting(false);
+        setShowUpgrade(true);
+        return;
+      }
 
-    await new Promise(r => setTimeout(r, 100));
-    const renderer = rendererRef.current;
-    const scene = sceneRef.current;
-    const camera = cameraRef.current;
-    const previousBackground = scene.background;
-    const previousClearColor = renderer.getClearColor(new THREE.Color()).clone();
-    const previousClearAlpha = renderer.getClearAlpha();
+      const useWatermark = exportData.hasWatermark;
+      setCredits(isUnlimited ? 999 : (exportData.freeCredits || 0) + (exportData.paidCredits || 0));
+      setPaidCredits(exportData.paidCredits || 0);
+      setHasWatermark(exportData.hasWatermark);
 
-    if (transparentBg) {
-      scene.background = null;
-      renderer.setClearColor(0x000000, 0);
-    } else {
-      scene.background = new THREE.Color(viewportBgColor);
-      renderer.setClearColor(new THREE.Color(viewportBgColor), 1);
-    }
+      await new Promise(r => setTimeout(r, 80));
 
-    renderer.render(scene, camera);
-    const rawDataURL = renderer.domElement.toDataURL('image/png');
+      const liveRenderer = rendererRef.current;
+      const scene = sceneRef.current;
+      const camera = cameraRef.current;
+      if (!liveRenderer || !scene || !camera) throw new Error('Renderer not ready');
 
-    scene.background = previousBackground;
-    renderer.setClearColor(previousClearColor, previousClearAlpha);
+      const liveCanvas = liveRenderer.domElement;
+      const liveWidth = liveCanvas.clientWidth || liveCanvas.width || 1;
+      const liveHeight = liveCanvas.clientHeight || liveCanvas.height || 1;
+      const aspect = liveWidth / Math.max(liveHeight, 1);
 
-    // Tile the watermark onto the captured frame for free (unpaid) exports
-    let finalDataURL = rawDataURL;
-    if (useWatermark) {
-      finalDataURL = await new Promise((resolve) => {
-        const img = new Image();
-        img.onload = () => {
-          const off = document.createElement('canvas');
-          off.width = img.width; off.height = img.height;
-          const ctx = off.getContext('2d');
-          ctx.drawImage(img, 0, 0);
-          const wm = new Image();
-          wm.onload = () => {
-            ctx.save();
-            ctx.globalAlpha = 0.02;
-            const wmSize = Math.round(off.width * 0.16);
-            const cols = Math.ceil(off.width / wmSize) + 1;
-            const rows = Math.ceil(off.height / wmSize) + 1;
-            for (let row = 0; row < rows; row++) {
-              const xOffset = (row % 2 === 0) ? 0 : wmSize / 2;
-              for (let col = 0; col < cols; col++) {
-                ctx.drawImage(wm, col * wmSize - xOffset, row * wmSize, wmSize, wmSize);
-              }
-            }
-            ctx.restore();
-            resolve(off.toDataURL('image/png'));
-          };
-          wm.onerror = () => resolve(off.toDataURL('image/png'));
-          wm.src = '/ProLine-PFP-New.jpg';
-        };
-        img.onerror = () => resolve(rawDataURL);
-        img.src = rawDataURL;
+      // Export resolution controls the final delivered PNG. Supersampling renders larger
+      // offscreen, then downsamples to produce cleaner edges and a more polished output.
+      let finalWidth = exportResolution;
+      let finalHeight = exportResolution;
+      if (aspect >= 1) {
+        finalWidth = exportResolution;
+        finalHeight = Math.max(1, Math.round(exportResolution / aspect));
+      } else {
+        finalHeight = exportResolution;
+        finalWidth = Math.max(1, Math.round(exportResolution * aspect));
+      }
+
+      const renderWidth = Math.max(1, Math.round(finalWidth * exportSupersample));
+      const renderHeight = Math.max(1, Math.round(finalHeight * exportSupersample));
+
+      const previousBackground = scene.background;
+      const previousClearColor = liveRenderer.getClearColor(new THREE.Color()).clone();
+      const previousClearAlpha = liveRenderer.getClearAlpha();
+
+      if (transparentBg) {
+        scene.background = null;
+      } else {
+        scene.background = new THREE.Color(viewportBgColor);
+      }
+
+      const exportRenderer = new THREE.WebGLRenderer({
+        antialias: true,
+        preserveDrawingBuffer: true,
+        alpha: true,
+        powerPreference: 'high-performance',
       });
+      exportRenderer.setPixelRatio(1);
+      exportRenderer.setSize(renderWidth, renderHeight, false);
+      exportRenderer.shadowMap.enabled = true;
+      exportRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      exportRenderer.outputColorSpace = liveRenderer.outputColorSpace;
+      exportRenderer.toneMapping = liveRenderer.toneMapping;
+      exportRenderer.toneMappingExposure = liveRenderer.toneMappingExposure;
+      exportRenderer.physicallyCorrectLights = liveRenderer.physicallyCorrectLights;
+      exportRenderer.setClearColor(
+        transparentBg ? 0x000000 : new THREE.Color(viewportBgColor),
+        transparentBg ? 0 : 1
+      );
+
+      const exportCamera = camera.clone();
+      exportCamera.aspect = renderWidth / Math.max(renderHeight, 1);
+      exportCamera.updateProjectionMatrix();
+      exportCamera.updateMatrixWorld(true);
+
+      // Sharpen export shadows a bit without permanently changing the live scene.
+      const keyLight = scene.userData.keyLight;
+      let prevShadowW = null;
+      let prevShadowH = null;
+      if (keyLight?.shadow?.mapSize) {
+        prevShadowW = keyLight.shadow.mapSize.width;
+        prevShadowH = keyLight.shadow.mapSize.height;
+        const targetShadowSize = renderWidth >= 5000 || renderHeight >= 5000 ? 4096 : 2048;
+        keyLight.shadow.mapSize.width = targetShadowSize;
+        keyLight.shadow.mapSize.height = targetShadowSize;
+        if (keyLight.shadow.map) {
+          keyLight.shadow.map.dispose?.();
+          keyLight.shadow.map = null;
+        }
+        keyLight.shadow.needsUpdate = true;
+      }
+
+      exportRenderer.render(scene, exportCamera);
+
+      // Downsample from the supersampled render to the final delivery size.
+      const finalCanvas = document.createElement('canvas');
+      finalCanvas.width = finalWidth;
+      finalCanvas.height = finalHeight;
+      const finalCtx = finalCanvas.getContext('2d', { alpha: true });
+      finalCtx.imageSmoothingEnabled = true;
+      finalCtx.imageSmoothingQuality = 'high';
+      finalCtx.clearRect(0, 0, finalWidth, finalHeight);
+      finalCtx.drawImage(exportRenderer.domElement, 0, 0, finalWidth, finalHeight);
+
+      let rawDataURL = finalCanvas.toDataURL('image/png');
+
+      // Restore live-scene settings.
+      scene.background = previousBackground;
+      liveRenderer.setClearColor(previousClearColor, previousClearAlpha);
+      if (keyLight?.shadow?.mapSize && prevShadowW && prevShadowH) {
+        keyLight.shadow.mapSize.width = prevShadowW;
+        keyLight.shadow.mapSize.height = prevShadowH;
+        if (keyLight.shadow.map) {
+          keyLight.shadow.map.dispose?.();
+          keyLight.shadow.map = null;
+        }
+        keyLight.shadow.needsUpdate = true;
+      }
+
+      exportRenderer.dispose();
+      exportRenderer.forceContextLoss?.();
+
+      // Tile the watermark onto the captured frame for free (unpaid) exports
+      let finalDataURL = rawDataURL;
+      if (useWatermark) {
+        finalDataURL = await new Promise((resolve) => {
+          const img = new Image();
+          img.onload = () => {
+            const off = document.createElement('canvas');
+            off.width = img.width; off.height = img.height;
+            const ctx = off.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            const wm = new Image();
+            wm.onload = () => {
+              ctx.save();
+              ctx.globalAlpha = 0.02;
+              const wmSize = Math.round(off.width * 0.16);
+              const cols = Math.ceil(off.width / wmSize) + 1;
+              const rows = Math.ceil(off.height / wmSize) + 1;
+              for (let row = 0; row < rows; row++) {
+                const xOffset = (row % 2 === 0) ? 0 : wmSize / 2;
+                for (let col = 0; col < cols; col++) {
+                  ctx.drawImage(wm, col * wmSize - xOffset, row * wmSize, wmSize, wmSize);
+                }
+              }
+              ctx.restore();
+              resolve(off.toDataURL('image/png'));
+            };
+            wm.onerror = () => resolve(off.toDataURL('image/png'));
+            wm.src = '/ProLine-PFP-New.jpg';
+          };
+          img.onerror = () => resolve(rawDataURL);
+          img.src = rawDataURL;
+        });
+      }
+
+      const a = document.createElement('a');
+      a.href = finalDataURL;
+      a.download = `proline-helmet-${finalWidth}x${finalHeight}.png`;
+      a.click();
+      setExporting(false);
+      setExported(true);
+      setTimeout(() => setExported(false), 2500);
+    } catch (err) {
+      console.error('Helmet export failed', err);
+      setExporting(false);
     }
-
-    const a = document.createElement('a');
-    a.href = finalDataURL;
-    a.download = 'proline-helmet.png';
-    a.click();
-    setExporting(false);
-    setExported(true);
-    setTimeout(() => setExported(false), 2500);
-  }, [isSignedIn, isUnlimited, credits, openSignIn, transparentBg, viewportBgColor]);
-
+  }, [isSignedIn, isUnlimited, credits, openSignIn, transparentBg, viewportBgColor, exportResolution, exportSupersample]);
   const handleGetCredits = () => {
     if (!isSignedIn) { openSignIn({ afterSignInUrl: '/helmet?upgrade=true', afterSignUpUrl: '/helmet?upgrade=true' }); return; }
     setSelectedPlan(null);
@@ -4389,7 +4482,7 @@ export default function HelmetBuilder() {
               { icon:'◎', text:'Car Paint + Chrome are the only finishes with reflections — Gloss/Matte/Satin use true flat color' },
               { icon:'✦', text:'Car Paint uses discrete glitter; Satin can add dense metallic micro-texture for fine-grain finishes' },
               { icon:'◉', text:'Drag to rotate the helmet and check the finish from multiple angles' },
-              { icon:'★', text:'Exports include watermark — upgrade to remove it' },
+              { icon:'★', text:'Use the Export Quality controls for higher-resolution, supersampled PNGs. Free exports include a ProLine watermark.' },
             ].map((tip,i) => (
               <div key={i} style={{ display:'flex', gap:9, marginBottom:10, alignItems:'flex-start' }}>
                 <span style={{ color:'#efff00', fontSize:12, lineHeight:1.5, flexShrink:0 }}>{tip.icon}</span>
@@ -4412,6 +4505,40 @@ export default function HelmetBuilder() {
                 <ColorSwatch color={viewportBgColor} onChange={setViewportBgColor} label="Color" />
               </div>
             </div>
+            <div style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:9, padding:'10px 12px', marginBottom:10 }}>
+              <SectionLabel>Export Quality</SectionLabel>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:8 }}>
+                <div>
+                  <div style={{ fontSize:10, color:'#9ca3af', marginBottom:5 }}>Final Size</div>
+                  <select
+                    value={String(exportResolution)}
+                    onChange={e => setExportResolution(parseInt(e.target.value))}
+                    style={{ width:'100%', background:'rgba(0,0,0,0.22)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:6, padding:'8px 10px', color:'#e5e7eb', fontSize:10, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.04em' }}
+                  >
+                    <option value="1500">1500 px</option>
+                    <option value="2048">2048 px</option>
+                    <option value="3000">3000 px</option>
+                    <option value="4096">4096 px</option>
+                  </select>
+                </div>
+                <div>
+                  <div style={{ fontSize:10, color:'#9ca3af', marginBottom:5 }}>Supersample</div>
+                  <select
+                    value={String(exportSupersample)}
+                    onChange={e => setExportSupersample(parseInt(e.target.value))}
+                    style={{ width:'100%', background:'rgba(0,0,0,0.22)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:6, padding:'8px 10px', color:'#e5e7eb', fontSize:10, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.04em' }}
+                  >
+                    <option value="1">1× Standard</option>
+                    <option value="2">2× High</option>
+                    <option value="3">3× Ultra</option>
+                  </select>
+                </div>
+              </div>
+              <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.45 }}>
+                Exports now render offscreen at a higher resolution, then downsample for cleaner edges and a more polished final PNG. Higher settings look better but take longer.
+              </div>
+            </div>
+
             <div style={{ background:'rgba(239,255,0,0.05)', border:'1px solid rgba(239,255,0,0.14)', borderRadius:9, padding:'10px 12px', marginBottom:10 }}>
               <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:5 }}>
                 <span style={{ fontSize:11, color:'#9ca3af' }}>Credits remaining</span>
