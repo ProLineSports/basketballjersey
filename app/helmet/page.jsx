@@ -1127,6 +1127,16 @@ export default function HelmetBuilder() {
     uniforms.leftColor.value.set(helmetStripeLeftColor);
     uniforms.centerColor.value.set(helmetStripeCenterColor);
     uniforms.rightColor.value.set(helmetStripeRightColor);
+
+    // The cross-shaped recess/slot in the Top Screws is real geometry, so a shader
+    // color overlay cannot physically fill it. When helmet stripes are active, treat
+    // the vinyl as the topmost layer and occlude the crown screws completely. The
+    // stripe remains rendered directly on the Shell underneath, so there is no float
+    // or z-fighting. Bumpers stay visible above the decal as separate geometry.
+    const topScrewRoots = partObjectsRef.current[partKey('Top Screws')] || [];
+    topScrewRoots.forEach(root => {
+      root.visible = !helmetStripesEnabled;
+    });
   }, [loaded, helmetStripesEnabled, helmetStripeWidth, helmetStripeLength, helmetStripeLeftColor, helmetStripeCenterColor, helmetStripeRightColor]);
 
   // ── SHADOW SURFACE ON/OFF ────────────────────────────────────────────────────
@@ -1570,7 +1580,7 @@ export default function HelmetBuilder() {
                   </div>
 
                   <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.5 }}>
-                    This preset uses three equal-width stripes with no gaps. Stripes are rendered directly on the shell surface, above any full wrap and beneath the bumpers.
+                    This preset uses three equal-width stripes with no gaps. Stripes sit directly on the shell, cover the crown screw hardware, layer above any full wrap, and remain beneath the bumpers.
                   </div>
 
                   <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:10 }}>
