@@ -660,28 +660,32 @@ function createSideLogoTexturePack(image, options = {}) {
     strokeThickness = 8,
     strokeOpacity = 1,
     textureSize = 1024,
+    textureWidth = null,
+    textureHeight = null,
     arcCompensation = 0,
   } = options;
 
   const size = Math.max(512, textureSize | 0);
+  const canvasWidth = Math.max(512, (textureWidth ?? size) | 0);
+  const canvasHeight = Math.max(256, (textureHeight ?? size) | 0);
   const baseCanvas = document.createElement('canvas');
-  baseCanvas.width = size;
-  baseCanvas.height = size;
+  baseCanvas.width = canvasWidth;
+  baseCanvas.height = canvasHeight;
   const baseCtx = baseCanvas.getContext('2d');
   if (!baseCtx) return null;
 
   // Keep the base logo footprint fixed so increasing the stroke does not make
   // the logo itself shrink. We reserve a generous constant margin instead.
   const pad = 120;
-  const fitW = size - pad * 2;
-  const fitH = size - pad * 2;
+  const fitW = canvasWidth - pad * 2;
+  const fitH = canvasHeight - pad * 2;
   const scale = Math.min(fitW / image.naturalWidth, fitH / image.naturalHeight);
   const drawW = image.naturalWidth * scale;
   const drawH = image.naturalHeight * scale;
 
   baseCtx.clearRect(0, 0, size, size);
   baseCtx.save();
-  baseCtx.translate(size / 2, size / 2);
+  baseCtx.translate(canvasWidth / 2, canvasHeight / 2);
   if (rotate180) baseCtx.rotate(Math.PI);
   baseCtx.scale(mirror ? -1 : 1, 1);
   baseCtx.drawImage(image, -drawW / 2, -drawH / 2, drawW, drawH);
@@ -704,7 +708,7 @@ function createSideLogoTexturePack(image, options = {}) {
     ctx.globalCompositeOperation = 'source-in';
     ctx.globalAlpha = opacityValue;
     ctx.fillStyle = colorHex;
-    ctx.fillRect(0, 0, size, size);
+    ctx.fillRect(0, 0, canvasWidth, canvasHeight);
     ctx.globalAlpha = 1;
     if (cutCenter) {
       ctx.globalCompositeOperation = 'destination-out';
@@ -738,11 +742,19 @@ function createSideLogoTexturePack(image, options = {}) {
   const mainTexture = new THREE.CanvasTexture(warpedFinalCanvas);
   mainTexture.colorSpace = THREE.SRGBColorSpace;
   mainTexture.wrapS = mainTexture.wrapT = THREE.ClampToEdgeWrapping;
+  mainTexture.minFilter = THREE.LinearMipmapLinearFilter;
+  mainTexture.magFilter = THREE.LinearFilter;
+  mainTexture.generateMipmaps = true;
+  mainTexture.anisotropy = 16;
   mainTexture.needsUpdate = true;
 
   const rimTexture = new THREE.CanvasTexture(warpedRimCanvas);
   rimTexture.colorSpace = THREE.SRGBColorSpace;
   rimTexture.wrapS = rimTexture.wrapT = THREE.ClampToEdgeWrapping;
+  rimTexture.minFilter = THREE.LinearMipmapLinearFilter;
+  rimTexture.magFilter = THREE.LinearFilter;
+  rimTexture.generateMipmaps = true;
+  rimTexture.anisotropy = 16;
   rimTexture.needsUpdate = true;
 
   return {
@@ -965,13 +977,15 @@ function hexToRgb(hex) {
 }
 
 function createFlakeTextures(intensity, colorHex) {
-  const size = 256;
+  // A much larger, asymmetrically repeated field avoids the obvious 16×16 tiled grid
+  // that appeared at medium/high glitter density.
+  const size = 1024;
   const ormCanvas = document.createElement('canvas');
   ormCanvas.width = size; ormCanvas.height = size;
   const ormCtx = ormCanvas.getContext('2d');
-  const baseAO     = 35;  // R channel ≈ 0.14 — blocks almost all env/indirect light
-  const baseRough  = 178; // G channel ≈ 0.70 roughness
-  const baseMetal  = 25;  // B channel ≈ 0.10 metalness — mostly true paint color
+  const baseAO     = 35;
+  const baseRough  = 178;
+  const baseMetal  = 25;
   ormCtx.fillStyle = `rgb(${baseAO},${baseRough},${baseMetal})`;
   ormCtx.fillRect(0, 0, size, size);
 
@@ -982,35 +996,56 @@ function createFlakeTextures(intensity, colorHex) {
   colorCtx.fillRect(0, 0, size, size);
 
   const { r, g, b } = hexToRgb(colorHex);
-  const flakeCount = Math.round(intensity * 420); // 0 → no flakes, 1 → dense
+  const flakeCount = Math.round(intensity * 5200);
   for (let i = 0; i < flakeCount; i++) {
     const x = Math.random() * size;
     const y = Math.random() * size;
-    const rad = 0.4 + Math.random() * 1.0;
+    const major = 1.0 + Math.random() * 3.8;
+    const minor = major * (0.35 + Math.random() * 0.65);
+    const angle = Math.random() * Math.PI;
 
-    const flakeAO     = Math.round(235 + Math.random() * 20); // ≈0.92–1.0 — fully lit by env
-    const flakeRough  = Math.round(4 + Math.random() * 14);   // ≈0.02–0.07 — near mirror
-    const flakeMetal  = Math.round(235 + Math.random() * 20); // ≈0.92–1.0 — near full metal
+    const flakeAO     = Math.round(225 + Math.random() * 30);
+    const flakeRough  = Math.round(3 + Math.random() * 22);
+    const flakeMetal  = Math.round(225 + Math.random() * 30);
+    ormCtx.save();
+    ormCtx.translate(x, y);
+    ormCtx.rotate(angle);
     ormCtx.fillStyle = `rgb(${flakeAO},${flakeRough},${flakeMetal})`;
     ormCtx.beginPath();
-    ormCtx.arc(x, y, rad, 0, Math.PI * 2);
+    ormCtx.ellipse(0, 0, major, minor, 0, 0, Math.PI * 2);
     ormCtx.fill();
+    ormCtx.restore();
 
-    const jitter = 0.7 + Math.random() * 0.3; // slight per-flake brightness variance
+    const jitter = 0.55 + Math.random() * 0.45;
+    colorCtx.save();
+    colorCtx.translate(x, y);
+    colorCtx.rotate(angle);
     colorCtx.fillStyle = `rgb(${Math.round(r * jitter)},${Math.round(g * jitter)},${Math.round(b * jitter)})`;
     colorCtx.beginPath();
-    colorCtx.arc(x, y, rad, 0, Math.PI * 2);
+    colorCtx.ellipse(0, 0, major, minor, 0, 0, Math.PI * 2);
     colorCtx.fill();
+    colorCtx.restore();
   }
+
+  // Non-square repeat counts + a rotated texture break up aligned repetition bands.
+  const repeatX = 4.15;
+  const repeatY = 3.55;
+  const rotation = 0.37;
 
   const ormTex = new THREE.CanvasTexture(ormCanvas);
   ormTex.wrapS = ormTex.wrapT = THREE.RepeatWrapping;
-  ormTex.repeat.set(16, 16);
+  ormTex.repeat.set(repeatX, repeatY);
+  ormTex.center.set(0.5, 0.5);
+  ormTex.rotation = rotation;
+  ormTex.anisotropy = 8;
   ormTex.needsUpdate = true;
 
   const colorTex = new THREE.CanvasTexture(colorCanvas);
   colorTex.wrapS = colorTex.wrapT = THREE.RepeatWrapping;
-  colorTex.repeat.set(16, 16);
+  colorTex.repeat.set(repeatX, repeatY);
+  colorTex.center.set(0.5, 0.5);
+  colorTex.rotation = rotation;
+  colorTex.anisotropy = 8;
   colorTex.colorSpace = THREE.SRGBColorSpace;
   colorTex.needsUpdate = true;
 
@@ -1105,10 +1140,10 @@ export default function HelmetBuilder() {
   const decalOverlayMaterialsRef = useRef([]);
   const stripeCarrierOverlayMeshesRef = useRef([]);
   const stripeCarrierOverlayMaterialsRef = useRef([]);
-  const bumperStripeCoverMeshesRef = useRef([]);
   const bumperLogoMeshesRef      = useRef([]);
   const bumperLogoMaterialsRef   = useRef([]);
   const bumperLogoTexturesRef    = useRef([]);
+  const bumperLogoPackCacheRef   = useRef({ front:null, rear:null });
   const bumperLogoFrontImageRef  = useRef(null);
   const bumperLogoRearImageRef   = useRef(null);
   const bumperLogoFrontObjectUrlRef = useRef(null);
@@ -1263,6 +1298,7 @@ export default function HelmetBuilder() {
   const [bumperLogoRearAcross, setBumperLogoRearAcross] = useState(0);
   const [bumperLogoFrontVertical, setBumperLogoFrontVertical] = useState(0);
   const [bumperLogoRearVertical, setBumperLogoRearVertical] = useState(0);
+  const [bumperLogoRearCurve, setBumperLogoRearCurve] = useState(-110);
   const [bumperLogoRevision, setBumperLogoRevision] = useState(0);
 
   const finishRef = useRef(finish);
@@ -1905,9 +1941,10 @@ export default function HelmetBuilder() {
         shellRoots
       );
 
-      // The full wrap remains on the real Shell. Stripes now get their own visible
-      // overlay cloned from the hidden baked Decal Surface. That filled carrier lets the
-      // stripe span crown screw openings/cutouts while retaining the helmet curvature.
+      // The full wrap remains on the real Shell. Stripes use a visible overlay cloned
+      // from the hidden baked Decal Surface. The Decal Surface itself is the stripe mask:
+      // it should include the smooth helmet shell but EXCLUDE any area physically covered
+      // by front/rear bumpers. That makes bumper occlusion exact with no render-order hacks.
       shellWrapUniformsRef.current.centerX.value = shellProjection?.centerX || 0;
       const decalOverlays = createShellDecalOverlays(
         shellRoots,
@@ -1982,14 +2019,10 @@ export default function HelmetBuilder() {
       stripeCarrierOverlayMaterialsRef.current.forEach(mat => mat.dispose?.());
       stripeCarrierOverlayMeshesRef.current = [];
       stripeCarrierOverlayMaterialsRef.current = [];
-      bumperStripeCoverMeshesRef.current.forEach(mesh => { mesh.parent?.remove(mesh); mesh.geometry?.dispose?.(); });
-      bumperStripeCoverMeshesRef.current = [];
       bumperLogoMeshesRef.current.forEach(mesh => { mesh.parent?.remove(mesh); mesh.geometry?.dispose?.(); });
       bumperLogoMaterialsRef.current.forEach(mat => mat.dispose?.());
-      bumperLogoTexturesRef.current.forEach(tex => tex.dispose?.());
       bumperLogoMeshesRef.current = [];
       bumperLogoMaterialsRef.current = [];
-      bumperLogoTexturesRef.current = [];
       decalSurfaceObjectsRef.current = [];
       sideLogoMeshesRef.current.forEach(mesh => mesh.parent?.remove(mesh));
       sideLogoMaterialsRef.current.forEach(mat => mat.dispose());
@@ -2732,10 +2765,8 @@ export default function HelmetBuilder() {
     const cleanup = () => {
       bumperLogoMeshesRef.current.forEach(mesh => { mesh.parent?.remove(mesh); mesh.geometry?.dispose?.(); });
       bumperLogoMaterialsRef.current.forEach(mat => mat.dispose?.());
-      bumperLogoTexturesRef.current.forEach(tex => tex.dispose?.());
       bumperLogoMeshesRef.current = [];
       bumperLogoMaterialsRef.current = [];
-      bumperLogoTexturesRef.current = [];
     };
     cleanup();
 
@@ -2778,25 +2809,30 @@ export default function HelmetBuilder() {
       const hit = getBumperHit(slot, acrossValue, verticalValue);
       if (!hit) return;
 
-      const pack = createSideLogoTexturePack(image, {
-        strokeEnabled:false,
-        textureSize: isFront ? 2048 : 4096,
-        // Rear bumper wordmarks tend to read with a slight smile when projected onto the
-        // convex bumper. Apply a subtle opposite arch so they look visually straighter.
-        arcCompensation: isFront ? 0 : -28,
-      });
+      const cacheSlot = isFront ? 'front' : 'rear';
+      const cacheKey = `${image.src}|${isFront ? 0 : bumperLogoRearCurve}`;
+      let cache = bumperLogoPackCacheRef.current[cacheSlot];
+      if (!cache || cache.key !== cacheKey) {
+        cache?.pack?.mainTexture?.dispose?.();
+        cache?.pack?.rimTexture?.dispose?.();
+        const nextPack = createSideLogoTexturePack(image, {
+          strokeEnabled:false,
+          // A wide canvas gives wordmarks far more useful horizontal pixels than a
+          // giant square texture and is cheaper to regenerate.
+          textureWidth: isFront ? 3072 : 4096,
+          textureHeight: 1024,
+          arcCompensation: isFront ? 0 : bumperLogoRearCurve,
+        });
+        cache = { key:cacheKey, pack:nextPack };
+        bumperLogoPackCacheRef.current[cacheSlot] = cache;
+      }
+      const pack = cache?.pack;
       if (!pack) return;
 
       let baseHeight = boundsModel.width * (isFront ? 0.060 : 0.072) * scaleValue;
       let baseWidth = baseHeight * THREE.MathUtils.clamp(pack.aspect, 0.55, 5.0);
-      // Bumper marks are commonly wide wordmarks. Allow artwork to span almost the
-      // full physical bumper width while still clipping to the bumper mesh itself.
-      const maxWidth = boundsModel.width * (isFront ? 0.98 : 1.18);
-      if (baseWidth > maxWidth) {
-        const k = maxWidth / baseWidth;
-        baseWidth *= k;
-        baseHeight *= k;
-      }
+      // Intentionally no max-width clamp. The physical bumper geometry is the mask,
+      // so scaling can continue smoothly until the user visually fills/crops the bumper.
 
       const normalMatrix = new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld);
       const fallback = new THREE.Vector3(0, 0, isFront ? 1 : -1).transformDirection(model.matrixWorld).normalize();
@@ -2855,7 +2891,6 @@ export default function HelmetBuilder() {
 
       bumperLogoMeshesRef.current.push(shadowMesh, mainMesh);
       bumperLogoMaterialsRef.current.push(shadowMat, mainMat);
-      bumperLogoTexturesRef.current.push(pack.rimTexture, pack.mainTexture);
     };
 
     makeBumperLogo('front');
@@ -2872,7 +2907,16 @@ export default function HelmetBuilder() {
     bumperLogoRearAcross,
     bumperLogoFrontVertical,
     bumperLogoRearVertical,
+    bumperLogoRearCurve,
   ]);
+
+  useEffect(() => () => {
+    Object.values(bumperLogoPackCacheRef.current).forEach(cache => {
+      cache?.pack?.mainTexture?.dispose?.();
+      cache?.pack?.rimTexture?.dispose?.();
+    });
+    bumperLogoPackCacheRef.current = { front:null, rear:null };
+  }, []);
 
   // ── DECAL FINISH ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -3590,7 +3634,7 @@ export default function HelmetBuilder() {
 
                 <CollapsibleSection title="BUMPER LOGOS">
                   <div style={{ fontSize:10, color:'#6b7280', lineHeight:1.5, marginBottom:10 }}>
-                    Add independent logos to the front and rear bumpers. Artwork starts large and can span nearly the full bumper width. The rear bumper option is tuned for wide wordmarks and uses a subtle arc compensation so logos read straighter across the curved bumper. Both wrap directly to the 3D bumper geometry, stay clipped to the bumper itself, use the active Decal Finish, and include the same subtle raised-vinyl effect.
+                    Add independent logos to the front and rear bumpers. Artwork can scale continuously across the bumper width and remains clipped by the physical bumper geometry. Rear wordmarks include an adjustable Curve correction to counter the visual smile created by the curved bumper. Both use high-resolution decal textures, the active Decal Finish, and the same subtle raised-vinyl effect.
                   </div>
                   {bumperLogoError && <div style={{ marginBottom:10, fontSize:10, color:'#ef4444', lineHeight:1.4 }}>{bumperLogoError}</div>}
                   <input id="front-bumper-logo-upload" type="file" accept="image/png,image/jpeg" onChange={handleFrontBumperLogoUpload} style={{ display:'none' }} />
@@ -3624,7 +3668,7 @@ export default function HelmetBuilder() {
                           </div>
                           <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:7 }}>
                             <span style={{ width:50, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Size</span>
-                            <input type="range" min="100" max="1600" value={Math.round(item.scale*100)} onChange={e => item.setScale(parseInt(e.target.value)/100)} style={{ flex:1, minWidth:0 }} />
+                            <input type="range" min="100" max="2400" value={Math.round(item.scale*100)} onChange={e => item.setScale(parseInt(e.target.value)/100)} style={{ flex:1, minWidth:0 }} />
                           </div>
                           <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:7 }}>
                             <span style={{ width:50, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Rotate</span>
@@ -3638,6 +3682,12 @@ export default function HelmetBuilder() {
                             <span style={{ width:50, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Up / Down</span>
                             <input type="range" min="-50" max="50" value={item.vertical} onChange={e => item.setVertical(parseInt(e.target.value))} style={{ flex:1, minWidth:0 }} />
                           </div>
+                          {item.slot === 'rear' && (
+                            <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:7 }}>
+                              <span style={{ width:50, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Curve</span>
+                              <input type="range" min="-260" max="120" value={bumperLogoRearCurve} onChange={e => setBumperLogoRearCurve(parseInt(e.target.value))} style={{ flex:1, minWidth:0 }} />
+                            </div>
+                          )}
                         </>
                       )}
                     </div>
