@@ -1026,7 +1026,7 @@ export default function HelmetBuilder() {
   const [sideLogoStrokeEnabled, setSideLogoStrokeEnabled] = useState(false);
   const [sideLogoStrokeColor, setSideLogoStrokeColor] = useState('#ffffff');
   const [sideLogoStrokeThickness, setSideLogoStrokeThickness] = useState(8);
-  const [sideLogoStrokeOpacity, setSideLogoStrokeOpacity] = useState(1);
+  const [sideLogoStrokeOpacity, setSideLogoStrokeOpacity] = useState(0.2);
   const [sideLogoRevision, setSideLogoRevision] = useState(0);
   const [selectedSideLogo, setSelectedSideLogo] = useState(null); // left | right | null
   const [sideLogoLocked, setSideLogoLocked] = useState(false);
@@ -2891,20 +2891,17 @@ export default function HelmetBuilder() {
                     <button onClick={() => setSideLogoLocked(v => !v)} style={{ width:'100%', background:sideLogoLocked?'rgba(239,255,0,0.10)':'rgba(255,255,255,0.04)', border:sideLogoLocked?'1px solid rgba(239,255,0,0.35)':'1px solid rgba(255,255,255,0.10)', borderRadius:6, padding:'7px 8px', cursor:'pointer', color:sideLogoLocked?'#efff00':'#9ca3af', fontSize:9, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.05em' }}>{sideLogoLocked ? 'LOCKED' : 'UNLOCKED'}</button>
                   </div>
 
-                  <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:8 }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
                     <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Size</span>
-                    <input type="range" min="40" max="180" value={Math.round(sideLogoScale*100)} onChange={e => setSideLogoScale(parseInt(e.target.value)/100)} style={{ flex:1 }} />
-                    <span style={{ width:42, flexShrink:0, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{Math.round(sideLogoScale*100)}%</span>
+                    <input type="range" min="40" max="180" value={Math.round(sideLogoScale*100)} onChange={e => setSideLogoScale(parseInt(e.target.value)/100)} style={{ flex:1, minWidth:0 }} />
                   </div>
-                  <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:8 }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
                     <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>F / B</span>
-                    <input type="range" min="-50" max="50" value={sideLogoFrontBack} onChange={e => setSideLogoFrontBack(parseInt(e.target.value))} style={{ flex:1 }} />
-                    <span style={{ width:42, flexShrink:0, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{sideLogoFrontBack}</span>
+                    <input type="range" min="-50" max="50" value={sideLogoFrontBack} onChange={e => setSideLogoFrontBack(parseInt(e.target.value))} style={{ flex:1, minWidth:0 }} />
                   </div>
-                  <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:12 }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12 }}>
                     <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Up / Down</span>
-                    <input type="range" min="-50" max="50" value={sideLogoUpDown} onChange={e => setSideLogoUpDown(parseInt(e.target.value))} style={{ flex:1 }} />
-                    <span style={{ width:42, flexShrink:0, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{sideLogoUpDown}</span>
+                    <input type="range" min="-50" max="50" value={sideLogoUpDown} onChange={e => setSideLogoUpDown(parseInt(e.target.value))} style={{ flex:1, minWidth:0 }} />
                   </div>
 
                   <div style={{ height:1, background:'rgba(255,255,255,0.06)', margin:'10px 0 10px' }} />
@@ -2918,15 +2915,13 @@ export default function HelmetBuilder() {
                   {sideLogoStrokeEnabled && (
                     <>
                       <ColorSwatch color={sideLogoStrokeColor} onChange={setSideLogoStrokeColor} label="Stroke Color" />
-                      <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:8 }}>
+                      <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
                         <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Thickness</span>
-                        <input type="range" min="0" max="30" value={sideLogoStrokeThickness} onChange={e => setSideLogoStrokeThickness(parseInt(e.target.value))} style={{ flex:1 }} />
-                        <span style={{ width:42, flexShrink:0, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{sideLogoStrokeThickness}px</span>
+                        <input type="range" min="0" max="30" value={sideLogoStrokeThickness} onChange={e => setSideLogoStrokeThickness(parseInt(e.target.value))} style={{ flex:1, minWidth:0 }} />
                       </div>
-                      <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                      <div style={{ display:'flex', alignItems:'center', gap:8 }}>
                         <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Opacity</span>
-                        <input type="range" min="0" max="100" value={Math.round(sideLogoStrokeOpacity*100)} onChange={e => setSideLogoStrokeOpacity(parseInt(e.target.value)/100)} style={{ flex:1 }} />
-                        <span style={{ width:42, flexShrink:0, textAlign:'right', fontSize:9, color:'#efff00', fontFamily:'monospace' }}>{Math.round(sideLogoStrokeOpacity*100)}%</span>
+                        <input type="range" min="0" max="100" value={Math.round(sideLogoStrokeOpacity*100)} onChange={e => setSideLogoStrokeOpacity(parseInt(e.target.value)/100)} style={{ flex:1, minWidth:0 }} />
                       </div>
                     </>
                   )}
