@@ -1057,6 +1057,41 @@ function createFlakeTextures(intensity, flakeSize, colorHex) {
   return { ormTex, colorTex };
 }
 
+
+function createSatinMicroTexture() {
+  // Fine high-frequency grain for metallic/satin paint. A larger random field plus
+  // asymmetric repeat/rotation makes it read as paint texture rather than a tiled image.
+  const size = 768;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const image = ctx.createImageData(size, size);
+  const data = image.data;
+
+  for (let i = 0; i < data.length; i += 4) {
+    // Keep values fairly bright so the map modulates metalness subtly rather than
+    // creating obvious black/white noise.
+    const fine = 178 + Math.random() * 72;
+    const occasional = Math.random() < 0.035 ? 18 + Math.random() * 35 : 0;
+    const value = Math.min(255, fine + occasional);
+    data[i] = value;
+    data[i + 1] = value;
+    data[i + 2] = value;
+    data[i + 3] = 255;
+  }
+  ctx.putImageData(image, 0, 0);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(7.35, 6.10);
+  tex.center.set(0.5, 0.5);
+  tex.rotation = 0.23;
+  tex.anisotropy = 8;
+  tex.needsUpdate = true;
+  return tex;
+}
+
 // ── COLOR SWATCH ──────────────────────────────────────────────────────────────
 function SectionLabel({ children }) {
   return <div style={{ fontSize:9, fontWeight:700, color:"#6b7280", letterSpacing:"0.1em", fontFamily:"'Barlow Condensed',sans-serif", marginBottom:10, marginTop:4 }}>{children}</div>;
@@ -1236,6 +1271,9 @@ export default function HelmetBuilder() {
   const [glitter, setGlitter]               = useState(0.3);
   const [glitterSize, setGlitterSize]       = useState(0.55);
   const [glitterColor, setGlitterColor]     = useState('#ffffff');
+  const [satinMetallic, setSatinMetallic]   = useState(0.62);
+  const [satinTexture, setSatinTexture]     = useState(0.45);
+  const satinMicroTextureRef                = useRef(null);
   const [facemaskFinish, setFacemaskFinish] = useState('gloss'); // gloss | matte
 
   const [wrapEnabled, setWrapEnabled]       = useState(false);
@@ -3131,54 +3169,100 @@ export default function HelmetBuilder() {
     if (sceneRef.current) applyShellEnvMap(materialsRef.current, sceneRef.current, finish);
   }, [finish]);
 
-  // ── CAR PAINT GLITTER FLAKES ─────────────────────────────────────────────────
-  // Builds the ORM (AO/roughness/metalness) + tinted emissive flake maps fresh whenever
-  // the slider or sparkle color changes, or Car Paint is (re)selected; clears both for
-  // every other finish so flakes — and the AO masking that keeps the base color
-  // accurate — don't bleed into other finishes. One texture pair per NAME (not per
-  // individual mesh) so meshes intentionally sharing a material name look identical,
-  // the way one shared material should.
+  // ── SHELL SURFACE TEXTURES — CAR PAINT + METALLIC SATIN ──────────────────────
+  // Car Paint uses discrete reflective flakes. Satin uses dense microscopic grain:
+  // much closer to the fine metallic appearance in the reference than simply making
+  // the glitter flakes larger or brighter.
   useEffect(() => {
     if (!loaded) return;
+
+    if (!satinMicroTextureRef.current) {
+      satinMicroTextureRef.current = createSatinMicroTexture();
+    }
+    const satinMicroTex = satinMicroTextureRef.current;
+
     SHELL_MATERIAL_NAMES.forEach(name => {
       const mats = materialsRef.current[name];
       if (!mats) return;
-      if (finish !== 'carpaint') {
+
+      if (finish === 'carpaint') {
+        const { ormTex, colorTex } = createFlakeTextures(glitter, glitterSize, glitterColor);
         mats.forEach(mat => {
-          if (mat.roughnessMap) { mat.roughnessMap.dispose(); }
-          if (mat.emissiveMap) { mat.emissiveMap.dispose(); }
-          mat.roughnessMap = null;
-          mat.metalnessMap = null;
-          mat.aoMap = null;
-          mat.emissiveMap = null;
-          mat.emissive.set(0x000000);
-          mat.emissiveIntensity = 1;
-          const finishDef = FINISHES.find(f => f.id === finish);
-          if (finishDef) { mat.roughness = finishDef.roughness; mat.metalness = finishDef.metalness; }
+          if (mat.roughnessMap && mat.roughnessMap !== satinMicroTex) mat.roughnessMap.dispose?.();
+          if (mat.emissiveMap) mat.emissiveMap.dispose?.();
+
+          mat.bumpMap = null;
+          mat.bumpScale = 0;
+          mat.roughnessMap = ormTex;
+          mat.metalnessMap = ormTex;
+          mat.aoMap = ormTex;
+          mat.aoMapIntensity = 1.0;
+          mat.emissiveMap = colorTex;
+          mat.emissive.set(0xffffff);
+          mat.emissiveIntensity = 1.0;
+          mat.roughness = 1.0;
+          mat.metalness = 1.0;
           mat.needsUpdate = true;
         });
         return;
       }
-      const { ormTex, colorTex } = createFlakeTextures(glitter, glitterSize, glitterColor);
+
+      if (finish === 'satin') {
+        mats.forEach(mat => {
+          if (mat.roughnessMap && mat.roughnessMap !== satinMicroTex) mat.roughnessMap.dispose?.();
+          if (mat.emissiveMap) mat.emissiveMap.dispose?.();
+
+          mat.emissiveMap = null;
+          mat.emissive.set(0x000000);
+          mat.emissiveIntensity = 1;
+          mat.aoMap = null;
+
+          // Texture adds microscopic breakup to highlights; Metallic controls how
+          // strongly the silver/metallic character comes through.
+          mat.bumpMap = satinTexture > 0.005 ? satinMicroTex : null;
+          mat.bumpScale = satinTexture * 0.0045;
+          mat.metalnessMap = satinTexture > 0.005 ? satinMicroTex : null;
+          mat.roughnessMap = null;
+          mat.metalness = 0.08 + satinMetallic * 0.82;
+          mat.roughness = 0.34 + satinTexture * 0.14;
+          mat.clearcoat = 0.18;
+          mat.clearcoatRoughness = 0.24;
+
+          // Metallic satin needs a softer environment response than Car Paint/Chrome.
+          mat.envMap = sceneRef.current?.userData?.envTexture || null;
+          mat.envMapIntensity = 0.12 + satinMetallic * 0.62;
+          mat.needsUpdate = true;
+        });
+        return;
+      }
+
+      // Plain Gloss / Matte / Chrome: clear all procedural surface maps.
       mats.forEach(mat => {
-        if (mat.roughnessMap) mat.roughnessMap.dispose();
-        if (mat.emissiveMap) mat.emissiveMap.dispose();
-        mat.roughnessMap = ormTex;
-        mat.metalnessMap = ormTex;
-        mat.aoMap = ormTex;
-        mat.aoMapIntensity = 1.0;
-        // emissive uniform stays white so colorTex's own per-pixel RGB fully drives the
-        // sparkle hue — black everywhere except exactly at the flake positions.
-        mat.emissiveMap = colorTex;
-        mat.emissive.set(0xffffff);
-        mat.emissiveIntensity = 1.0;
-        // Map fully drives per-pixel values now, so the base scalar is just a multiplier of 1
-        mat.roughness = 1.0;
-        mat.metalness = 1.0;
+        if (mat.roughnessMap && mat.roughnessMap !== satinMicroTex) mat.roughnessMap.dispose?.();
+        if (mat.emissiveMap) mat.emissiveMap.dispose?.();
+        mat.roughnessMap = null;
+        mat.metalnessMap = null;
+        mat.aoMap = null;
+        mat.bumpMap = null;
+        mat.bumpScale = 0;
+        mat.emissiveMap = null;
+        mat.emissive.set(0x000000);
+        mat.emissiveIntensity = 1;
+
+        const finishDef = FINISHES.find(f => f.id === finish);
+        if (finishDef) {
+          mat.roughness = finishDef.roughness;
+          mat.metalness = finishDef.metalness;
+        }
         mat.needsUpdate = true;
       });
     });
-  }, [glitter, glitterSize, glitterColor, finish, loaded]);
+  }, [glitter, glitterSize, glitterColor, satinMetallic, satinTexture, finish, loaded]);
+
+  useEffect(() => () => {
+    satinMicroTextureRef.current?.dispose?.();
+    satinMicroTextureRef.current = null;
+  }, []);
 
   const setColor = useCallback((zoneId, val) => setColors(c => ({ ...c, [zoneId]: val })), []);
 
@@ -3393,13 +3477,30 @@ export default function HelmetBuilder() {
                     <SectionLabel>Glitter Controls</SectionLabel>
                     <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:10 }}>
                       <span style={{ fontSize:10, color:'#9ca3af', minWidth:48 }}>Amount</span>
-                      <input type="range" min="0" max="100" value={Math.round(glitter*100)} onChange={e => setGlitter(parseInt(e.target.value)/100)} style={{ flex:1, minWidth:0 }} />
+                      <input type="range" min="0" max="300" value={Math.round(glitter*100)} onChange={e => setGlitter(parseInt(e.target.value)/100)} style={{ flex:1, minWidth:0 }} />
                     </div>
                     <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:10 }}>
                       <span style={{ fontSize:10, color:'#9ca3af', minWidth:48 }}>Size</span>
                       <input type="range" min="0" max="100" value={Math.round(glitterSize*100)} onChange={e => setGlitterSize(parseInt(e.target.value)/100)} style={{ flex:1, minWidth:0 }} />
                     </div>
                     <ColorSwatch color={glitterColor} onChange={setGlitterColor} label="Sparkle Color" />
+                  </div>
+                )}
+                {finish === 'satin' && (
+                  <div>
+                    <div style={{ height:1, background:'rgba(255,255,255,0.06)', marginBottom:14 }} />
+                    <SectionLabel>Metallic Satin Controls</SectionLabel>
+                    <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.45, marginBottom:10 }}>
+                      Use fine Texture with higher Metallic for a dense micro-flake paint look rather than visible glitter specks.
+                    </div>
+                    <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:10 }}>
+                      <span style={{ fontSize:10, color:'#9ca3af', minWidth:48 }}>Metallic</span>
+                      <input type="range" min="0" max="100" value={Math.round(satinMetallic*100)} onChange={e => setSatinMetallic(parseInt(e.target.value)/100)} style={{ flex:1, minWidth:0 }} />
+                    </div>
+                    <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:4 }}>
+                      <span style={{ fontSize:10, color:'#9ca3af', minWidth:48 }}>Texture</span>
+                      <input type="range" min="0" max="100" value={Math.round(satinTexture*100)} onChange={e => setSatinTexture(parseInt(e.target.value)/100)} style={{ flex:1, minWidth:0 }} />
+                    </div>
                   </div>
                 )}
                 </CollapsibleSection>
@@ -3946,7 +4047,7 @@ export default function HelmetBuilder() {
             {[
               { icon:'◈', text:'Click any swatch or type a hex code to change colors' },
               { icon:'◎', text:'Car Paint + Chrome are the only finishes with reflections — Gloss/Matte/Satin use true flat color' },
-              { icon:'✦', text:'Glitter flakes only show up on the Car Paint finish, with separate amount and size controls' },
+              { icon:'✦', text:'Car Paint uses discrete glitter; Satin can add dense metallic micro-texture for fine-grain finishes' },
               { icon:'◉', text:'Drag to rotate the helmet and check the finish from multiple angles' },
               { icon:'★', text:'Exports include watermark — upgrade to remove it' },
             ].map((tip,i) => (
