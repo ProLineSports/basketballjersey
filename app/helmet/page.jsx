@@ -495,10 +495,14 @@ function createWorldSpaceDecalOverlays(scene, roots, decalUniforms, options = {}
         alphaTest: 0.001,
         side: THREE.DoubleSide,
         depthTest: true,
-        depthWrite: true,
+        // Do not let the transparent stripe carrier establish depth in front of
+        // physical helmet parts such as the bumpers.
+        depthWrite: false,
         polygonOffset: true,
-        polygonOffsetFactor: -2,
-        polygonOffsetUnits: -2,
+        // Positive offset biases the stripe layer slightly back in the depth buffer.
+        // This preserves the simulated vinyl lift while ensuring real bumpers win.
+        polygonOffsetFactor: 2,
+        polygonOffsetUnits: 2,
       });
       installDecalOverlayShader(material, decalUniforms);
 
@@ -1227,8 +1231,8 @@ export default function HelmetBuilder() {
   const [bumperLogoRearPreviewUrl, setBumperLogoRearPreviewUrl] = useState(null);
   const [bumperLogoFrontFileName, setBumperLogoFrontFileName] = useState('');
   const [bumperLogoRearFileName, setBumperLogoRearFileName] = useState('');
-  const [bumperLogoFrontScale, setBumperLogoFrontScale] = useState(1);
-  const [bumperLogoRearScale, setBumperLogoRearScale] = useState(1);
+  const [bumperLogoFrontScale, setBumperLogoFrontScale] = useState(6.6);
+  const [bumperLogoRearScale, setBumperLogoRearScale] = useState(6.6);
   const [bumperLogoFrontRotation, setBumperLogoFrontRotation] = useState(0);
   const [bumperLogoRearRotation, setBumperLogoRearRotation] = useState(0);
   const [bumperLogoFrontAcross, setBumperLogoFrontAcross] = useState(0);
@@ -1895,7 +1899,7 @@ export default function HelmetBuilder() {
           scene,
           decalSurfaceObjectsRef.current,
           stripeUniformsRef.current,
-          { normalLift: 0.00055, renderOrder: 28, namePrefix: 'HelmetStripeCarrier' }
+          { normalLift: 0.00012, renderOrder: 18, namePrefix: 'HelmetStripeCarrier' }
         );
         stripeCarrierOverlayMeshesRef.current = stripeCarrier.overlays;
         stripeCarrierOverlayMaterialsRef.current = stripeCarrier.materials;
@@ -2735,7 +2739,10 @@ export default function HelmetBuilder() {
 
       let baseHeight = boundsModel.width * 0.060 * scaleValue;
       let baseWidth = baseHeight * THREE.MathUtils.clamp(pack.aspect, 0.55, 5.0);
-      const maxWidth = boundsModel.width * 0.48;
+      // Bumper marks are commonly wide wordmarks. Allow artwork to span almost the
+      // full physical bumper width; the surface shader still clips it strictly to the
+      // bumper geometry, so it cannot spill onto the shell.
+      const maxWidth = boundsModel.width * 0.98;
       if (baseWidth > maxWidth) {
         const k = maxWidth / baseWidth;
         baseWidth *= k;
@@ -3508,7 +3515,7 @@ export default function HelmetBuilder() {
 
                 <CollapsibleSection title="BUMPER LOGOS">
                   <div style={{ fontSize:10, color:'#6b7280', lineHeight:1.5, marginBottom:10 }}>
-                    Add independent logos to the front and rear bumpers. Artwork is clipped by the actual bumper geometry, so it cannot extend onto the shell. Bumper logos use the active Decal Finish and include the same subtle raised-vinyl effect.
+                    Add independent logos to the front and rear bumpers. Artwork starts large and can span nearly the full bumper width. It is clipped by the actual bumper geometry so it cannot extend onto the shell. Bumper logos use the active Decal Finish and include the same subtle raised-vinyl effect.
                   </div>
                   {bumperLogoError && <div style={{ marginBottom:10, fontSize:10, color:'#ef4444', lineHeight:1.4 }}>{bumperLogoError}</div>}
                   <input id="front-bumper-logo-upload" type="file" accept="image/png,image/jpeg" onChange={handleFrontBumperLogoUpload} style={{ display:'none' }} />
@@ -3542,7 +3549,7 @@ export default function HelmetBuilder() {
                           </div>
                           <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:7 }}>
                             <span style={{ width:50, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Size</span>
-                            <input type="range" min="40" max="220" value={Math.round(item.scale*100)} onChange={e => item.setScale(parseInt(e.target.value)/100)} style={{ flex:1, minWidth:0 }} />
+                            <input type="range" min="100" max="1000" value={Math.round(item.scale*100)} onChange={e => item.setScale(parseInt(e.target.value)/100)} style={{ flex:1, minWidth:0 }} />
                           </div>
                           <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:7 }}>
                             <span style={{ width:50, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Rotate</span>
