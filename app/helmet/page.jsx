@@ -469,6 +469,54 @@ function createShellDecalOverlays(roots, decalUniforms) {
 }
 
 
+
+function createWorldSpaceDecalOverlays(scene, roots, decalUniforms, options = {}) {
+  const { normalLift = 0, renderOrder = 20, namePrefix = 'CarrierStripe' } = options;
+  const overlays = [];
+  const materials = [];
+  const seen = new Set();
+
+  (roots || []).forEach(root => {
+    root.traverse(source => {
+      if (!source.isMesh || !source.geometry?.attributes?.helmetModelPosition || seen.has(source)) return;
+      seen.add(source);
+      source.updateWorldMatrix(true, false);
+
+      const geometry = source.geometry.clone();
+      if (normalLift) offsetGeometryAlongNormals(geometry, normalLift);
+      const material = new THREE.MeshPhysicalMaterial({
+        color: 0xffffff,
+        roughness: 0.08,
+        metalness: 0.0,
+        clearcoat: 1.0,
+        clearcoatRoughness: 0.04,
+        transparent: true,
+        opacity: 1.0,
+        alphaTest: 0.001,
+        side: THREE.DoubleSide,
+        depthTest: true,
+        depthWrite: true,
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -2,
+      });
+      installDecalOverlayShader(material, decalUniforms);
+
+      const overlay = new THREE.Mesh(geometry, material);
+      overlay.name = `${namePrefix}_${source.name || 'Surface'}`;
+      source.matrixWorld.decompose(overlay.position, overlay.quaternion, overlay.scale);
+      overlay.renderOrder = renderOrder;
+      overlay.castShadow = false;
+      overlay.receiveShadow = false;
+      scene.add(overlay);
+      overlays.push(overlay);
+      materials.push(material);
+    });
+  });
+
+  return { overlays, materials };
+}
+
 function findFirstProjectableMesh(roots) {
   for (const root of roots || []) {
     let found = null;
@@ -947,6 +995,29 @@ function SectionLabel({ children }) {
   return <div style={{ fontSize:9, fontWeight:700, color:"#6b7280", letterSpacing:"0.1em", fontFamily:"'Barlow Condensed',sans-serif", marginBottom:10, marginTop:4 }}>{children}</div>;
 }
 
+function CollapsibleSection({ title, children, defaultOpen = false }) {
+  const [open, setOpen] = React.useState(defaultOpen);
+  return (
+    <div style={{ borderBottom:'1px solid rgba(255,255,255,0.06)', paddingBottom:8, marginBottom:8 }}>
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        aria-expanded={open}
+        style={{
+          width:'100%', display:'flex', alignItems:'center', justifyContent:'space-between',
+          background:'none', border:'none', padding:'7px 0 8px', cursor:'pointer',
+          color:open?'#d1d5db':'#9ca3af', fontSize:10, fontWeight:800,
+          fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.09em', textAlign:'left'
+        }}
+      >
+        <span>{title}</span>
+        <span style={{ color:'#efff00', fontSize:15, fontWeight:500, lineHeight:1 }}>{open ? '−' : '+'}</span>
+      </button>
+      {open && <div style={{ paddingBottom:6 }}>{children}</div>}
+    </div>
+  );
+}
+
 function ColorSwatch({ color, onChange, label }) {
   const [hex, setHex] = React.useState(color.toUpperCase());
   const inputRef = React.useRef(null);
@@ -1005,6 +1076,15 @@ export default function HelmetBuilder() {
   const stripeDesignObjectUrlRef = useRef(null);
   const decalOverlayMeshesRef    = useRef([]);
   const decalOverlayMaterialsRef = useRef([]);
+  const stripeCarrierOverlayMeshesRef = useRef([]);
+  const stripeCarrierOverlayMaterialsRef = useRef([]);
+  const bumperLogoMeshesRef      = useRef([]);
+  const bumperLogoMaterialsRef   = useRef([]);
+  const bumperLogoTexturesRef    = useRef([]);
+  const bumperLogoFrontImageRef  = useRef(null);
+  const bumperLogoRearImageRef   = useRef(null);
+  const bumperLogoFrontObjectUrlRef = useRef(null);
+  const bumperLogoRearObjectUrlRef  = useRef(null);
   const sideLogoMeshesRef        = useRef([]);
   const sideLogoMaterialsRef     = useRef([]);
   const sideLogoTexturesRef      = useRef([]);
@@ -1035,6 +1115,8 @@ export default function HelmetBuilder() {
 
   // Shared shader-uniform objects for Shell stripe decals. The renderer keeps references
   // to these objects across material recompiles (wrap on/off, finish changes, etc.).
+  // Stripe-only uniforms. These render on the baked Decal Surface so the stripe
+  // bridges crown hardware/cutouts while still following the true shell curvature.
   const stripeUniformsRef = useRef({
     enabled:         { value: 0 },
     baseEnabled:     { value: 0 },
@@ -1044,6 +1126,23 @@ export default function HelmetBuilder() {
     leftColor:       { value: new THREE.Color('#efff00') },
     centerColor:     { value: new THREE.Color('#eaeaea') },
     rightColor:      { value: new THREE.Color('#efff00') },
+    designEnabled:   { value: 0 },
+    designMap:       { value: null },
+    wrapEnabled:     { value: 0 },
+    wrapMap:         { value: null },
+  });
+
+  // Wrap-only overlay for the real Shell. Keeping this separate prevents the stripe
+  // from being drawn twice now that stripes have their own carrier-surface layer.
+  const shellWrapUniformsRef = useRef({
+    enabled:         { value: 0 },
+    baseEnabled:     { value: 0 },
+    widthScale:      { value: 1 },
+    length:          { value: 1 },
+    centerX:         { value: 0 },
+    leftColor:       { value: new THREE.Color('#ffffff') },
+    centerColor:     { value: new THREE.Color('#ffffff') },
+    rightColor:      { value: new THREE.Color('#ffffff') },
     designEnabled:   { value: 0 },
     designMap:       { value: null },
     wrapEnabled:     { value: 0 },
@@ -1120,6 +1219,21 @@ export default function HelmetBuilder() {
   const [sideLogoRevision, setSideLogoRevision] = useState(0);
   const [selectedSideLogo, setSelectedSideLogo] = useState(null); // left | right | null
   const [sideLogoLocked, setSideLogoLocked] = useState(false);
+
+  const [bumperLogoError, setBumperLogoError] = useState('');
+  const [bumperLogoFrontPreviewUrl, setBumperLogoFrontPreviewUrl] = useState(null);
+  const [bumperLogoRearPreviewUrl, setBumperLogoRearPreviewUrl] = useState(null);
+  const [bumperLogoFrontFileName, setBumperLogoFrontFileName] = useState('');
+  const [bumperLogoRearFileName, setBumperLogoRearFileName] = useState('');
+  const [bumperLogoFrontScale, setBumperLogoFrontScale] = useState(1);
+  const [bumperLogoRearScale, setBumperLogoRearScale] = useState(1);
+  const [bumperLogoFrontRotation, setBumperLogoFrontRotation] = useState(0);
+  const [bumperLogoRearRotation, setBumperLogoRearRotation] = useState(0);
+  const [bumperLogoFrontAcross, setBumperLogoFrontAcross] = useState(0);
+  const [bumperLogoRearAcross, setBumperLogoRearAcross] = useState(0);
+  const [bumperLogoFrontVertical, setBumperLogoFrontVertical] = useState(0);
+  const [bumperLogoRearVertical, setBumperLogoRearVertical] = useState(0);
+  const [bumperLogoRevision, setBumperLogoRevision] = useState(0);
 
   const finishRef = useRef(finish);
   useEffect(() => { finishRef.current = finish; }, [finish]);
@@ -1367,6 +1481,65 @@ export default function HelmetBuilder() {
     });
   }, []);
 
+  const assignBumperLogoFile = useCallback((slot, file) => {
+    if (!file) return;
+    if (!['image/png', 'image/jpeg'].includes(file.type)) {
+      setBumperLogoError('Please upload a PNG or JPEG for bumper logos.');
+      return;
+    }
+    const objectUrl = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const target = slot === 'front'
+        ? { ref: bumperLogoFrontImageRef, urlRef: bumperLogoFrontObjectUrlRef, setPreview: setBumperLogoFrontPreviewUrl, setName: setBumperLogoFrontFileName }
+        : { ref: bumperLogoRearImageRef, urlRef: bumperLogoRearObjectUrlRef, setPreview: setBumperLogoRearPreviewUrl, setName: setBumperLogoRearFileName };
+      if (target.urlRef.current) URL.revokeObjectURL(target.urlRef.current);
+      target.urlRef.current = objectUrl;
+      target.ref.current = img;
+      target.setPreview(objectUrl);
+      target.setName(file.name);
+      setBumperLogoError('');
+      setBumperLogoRevision(v => v + 1);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      setBumperLogoError('That bumper logo could not be read. Please try another PNG or JPEG.');
+    };
+    img.src = objectUrl;
+  }, []);
+
+  const handleFrontBumperLogoUpload = useCallback((event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (file) assignBumperLogoFile('front', file);
+  }, [assignBumperLogoFile]);
+
+  const handleRearBumperLogoUpload = useCallback((event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (file) assignBumperLogoFile('rear', file);
+  }, [assignBumperLogoFile]);
+
+  const removeBumperLogo = useCallback((slot) => {
+    const target = slot === 'front'
+      ? { ref: bumperLogoFrontImageRef, urlRef: bumperLogoFrontObjectUrlRef, setPreview: setBumperLogoFrontPreviewUrl, setName: setBumperLogoFrontFileName }
+      : { ref: bumperLogoRearImageRef, urlRef: bumperLogoRearObjectUrlRef, setPreview: setBumperLogoRearPreviewUrl, setName: setBumperLogoRearFileName };
+    if (target.urlRef.current) {
+      URL.revokeObjectURL(target.urlRef.current);
+      target.urlRef.current = null;
+    }
+    target.ref.current = null;
+    target.setPreview(null);
+    target.setName('');
+    setBumperLogoRevision(v => v + 1);
+  }, []);
+
+  useEffect(() => () => {
+    [bumperLogoFrontObjectUrlRef, bumperLogoRearObjectUrlRef].forEach(ref => {
+      if (ref.current) URL.revokeObjectURL(ref.current);
+    });
+  }, []);
+
   useEffect(() => {
     if (sideLogoIndependent) return;
     const sourceSide = selectedSideLogoRef.current === 'right' ? 'right' : 'left';
@@ -1488,7 +1661,9 @@ export default function HelmetBuilder() {
         applyFacemaskEnvMap(materialsRef.current, scene, facemaskFinishRef.current);
         applyDecalFinishToMaterials([
           ...decalOverlayMaterialsRef.current,
+          ...stripeCarrierOverlayMaterialsRef.current,
           ...sideLogoMaterialsRef.current.filter(mat => mat.userData?.sideLogoMainMaterial),
+          ...bumperLogoMaterialsRef.current.filter(mat => mat.userData?.bumperLogoMainMaterial),
         ], scene, decalFinishRef.current);
       },
       undefined,
@@ -1699,17 +1874,40 @@ export default function HelmetBuilder() {
         shellRoots
       );
 
-      // Wraps and stripes still use the real Shell as their decal overlay surface.
-      // The baked `Decal Surface` is reserved as a hidden carrier for main-logo placement,
-      // exactly like a clipping-mask shape: only the projected logo itself becomes visible.
-      stripeUniformsRef.current.centerX.value = shellProjection?.centerX || 0;
+      // The full wrap remains on the real Shell. Stripes now get their own visible
+      // overlay cloned from the hidden baked Decal Surface. That filled carrier lets the
+      // stripe span crown screw openings/cutouts while retaining the helmet curvature.
+      shellWrapUniformsRef.current.centerX.value = shellProjection?.centerX || 0;
       const decalOverlays = createShellDecalOverlays(
         shellRoots,
-        stripeUniformsRef.current
+        shellWrapUniformsRef.current
       );
       decalOverlayMeshesRef.current = decalOverlays.overlays;
       decalOverlayMaterialsRef.current = decalOverlays.materials;
-      applyDecalFinishToMaterials(decalOverlayMaterialsRef.current, scene, decalFinishRef.current);
+
+      if (decalSurfaceObjectsRef.current.length) {
+        const carrierProjection = applyPanoramicShellWrapUV(model, decalSurfaceObjectsRef.current);
+        stripeUniformsRef.current.centerX.value = carrierProjection?.centerX ?? shellProjection?.centerX ?? 0;
+        const stripeCarrier = createWorldSpaceDecalOverlays(
+          scene,
+          decalSurfaceObjectsRef.current,
+          stripeUniformsRef.current,
+          { normalLift: 0.00055, renderOrder: 28, namePrefix: 'HelmetStripeCarrier' }
+        );
+        stripeCarrierOverlayMeshesRef.current = stripeCarrier.overlays;
+        stripeCarrierOverlayMaterialsRef.current = stripeCarrier.materials;
+      } else {
+        // Fallback for an older GLB: put stripes back on the visible shell overlay.
+        stripeUniformsRef.current.centerX.value = shellProjection?.centerX || 0;
+        const stripeFallback = createShellDecalOverlays(shellRoots, stripeUniformsRef.current);
+        stripeCarrierOverlayMeshesRef.current = stripeFallback.overlays;
+        stripeCarrierOverlayMaterialsRef.current = stripeFallback.materials;
+      }
+
+      applyDecalFinishToMaterials([
+        ...decalOverlayMaterialsRef.current,
+        ...stripeCarrierOverlayMaterialsRef.current,
+      ], scene, decalFinishRef.current);
 
       scene.add(model);
       // Now that all shell/facemask materials exist, route env maps per current finish
@@ -1749,6 +1947,16 @@ export default function HelmetBuilder() {
       decalOverlayMaterialsRef.current.forEach(mat => mat.dispose());
       decalOverlayMeshesRef.current = [];
       decalOverlayMaterialsRef.current = [];
+      stripeCarrierOverlayMeshesRef.current.forEach(mesh => { mesh.parent?.remove(mesh); mesh.geometry?.dispose?.(); });
+      stripeCarrierOverlayMaterialsRef.current.forEach(mat => mat.dispose?.());
+      stripeCarrierOverlayMeshesRef.current = [];
+      stripeCarrierOverlayMaterialsRef.current = [];
+      bumperLogoMeshesRef.current.forEach(mesh => { mesh.parent?.remove(mesh); mesh.geometry?.dispose?.(); });
+      bumperLogoMaterialsRef.current.forEach(mat => mat.dispose?.());
+      bumperLogoTexturesRef.current.forEach(tex => tex.dispose?.());
+      bumperLogoMeshesRef.current = [];
+      bumperLogoMaterialsRef.current = [];
+      bumperLogoTexturesRef.current = [];
       decalSurfaceObjectsRef.current = [];
       sideLogoMeshesRef.current.forEach(mesh => mesh.parent?.remove(mesh));
       sideLogoMaterialsRef.current.forEach(mat => mat.dispose());
@@ -1780,7 +1988,7 @@ export default function HelmetBuilder() {
   // ── FULL WRAP TEXTURE ───────────────────────────────────────────────────────
   useEffect(() => {
     if (!loaded) return;
-    const uniforms = stripeUniformsRef.current;
+    const uniforms = shellWrapUniformsRef.current;
 
     if (!wrapEnabled || !wrapImageRef.current) {
       uniforms.wrapEnabled.value = 0;
@@ -1906,6 +2114,16 @@ export default function HelmetBuilder() {
     uniforms.designEnabled.value = helmetStripeDesignEnabled && hasDesign ? 1 : 0;
   }, [loaded, helmetStripesEnabled, helmetStripeWidth, helmetStripeLength, helmetStripeLeftColor, helmetStripeCenterColor, helmetStripeRightColor, helmetStripeDesignEnabled, helmetStripeDesignRevision]);
 
+  // Hide crown screws while any stripe layer is active. The filled Decal Surface
+  // supplies the visible curved stripe across that area, so the screw hardware cannot
+  // poke through the vinyl graphic.
+  useEffect(() => {
+    const hasDesign = !!stripeDesignImageRef.current;
+    const stripeActive = helmetStripesEnabled || (helmetStripeDesignEnabled && hasDesign);
+    const roots = partObjectsRef.current[partKey('Top Screws')] || [];
+    roots.forEach(root => { root.visible = !stripeActive; });
+  }, [loaded, helmetStripesEnabled, helmetStripeDesignEnabled, helmetStripeDesignRevision]);
+
   // ── MAIN SIDE LOGO DECALS ───────────────────────────────────────────────
   // Main logos use the hidden baked `Decal Surface` as a true clipping carrier:
   // the full carrier curvature is duplicated for rendering, but a shader makes every
@@ -1971,14 +2189,89 @@ export default function HelmetBuilder() {
       return hits[0];
     };
 
+    const getHitWorldNormal = (hit, side) => {
+      const normalMatrix = new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld);
+      return hit.face?.normal?.clone().applyMatrix3(normalMatrix).normalize()
+        || new THREE.Vector3(side === 'left' ? -1 : 1, 0, 0).transformDirection(model.matrixWorld).normalize();
+    };
+
+    const mirrorWorldPointAcrossHelmet = (worldPoint) => {
+      const local = worldPoint.clone();
+      model.worldToLocal(local);
+      local.x = boundsModel.centerX * 2 - local.x;
+      return model.localToWorld(local);
+    };
+
+    const mirrorWorldDirectionAcrossHelmet = (worldDirection) => {
+      const inverseWorld = new THREE.Matrix4().copy(model.matrixWorld).invert();
+      const local = worldDirection.clone().transformDirection(inverseWorld);
+      local.x *= -1;
+      return local.transformDirection(model.matrixWorld).normalize();
+    };
+
+    const makeFrameQuaternion = (right, up, normal) => {
+      const basis = new THREE.Matrix4().makeBasis(right, up, normal);
+      return new THREE.Quaternion().setFromRotationMatrix(basis);
+    };
+
+    const getSideFrame = (side) => {
+      if (sideLogoIndependent) {
+        const placement = sideLogoPlacementRef.current[side];
+        const hit = getSideHit(side, placement);
+        if (!hit) return null;
+        const logoCenter = hit.point.clone();
+        const worldNormal = getHitWorldNormal(hit, side);
+        const helper = new THREE.Object3D();
+        helper.position.copy(logoCenter);
+        helper.lookAt(logoCenter.clone().add(worldNormal));
+        helper.rotateZ(placement.rotation);
+        const frameQuat = helper.quaternion.clone();
+        const frameRight = new THREE.Vector3(1, 0, 0).applyQuaternion(frameQuat).normalize();
+        const frameUp = new THREE.Vector3(0, 1, 0).applyQuaternion(frameQuat).normalize();
+        return { logoCenter, worldNormal, frameRight, frameUp, frameQuat };
+      }
+
+      // Linked logos use one mathematically mirrored transform. We derive the canonical
+      // frame from the model-space LEFT carrier side, then reflect the actual center and
+      // tangent frame across the helmet's X=center plane. This guarantees identical
+      // height/front-back/scale/rotation on both sides instead of relying on two slightly
+      // different raycast intersections.
+      const placement = sideLogoPlacementRef.current.left;
+      const masterHit = getSideHit('left', placement);
+      if (!masterHit) return null;
+      const masterCenter = masterHit.point.clone();
+      const masterNormal = getHitWorldNormal(masterHit, 'left');
+      const masterHelper = new THREE.Object3D();
+      masterHelper.position.copy(masterCenter);
+      masterHelper.lookAt(masterCenter.clone().add(masterNormal));
+      masterHelper.rotateZ(placement.rotation);
+      const masterQuat = masterHelper.quaternion.clone();
+      const masterRight = new THREE.Vector3(1, 0, 0).applyQuaternion(masterQuat).normalize();
+      const masterUp = new THREE.Vector3(0, 1, 0).applyQuaternion(masterQuat).normalize();
+
+      if (side === 'left') {
+        return { logoCenter:masterCenter, worldNormal:masterNormal, frameRight:masterRight, frameUp:masterUp, frameQuat:masterQuat };
+      }
+
+      const logoCenter = mirrorWorldPointAcrossHelmet(masterCenter);
+      const worldNormal = mirrorWorldDirectionAcrossHelmet(masterNormal);
+      const frameUp = mirrorWorldDirectionAcrossHelmet(masterUp);
+      // Reflection reverses handedness. Rebuild a proper right-handed tangent basis so
+      // PlaneGeometry/selection UI remain stable while the uploaded image's MIRROR toggle
+      // controls whether the artwork itself is flipped.
+      const frameRight = frameUp.clone().cross(worldNormal).normalize();
+      const frameQuat = makeFrameQuaternion(frameRight, frameUp, worldNormal);
+      return { logoCenter, worldNormal, frameRight, frameUp, frameQuat };
+    };
+
     const makeSide = (side) => {
       const show = side === 'left' ? sideLogoLeftVisible : sideLogoRightVisible;
       const image = resolveImageForSide(side);
       if (!show || !image) return;
 
       const placement = sideLogoPlacementRef.current[side];
-      const hit = getSideHit(side, placement);
-      if (!hit) return;
+      const frame = getSideFrame(side);
+      if (!frame) return;
 
       const pack = createSideLogoTexturePack(image, {
         mirror: side === 'left' ? sideLogoLeftMirror : sideLogoRightMirror,
@@ -1994,18 +2287,7 @@ export default function HelmetBuilder() {
       const baseHeight = boundsModel.height * 1.00 * combinedScale;
       const baseWidth = baseHeight * THREE.MathUtils.clamp(pack.aspect, 0.55, 2.6);
 
-      const normalMatrix = new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld);
-      const worldNormal = hit.face?.normal?.clone().applyMatrix3(normalMatrix).normalize()
-        || new THREE.Vector3(side === 'left' ? -1 : 1, 0, 0).transformDirection(model.matrixWorld).normalize();
-
-      const logoCenter = hit.point.clone();
-      const helper = new THREE.Object3D();
-      helper.position.copy(logoCenter);
-      helper.lookAt(logoCenter.clone().add(worldNormal));
-      helper.rotateZ(placement.rotation);
-      const frameQuat = helper.quaternion.clone();
-      const frameRight = new THREE.Vector3(1, 0, 0).applyQuaternion(frameQuat).normalize();
-      const frameUp = new THREE.Vector3(0, 1, 0).applyQuaternion(frameQuat).normalize();
+      const { logoCenter, worldNormal, frameRight, frameUp, frameQuat } = frame;
 
       // The artwork is sampled on the *entire* baked carrier surface. Only transparent
       // pixels outside the image disappear; there is no geometric decal mask at all.
@@ -2384,11 +2666,148 @@ export default function HelmetBuilder() {
     sideLogoLocked,
   ]);
 
+  // ── FRONT / REAR BUMPER LOGOS ─────────────────────────────────────────────
+  useEffect(() => {
+    const scene = sceneRef.current;
+    const model = modelRef.current;
+    if (!loaded || !scene || !model) return;
+
+    const bumperRoots = partObjectsRef.current[partKey('Bumpers')] || [];
+    const bumperMeshes = collectMeshDescendants(bumperRoots);
+    const boundsWorld = getWorldBoundsForRoots(bumperRoots);
+    const boundsModel = computeRootsBoundsInModelSpace(model, bumperRoots);
+    if (!bumperMeshes.length || !boundsWorld || !boundsModel) return;
+
+    const cleanup = () => {
+      bumperLogoMeshesRef.current.forEach(mesh => { mesh.parent?.remove(mesh); mesh.geometry?.dispose?.(); });
+      bumperLogoMaterialsRef.current.forEach(mat => mat.dispose?.());
+      bumperLogoTexturesRef.current.forEach(tex => tex.dispose?.());
+      bumperLogoMeshesRef.current = [];
+      bumperLogoMaterialsRef.current = [];
+      bumperLogoTexturesRef.current = [];
+    };
+    cleanup();
+
+    const getBumperHit = (slot, across, vertical) => {
+      const isFront = slot === 'front';
+      const localTarget = new THREE.Vector3(
+        boundsModel.centerX + (across / 100) * boundsModel.width * 0.22,
+        isFront
+          ? boundsModel.maxY - boundsModel.height * (0.10 - (vertical / 100) * 0.12)
+          : boundsModel.minY + boundsModel.height * (0.10 + (vertical / 100) * 0.12),
+        isFront ? boundsModel.maxZ : boundsModel.minZ,
+      );
+      const targetWorld = model.localToWorld(localTarget.clone());
+      const outwardLocal = new THREE.Vector3(0, 0, isFront ? 1 : -1);
+      const outwardWorld = outwardLocal.clone().transformDirection(model.matrixWorld).normalize();
+      const rayOrigin = targetWorld.clone().addScaledVector(outwardWorld, boundsWorld.size.length() * 0.6);
+      const raycaster = new THREE.Raycaster(
+        rayOrigin,
+        outwardWorld.clone().multiplyScalar(-1),
+        0,
+        boundsWorld.size.length() * 1.5
+      );
+      const hits = raycaster.intersectObjects(bumperMeshes, false);
+      if (!hits.length) return null;
+      const modelInverse = new THREE.Matrix4().copy(model.matrixWorld).invert();
+      return hits.find(hit => {
+        const local = hit.point.clone().applyMatrix4(modelInverse);
+        return isFront ? local.z >= boundsModel.centerZ : local.z <= boundsModel.centerZ;
+      }) || null;
+    };
+
+    const makeBumperLogo = (slot) => {
+      const isFront = slot === 'front';
+      const image = isFront ? bumperLogoFrontImageRef.current : bumperLogoRearImageRef.current;
+      if (!image) return;
+      const scaleValue = isFront ? bumperLogoFrontScale : bumperLogoRearScale;
+      const rotationValue = isFront ? bumperLogoFrontRotation : bumperLogoRearRotation;
+      const acrossValue = isFront ? bumperLogoFrontAcross : bumperLogoRearAcross;
+      const verticalValue = isFront ? bumperLogoFrontVertical : bumperLogoRearVertical;
+      const hit = getBumperHit(slot, acrossValue, verticalValue);
+      if (!hit) return;
+
+      const pack = createSideLogoTexturePack(image, { strokeEnabled:false });
+      if (!pack) return;
+
+      let baseHeight = boundsModel.width * 0.060 * scaleValue;
+      let baseWidth = baseHeight * THREE.MathUtils.clamp(pack.aspect, 0.55, 5.0);
+      const maxWidth = boundsModel.width * 0.48;
+      if (baseWidth > maxWidth) {
+        const k = maxWidth / baseWidth;
+        baseWidth *= k;
+        baseHeight *= k;
+      }
+
+      const normalMatrix = new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld);
+      const fallback = new THREE.Vector3(0, 0, isFront ? 1 : -1).transformDirection(model.matrixWorld).normalize();
+      const worldNormal = hit.face?.normal?.clone().applyMatrix3(normalMatrix).normalize() || fallback;
+      const center = hit.point.clone();
+      const helper = new THREE.Object3D();
+      helper.position.copy(center);
+      helper.lookAt(center.clone().add(worldNormal));
+      helper.rotateZ(rotationValue * Math.PI / 180);
+      const quat = helper.quaternion.clone();
+      const right = new THREE.Vector3(1,0,0).applyQuaternion(quat).normalize();
+      const up = new THREE.Vector3(0,1,0).applyQuaternion(quat).normalize();
+      const depth = Math.max(baseHeight * 0.6, boundsModel.depth * 0.045);
+      const lift = Math.max(boundsModel.width * 0.00045, 0.00018);
+
+      const shadowUniforms = {
+        center:{ value:center }, right:{ value:right }, up:{ value:up }, normal:{ value:worldNormal },
+        width:{ value:baseWidth * 1.02 }, height:{ value:baseHeight * 1.02 }, depth:{ value:depth }, lift:{ value:lift * 0.25 },
+      };
+      const mainUniforms = {
+        center:{ value:center }, right:{ value:right }, up:{ value:up }, normal:{ value:worldNormal },
+        width:{ value:baseWidth }, height:{ value:baseHeight }, depth:{ value:depth }, lift:{ value:lift * 0.65 },
+      };
+
+      const shadowMat = new THREE.MeshPhysicalMaterial({
+        color:0x000000, map:pack.rimTexture, transparent:true, alphaTest:0.01, opacity:0.32,
+        side:THREE.DoubleSide, depthWrite:false, depthTest:true, roughness:0.95, metalness:0,
+        polygonOffset:true, polygonOffsetFactor:-1, polygonOffsetUnits:-1,
+      });
+      installSideLogoSurfaceProjection(shadowMat, shadowUniforms, `bumper-logo-shadow-${slot}`);
+
+      const mainMat = new THREE.MeshPhysicalMaterial({
+        color:0xffffff, map:pack.mainTexture, transparent:true, alphaTest:0.01, opacity:1,
+        side:THREE.DoubleSide, depthWrite:false, depthTest:true,
+        polygonOffset:true, polygonOffsetFactor:-2, polygonOffsetUnits:-2,
+      });
+      mainMat.userData.bumperLogoMainMaterial = true;
+      installSideLogoSurfaceProjection(mainMat, mainUniforms, `bumper-logo-main-${slot}`);
+      applyDecalFinishToMaterials([mainMat], scene, decalFinishRef.current);
+
+      const shadowMeshes = createCarrierSurfaceLogoMeshes(scene, bumperMeshes, shadowMat, `bumper-${slot}`, 'Shadow', 34);
+      const mainMeshes = createCarrierSurfaceLogoMeshes(scene, bumperMeshes, mainMat, `bumper-${slot}`, 'Artwork', 35);
+      bumperLogoMeshesRef.current.push(...shadowMeshes, ...mainMeshes);
+      bumperLogoMaterialsRef.current.push(shadowMat, mainMat);
+      bumperLogoTexturesRef.current.push(pack.rimTexture, pack.mainTexture);
+    };
+
+    makeBumperLogo('front');
+    makeBumperLogo('rear');
+    return cleanup;
+  }, [
+    loaded,
+    bumperLogoRevision,
+    bumperLogoFrontScale,
+    bumperLogoRearScale,
+    bumperLogoFrontRotation,
+    bumperLogoRearRotation,
+    bumperLogoFrontAcross,
+    bumperLogoRearAcross,
+    bumperLogoFrontVertical,
+    bumperLogoRearVertical,
+  ]);
+
   // ── DECAL FINISH ────────────────────────────────────────────────────────────
   useEffect(() => {
     applyDecalFinishToMaterials([
       ...decalOverlayMaterialsRef.current,
+      ...stripeCarrierOverlayMaterialsRef.current,
       ...sideLogoMaterialsRef.current.filter(mat => mat.userData?.sideLogoMainMaterial),
+      ...bumperLogoMaterialsRef.current.filter(mat => mat.userData?.bumperLogoMainMaterial),
     ], sceneRef.current, decalFinish);
   }, [loaded, decalFinish]);
 
@@ -2657,13 +3076,13 @@ export default function HelmetBuilder() {
             {/* COLORS */}
             {activeTab === 'colors' && (
               <div>
-                <SectionLabel>Part Colors</SectionLabel>
+                <CollapsibleSection title="PART COLORS">
                 {ZONES.map(zone => (
                   <ColorSwatch key={zone.id} color={colors[zone.id]} onChange={v => setColor(zone.id, v)} label={zone.label} />
                 ))}
 
-                <div style={{ height:1, background:'rgba(255,255,255,0.06)', margin:'14px 0' }} />
-                <SectionLabel>Background</SectionLabel>
+                </CollapsibleSection>
+                <CollapsibleSection title="BACKGROUND">
                 <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:14 }}>
                   <span style={{ fontSize:11, color:'#9ca3af' }}>Shadow Surface</span>
                   <button onClick={() => setShowShadows(s => !s)} style={{ background:showShadows?'rgba(239,255,0,0.15)':'rgba(255,255,255,0.06)', border:showShadows?'1px solid rgba(239,255,0,0.5)':'1px solid rgba(255,255,255,0.12)', borderRadius:20, padding:'3px 12px', cursor:'pointer', fontSize:9, fontWeight:700, fontFamily:"'Barlow Condensed',sans-serif", color:showShadows?'#efff00':'#6b7280', letterSpacing:'0.06em' }}>{showShadows?'ON':'OFF'}</button>
@@ -2675,19 +3094,20 @@ export default function HelmetBuilder() {
                     {sparkleRotating ? 'STOP' : 'START'}
                   </button>
                 </div>
-                <div style={{ height:1, background:'rgba(255,255,255,0.06)', margin:'4px 0 14px' }} />
-                <SectionLabel>Visor</SectionLabel>
+                </CollapsibleSection>
+                <CollapsibleSection title="VISOR">
                 <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:8 }}>
                   <span style={{ fontSize:11, color:'#9ca3af' }}>Visor + Clips</span>
                   <button onClick={() => setVisorOn(v => !v)} style={{ background:visorOn?'rgba(239,255,0,0.15)':'rgba(255,255,255,0.06)', border:visorOn?'1px solid rgba(239,255,0,0.5)':'1px solid rgba(255,255,255,0.12)', borderRadius:20, padding:'3px 12px', cursor:'pointer', fontSize:9, fontWeight:700, fontFamily:"'Barlow Condensed',sans-serif", color:visorOn?'#efff00':'#6b7280', letterSpacing:'0.06em' }}>{visorOn?'ON':'OFF'}</button>
                 </div>
+                </CollapsibleSection>
               </div>
             )}
 
             {/* FINISH */}
             {activeTab === 'finish' && (
               <div>
-                <SectionLabel>Shell Finish</SectionLabel>
+                <CollapsibleSection title="SHELL FINISH">
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {FINISHES.map(f => (
                     <button key={f.id} onClick={() => setFinish(f.id)} style={{ background: finish === f.id ? 'rgba(239,255,0,0.1)' : 'rgba(255,255,255,0.04)', border: finish === f.id ? '1px solid rgba(239,255,0,0.4)' : '1px solid rgba(255,255,255,0.08)', borderRadius: 8, padding: '10px 14px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -2712,20 +3132,21 @@ export default function HelmetBuilder() {
                     <ColorSwatch color={glitterColor} onChange={setGlitterColor} label="Sparkle Color" />
                   </div>
                 )}
-                <div style={{ height:1, background:'rgba(255,255,255,0.06)', margin:'14px 0' }} />
-                <SectionLabel>Facemask Finish</SectionLabel>
+                </CollapsibleSection>
+                <CollapsibleSection title="FACEMASK FINISH">
                 <div style={{ display:'flex', gap:6 }}>
                   {['gloss','matte','chrome'].map(f => (
                     <button key={f} onClick={() => setFacemaskFinish(f)} style={{ flex:1, background:facemaskFinish===f?'rgba(239,255,0,0.1)':'rgba(255,255,255,0.04)', border:facemaskFinish===f?'1px solid rgba(239,255,0,0.4)':'1px solid rgba(255,255,255,0.08)', borderRadius:6, padding:'8px 4px', cursor:'pointer', fontSize:10, fontWeight:700, fontFamily:"'Barlow Condensed',sans-serif", color:facemaskFinish===f?'#efff00':'#9ca3af' }}>{f.toUpperCase()}</button>
                   ))}
                 </div>
+                </CollapsibleSection>
               </div>
             )}
 
             {/* DECALS */}
             {activeTab === 'decals' && (
               <div>
-                <SectionLabel>Decal Finish</SectionLabel>
+                <CollapsibleSection title="DECAL FINISH">
                 <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:6, marginBottom:8 }}>
                   {DECAL_FINISHES.map(f => (
                     <button
@@ -2749,10 +3170,11 @@ export default function HelmetBuilder() {
                   ))}
                 </div>
                 <div style={{ fontSize:8, color:'#4b5563', lineHeight:1.45, marginBottom:14 }}>
-                  Applies to full wraps, preset stripes and uploaded stripe designs. Decals use their own finish and never inherit Shell glitter or Car Paint effects.
+                  Applies to full wraps, helmet stripes, side logos, and bumper logos. Decals use their own finish and never inherit Shell glitter or Car Paint effects.
                 </div>
+                </CollapsibleSection>
 
-                <SectionLabel>Full Wrap</SectionLabel>
+                <CollapsibleSection title="FULL WRAP">
                 <div style={{ fontSize:10, color:'#6b7280', lineHeight:1.55, marginBottom:10 }}>
                   Upload a PNG or JPEG of at least 1080×1080px. For best results use a wide image (around 2:1). The center maps to the front of the helmet and the left/right edges meet at the back.
                 </div>
@@ -2837,7 +3259,9 @@ export default function HelmetBuilder() {
                 )}
 
                 <div style={{ height:1, background:'rgba(255,255,255,0.06)', margin:'16px 0 14px' }} />
-                <SectionLabel>Helmet Stripes</SectionLabel>
+                </CollapsibleSection>
+
+                <CollapsibleSection title="HELMET STRIPES">
                 <div style={{ background:'rgba(255,255,255,0.035)', border:'1px solid rgba(255,255,255,0.09)', borderRadius:8, padding:10 }}>
                   <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:10 }}>
                     <div>
@@ -2954,8 +3378,9 @@ export default function HelmetBuilder() {
                     100% reaches the full rear extent below the bumper. Reducing Length moves only the rear ends forward toward the crown while keeping the front aligned.
                   </div>
                 </div>
-                <div style={{ height:1, background:'rgba(255,255,255,0.06)', margin:'16px 0 14px' }} />
-                <SectionLabel>Main Side Logos</SectionLabel>
+                </CollapsibleSection>
+
+                <CollapsibleSection title="MAIN SIDE LOGOS">
                 <div style={{ background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.04)', borderRadius:10, padding:12 }}>
                   <div style={{ fontSize:10, color:'#6b7280', lineHeight:1.5, marginBottom:8 }}>
                     Upload the main side logo decal. It automatically lands on both helmet sides, with the right side mirrored. You can hide either side, rotate either side 180°, or switch to fully independent left/right logo uploads.
@@ -3070,6 +3495,63 @@ export default function HelmetBuilder() {
                     </>
                   )}
                 </div>
+                </CollapsibleSection>
+
+                <CollapsibleSection title="BUMPER LOGOS">
+                  <div style={{ fontSize:10, color:'#6b7280', lineHeight:1.5, marginBottom:10 }}>
+                    Add independent logos to the front and rear bumpers. Artwork is clipped by the actual bumper geometry, so it cannot extend onto the shell. Bumper logos use the active Decal Finish and include the same subtle raised-vinyl effect.
+                  </div>
+                  {bumperLogoError && <div style={{ marginBottom:10, fontSize:10, color:'#ef4444', lineHeight:1.4 }}>{bumperLogoError}</div>}
+                  <input id="front-bumper-logo-upload" type="file" accept="image/png,image/jpeg" onChange={handleFrontBumperLogoUpload} style={{ display:'none' }} />
+                  <input id="rear-bumper-logo-upload" type="file" accept="image/png,image/jpeg" onChange={handleRearBumperLogoUpload} style={{ display:'none' }} />
+
+                  {[
+                    {
+                      slot:'front', title:'FRONT BUMPER', inputId:'front-bumper-logo-upload', preview:bumperLogoFrontPreviewUrl, fileName:bumperLogoFrontFileName,
+                      scale:bumperLogoFrontScale, setScale:setBumperLogoFrontScale, rotation:bumperLogoFrontRotation, setRotation:setBumperLogoFrontRotation,
+                      across:bumperLogoFrontAcross, setAcross:setBumperLogoFrontAcross, vertical:bumperLogoFrontVertical, setVertical:setBumperLogoFrontVertical,
+                    },
+                    {
+                      slot:'rear', title:'REAR BUMPER', inputId:'rear-bumper-logo-upload', preview:bumperLogoRearPreviewUrl, fileName:bumperLogoRearFileName,
+                      scale:bumperLogoRearScale, setScale:setBumperLogoRearScale, rotation:bumperLogoRearRotation, setRotation:setBumperLogoRearRotation,
+                      across:bumperLogoRearAcross, setAcross:setBumperLogoRearAcross, vertical:bumperLogoRearVertical, setVertical:setBumperLogoRearVertical,
+                    },
+                  ].map(item => (
+                    <div key={item.slot} style={{ background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.05)', borderRadius:8, padding:9, marginBottom:9 }}>
+                      <div style={{ fontSize:9, fontWeight:800, color:'#9ca3af', letterSpacing:'0.07em', marginBottom:7 }}>{item.title}</div>
+                      <label htmlFor={item.inputId} style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:6, width:'100%', boxSizing:'border-box', background:'rgba(239,255,0,0.07)', border:'1px dashed rgba(239,255,0,0.30)', borderRadius:6, padding:'8px 9px', cursor:'pointer', color:'#efff00', fontSize:9, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.05em' }}>
+                        <span>＋</span>{item.preview ? 'REPLACE LOGO' : 'UPLOAD LOGO'}
+                      </label>
+                      {item.preview && (
+                        <>
+                          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:7, marginTop:7, marginBottom:8 }}>
+                            <div style={{ fontSize:8, color:'#9ca3af', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={item.fileName}>{item.fileName}</div>
+                            <button onClick={() => removeBumperLogo(item.slot)} style={{ background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:5, padding:'3px 6px', cursor:'pointer', color:'#ef4444', fontSize:8, fontWeight:700 }}>REMOVE</button>
+                          </div>
+                          <div style={{ position:'relative', width:'100%', aspectRatio:'3 / 1', overflow:'hidden', borderRadius:6, border:'1px solid rgba(255,255,255,0.08)', backgroundColor:'#c8cdd4', backgroundImage:'linear-gradient(45deg, rgba(255,255,255,0.95) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.95) 75%, rgba(255,255,255,0.95)), linear-gradient(45deg, rgba(255,255,255,0.95) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.95) 75%, rgba(255,255,255,0.95))', backgroundSize:'14px 14px', backgroundPosition:'0 0, 7px 7px', marginBottom:8 }}>
+                            <img src={item.preview} alt={`${item.title} logo preview`} style={{ width:'100%', height:'100%', objectFit:'contain' }} />
+                          </div>
+                          <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:7 }}>
+                            <span style={{ width:50, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Size</span>
+                            <input type="range" min="40" max="220" value={Math.round(item.scale*100)} onChange={e => item.setScale(parseInt(e.target.value)/100)} style={{ flex:1, minWidth:0 }} />
+                          </div>
+                          <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:7 }}>
+                            <span style={{ width:50, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Rotate</span>
+                            <input type="range" min="-180" max="180" value={item.rotation} onChange={e => item.setRotation(parseInt(e.target.value))} style={{ flex:1, minWidth:0 }} />
+                          </div>
+                          <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:7 }}>
+                            <span style={{ width:50, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Across</span>
+                            <input type="range" min="-50" max="50" value={item.across} onChange={e => item.setAcross(parseInt(e.target.value))} style={{ flex:1, minWidth:0 }} />
+                          </div>
+                          <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                            <span style={{ width:50, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Up / Down</span>
+                            <input type="range" min="-50" max="50" value={item.vertical} onChange={e => item.setVertical(parseInt(e.target.value))} style={{ flex:1, minWidth:0 }} />
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </CollapsibleSection>
               </div>
             )}
           </div>
