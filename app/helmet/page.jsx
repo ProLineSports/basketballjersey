@@ -920,7 +920,7 @@ const CREDITS_INITIAL = 3;
 // environment map / glitter map) is allowed to touch. Hardware (screws, shiny metal)
 // intentionally does NOT get an env map anymore — that was the other source of the
 // "everything looks washed out" complaint.
-const SHELL_MATERIAL_NAMES = ['Helmet Main Shell'];
+const SHELL_MATERIAL_NAMES = ['__ShellContinuousSurface'];
 const FACEMASK_MATERIAL_NAMES = ['facemask'];
 
 // ── ENV MAP ROUTING ─────────────────────────────────────────────────────────
@@ -1144,6 +1144,8 @@ export default function HelmetBuilder() {
   const bumperLogoMaterialsRef   = useRef([]);
   const bumperLogoTexturesRef    = useRef([]);
   const bumperLogoPackCacheRef   = useRef({ front:null, rear:null });
+  const bumperSliderTimersRef    = useRef({});
+  const bumperSliderPendingRef   = useRef({});
   const bumperLogoFrontImageRef  = useRef(null);
   const bumperLogoRearImageRef   = useRef(null);
   const bumperLogoFrontObjectUrlRef = useRef(null);
@@ -1291,13 +1293,13 @@ export default function HelmetBuilder() {
   const [bumperLogoFrontFileName, setBumperLogoFrontFileName] = useState('');
   const [bumperLogoRearFileName, setBumperLogoRearFileName] = useState('');
   const [bumperLogoFrontScale, setBumperLogoFrontScale] = useState(6.6);
-  const [bumperLogoRearScale, setBumperLogoRearScale] = useState(7.1);
+  const [bumperLogoRearScale, setBumperLogoRearScale] = useState(6.05);
   const [bumperLogoFrontRotation, setBumperLogoFrontRotation] = useState(0);
   const [bumperLogoRearRotation, setBumperLogoRearRotation] = useState(0);
   const [bumperLogoFrontAcross, setBumperLogoFrontAcross] = useState(0);
   const [bumperLogoRearAcross, setBumperLogoRearAcross] = useState(0);
   const [bumperLogoFrontVertical, setBumperLogoFrontVertical] = useState(0);
-  const [bumperLogoRearVertical, setBumperLogoRearVertical] = useState(-15);
+  const [bumperLogoRearVertical, setBumperLogoRearVertical] = useState(-22);
   const [bumperLogoRearCurve, setBumperLogoRearCurve] = useState(-135);
   const [bumperLogoRevision, setBumperLogoRevision] = useState(0);
 
@@ -1607,6 +1609,28 @@ export default function HelmetBuilder() {
     [bumperLogoFrontObjectUrlRef, bumperLogoRearObjectUrlRef].forEach(ref => {
       if (ref.current) URL.revokeObjectURL(ref.current);
     });
+    Object.values(bumperSliderTimersRef.current).forEach(timer => clearTimeout(timer));
+  }, []);
+
+  // DecalGeometry is significantly more expensive than the other controls. Keep the
+  // browser's native range thumb fully smooth, but throttle geometry regeneration to
+  // roughly 12 fps while dragging. The final value is always committed.
+  const queueBumperSliderUpdate = useCallback((key, setter, value) => {
+    bumperSliderPendingRef.current[key] = { setter, value };
+    if (bumperSliderTimersRef.current[key]) return;
+
+    const flush = () => {
+      const pending = bumperSliderPendingRef.current[key];
+      if (pending) {
+        pending.setter(pending.value);
+        delete bumperSliderPendingRef.current[key];
+      }
+      bumperSliderTimersRef.current[key] = null;
+      if (bumperSliderPendingRef.current[key]) {
+        bumperSliderTimersRef.current[key] = setTimeout(flush, 80);
+      }
+    };
+    bumperSliderTimersRef.current[key] = setTimeout(flush, 0);
   }, []);
 
   useEffect(() => {
@@ -1945,6 +1969,28 @@ export default function HelmetBuilder() {
         model,
         shellRoots
       );
+
+      // Side Screws + Top Screws are visually part of the painted shell. Give them the
+      // same continuous projection coordinates as the Shell so Car Paint flakes don't
+      // restart/repeat differently on each hardware mesh.
+      const sideScrewRoots = partObjectsRef.current[partKey('Side Screws')] || [];
+      const topScrewRoots = partObjectsRef.current[partKey('Top Screws')] || [];
+      applyStripeProjectionAttributes(model, sideScrewRoots, shellProjection, 1);
+      applyStripeProjectionAttributes(model, topScrewRoots, shellProjection, 1);
+
+      const continuousShellMaterials = [];
+      const continuousShellMaterialSet = new Set();
+      [shellRoots, sideScrewRoots, topScrewRoots].forEach(roots => {
+        collectMeshDescendants(roots).forEach(mesh => {
+          const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+          mats.forEach(mat => {
+            if (!mat || continuousShellMaterialSet.has(mat)) return;
+            continuousShellMaterialSet.add(mat);
+            continuousShellMaterials.push(mat);
+          });
+        });
+      });
+      materialsRef.current.__ShellContinuousSurface = continuousShellMaterials;
 
       // The full wrap remains on the real Shell. Stripes use a visible overlay cloned
       // from the hidden baked Decal Surface. The Decal Surface itself is the stripe mask:
@@ -2851,12 +2897,63 @@ export default function HelmetBuilder() {
       // Intentionally no max-width clamp. The physical bumper geometry is the mask,
       // so scaling can continue smoothly until the user visually fills/crops the bumper.
 
+      // Front bumper looked best with the carrier-surface projection used before the
+      // DecalGeometry rewrite. Restore that method for the front only: it starts square,
+      // does not inherit a random triangle skew, and remains clipped to the bumper mesh.
+      if (isFront) {
+        const center = hit.point.clone();
+        const frontNormal = new THREE.Vector3(0, 0, 1).transformDirection(model.matrixWorld).normalize();
+        const modelUp = new THREE.Vector3(0, 1, 0).transformDirection(model.matrixWorld).normalize();
+        let right = new THREE.Vector3().crossVectors(modelUp, frontNormal).normalize();
+        if (right.lengthSq() < 0.000001) right = new THREE.Vector3(1, 0, 0).transformDirection(model.matrixWorld).normalize();
+        let up = new THREE.Vector3().crossVectors(frontNormal, right).normalize();
+
+        const rot = rotationValue * Math.PI / 180;
+        if (Math.abs(rot) > 0.000001) {
+          right.applyAxisAngle(frontNormal, rot);
+          up.applyAxisAngle(frontNormal, rot);
+        }
+
+        const projectionDepth = Math.max(boundsModel.depth * 0.12, baseHeight * 0.65);
+        const lift = Math.max(boundsModel.width * 0.00045, 0.00018);
+
+        const shadowUniforms = {
+          center:{ value:center }, right:{ value:right }, up:{ value:up }, normal:{ value:frontNormal },
+          width:{ value:baseWidth * 1.018 }, height:{ value:baseHeight * 1.018 },
+          depth:{ value:projectionDepth }, lift:{ value:lift * 0.20 },
+        };
+        const mainUniforms = {
+          center:{ value:center }, right:{ value:right }, up:{ value:up }, normal:{ value:frontNormal },
+          width:{ value:baseWidth }, height:{ value:baseHeight },
+          depth:{ value:projectionDepth }, lift:{ value:lift * 0.55 },
+        };
+
+        const shadowMat = new THREE.MeshPhysicalMaterial({
+          color:0x000000, map:pack.rimTexture, transparent:true, alphaTest:0.01, opacity:0.28,
+          side:THREE.DoubleSide, depthWrite:false, depthTest:true, roughness:0.95, metalness:0,
+          polygonOffset:true, polygonOffsetFactor:-1, polygonOffsetUnits:-1,
+        });
+        installSideLogoSurfaceProjection(shadowMat, shadowUniforms, 'bumper-logo-front-shadow-surface-v2');
+
+        const mainMat = new THREE.MeshPhysicalMaterial({
+          color:0xffffff, map:pack.mainTexture, transparent:true, alphaTest:0.01, opacity:1,
+          side:THREE.DoubleSide, depthWrite:false, depthTest:true,
+          polygonOffset:true, polygonOffsetFactor:-2, polygonOffsetUnits:-2,
+        });
+        mainMat.userData.bumperLogoMainMaterial = true;
+        installSideLogoSurfaceProjection(mainMat, mainUniforms, 'bumper-logo-front-main-surface-v2');
+        applyDecalFinishToMaterials([mainMat], scene, bumperLogoFinishRef.current);
+
+        const shadowMeshes = createCarrierSurfaceLogoMeshes(scene, bumperMeshes, shadowMat, 'bumper-front', 'Shadow', 34);
+        const mainMeshes = createCarrierSurfaceLogoMeshes(scene, bumperMeshes, mainMat, 'bumper-front', 'Artwork', 35);
+        bumperLogoMeshesRef.current.push(...shadowMeshes, ...mainMeshes);
+        bumperLogoMaterialsRef.current.push(shadowMat, mainMat);
+        return;
+      }
+
       const normalMatrix = new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld);
-      const fallback = new THREE.Vector3(0, 0, isFront ? 1 : -1).transformDirection(model.matrixWorld).normalize();
-      // Front bumper should start square and unskewed. Rear keeps the local surface
-      // normal because its wrap/curve behavior is already tuned for that geometry.
-      const surfaceNormal = hit.face?.normal?.clone().applyMatrix3(normalMatrix).normalize() || fallback;
-      const worldNormal = isFront ? fallback : surfaceNormal;
+      const fallback = new THREE.Vector3(0, 0, -1).transformDirection(model.matrixWorld).normalize();
+      const worldNormal = hit.face?.normal?.clone().applyMatrix3(normalMatrix).normalize() || fallback;
       const projectorPosition = hit.point.clone().addScaledVector(worldNormal, 0.00045);
       const helper = new THREE.Object3D();
       helper.position.copy(projectorPosition);
@@ -3665,7 +3762,7 @@ export default function HelmetBuilder() {
                   {bumperLogoError && <div style={{ marginBottom:10, fontSize:10, color:'#ef4444', lineHeight:1.4 }}>{bumperLogoError}</div>}
                   <SectionLabel>Bumper Logo Finish</SectionLabel>
                   <div style={{ display:'grid', gridTemplateColumns:'repeat(4, minmax(0,1fr))', gap:6, marginBottom:10 }}>
-                    {FINISHES.map(f => (
+                    {DECAL_FINISHES.map(f => (
                       <button
                         key={`bumper-finish-${f.id}`}
                         onClick={() => setBumperLogoFinish(f.id)}
@@ -3715,24 +3812,24 @@ export default function HelmetBuilder() {
                           </div>
                           <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:7 }}>
                             <span style={{ width:50, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Size</span>
-                            <input type="range" min="100" max="2400" value={Math.round(item.scale*100)} onChange={e => item.setScale(parseInt(e.target.value)/100)} style={{ flex:1, minWidth:0 }} />
+                            <input type="range" min="100" max="2400" defaultValue={Math.round(item.scale*100)} onInput={e => queueBumperSliderUpdate(`${item.slot}-scale`, item.setScale, parseInt(e.currentTarget.value)/100)} onPointerUp={e => item.setScale(parseInt(e.currentTarget.value)/100)} style={{ flex:1, minWidth:0 }} />
                           </div>
                           <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:7 }}>
                             <span style={{ width:50, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Rotate</span>
-                            <input type="range" min="-180" max="180" value={item.rotation} onChange={e => item.setRotation(parseInt(e.target.value))} style={{ flex:1, minWidth:0 }} />
+                            <input type="range" min="-180" max="180" defaultValue={item.rotation} onInput={e => queueBumperSliderUpdate(`${item.slot}-rotation`, item.setRotation, parseInt(e.currentTarget.value))} onPointerUp={e => item.setRotation(parseInt(e.currentTarget.value))} style={{ flex:1, minWidth:0 }} />
                           </div>
                           <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:7 }}>
                             <span style={{ width:50, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Across</span>
-                            <input type="range" min="-80" max="80" value={item.across} onChange={e => item.setAcross(parseInt(e.target.value))} style={{ flex:1, minWidth:0 }} />
+                            <input type="range" min="-80" max="80" defaultValue={item.across} onInput={e => queueBumperSliderUpdate(`${item.slot}-across`, item.setAcross, parseInt(e.currentTarget.value))} onPointerUp={e => item.setAcross(parseInt(e.currentTarget.value))} style={{ flex:1, minWidth:0 }} />
                           </div>
                           <div style={{ display:'flex', alignItems:'center', gap:8 }}>
                             <span style={{ width:50, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Up / Down</span>
-                            <input type="range" min="-80" max="80" value={item.vertical} onChange={e => item.setVertical(parseInt(e.target.value))} style={{ flex:1, minWidth:0 }} />
+                            <input type="range" min="-80" max="80" defaultValue={item.vertical} onInput={e => queueBumperSliderUpdate(`${item.slot}-vertical`, item.setVertical, parseInt(e.currentTarget.value))} onPointerUp={e => item.setVertical(parseInt(e.currentTarget.value))} style={{ flex:1, minWidth:0 }} />
                           </div>
                           {item.slot === 'rear' && (
                             <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:7 }}>
                               <span style={{ width:50, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Curve</span>
-                              <input type="range" min="-260" max="120" value={bumperLogoRearCurve} onChange={e => setBumperLogoRearCurve(parseInt(e.target.value))} style={{ flex:1, minWidth:0 }} />
+                              <input type="range" min="-260" max="120" defaultValue={bumperLogoRearCurve} onInput={e => queueBumperSliderUpdate('rear-curve', setBumperLogoRearCurve, parseInt(e.currentTarget.value))} onPointerUp={e => setBumperLogoRearCurve(parseInt(e.currentTarget.value))} style={{ flex:1, minWidth:0 }} />
                             </div>
                           )}
                         </>
