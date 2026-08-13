@@ -967,8 +967,8 @@ function applyFacemaskEnvMap(materialsMap, scene, facemaskFinishId) {
 // A second canvas — black everywhere except tinted dots at the exact same flake
 // positions — drives emissiveMap, so the sparkle color can be picked independently of
 // the paint's own base color (which stays on mat.color / the Zone Colors swatch).
-// `intensity` (0–1, Glitter slider) controls flake density; `colorHex` is the chosen
-// Sparkle Color.
+// `intensity` (0–1, Glitter slider) controls flake density; `flakeSize` (0–1)
+// controls the average speck size; `colorHex` is the chosen Sparkle Color.
 function hexToRgb(hex) {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex || '');
   if (!m) return { r: 255, g: 255, b: 255 };
@@ -976,7 +976,7 @@ function hexToRgb(hex) {
   return { r: (int >> 16) & 255, g: (int >> 8) & 255, b: int & 255 };
 }
 
-function createFlakeTextures(intensity, colorHex) {
+function createFlakeTextures(intensity, flakeSize, colorHex) {
   // A much larger, asymmetrically repeated field avoids the obvious 16×16 tiled grid
   // that appeared at medium/high glitter density.
   const size = 1024;
@@ -996,12 +996,17 @@ function createFlakeTextures(intensity, colorHex) {
   colorCtx.fillRect(0, 0, size, size);
 
   const { r, g, b } = hexToRgb(colorHex);
+  // Keep the current look near the default mid setting, but allow much smaller
+  // Raiders-style fine metallic flecks when the user drags the new Size slider down.
+  const sizeBias = THREE.MathUtils.clamp(flakeSize ?? 0.55, 0, 1);
+  const minMajor = 0.25 + sizeBias * 1.00;
+  const maxMajor = 1.10 + sizeBias * 3.70;
   const flakeCount = Math.round(intensity * 5200);
   for (let i = 0; i < flakeCount; i++) {
     const x = Math.random() * size;
     const y = Math.random() * size;
-    const major = 1.0 + Math.random() * 3.8;
-    const minor = major * (0.35 + Math.random() * 0.65);
+    const major = minMajor + Math.random() * (maxMajor - minMajor);
+    const minor = major * (0.28 + Math.random() * 0.62);
     const angle = Math.random() * Math.PI;
 
     const flakeAO     = Math.round(225 + Math.random() * 30);
@@ -1229,6 +1234,7 @@ export default function HelmetBuilder() {
   const [transparentBg, setTransparentBg]     = useState(false);
   const [visorOn, setVisorOn]               = useState(true);
   const [glitter, setGlitter]               = useState(0.3);
+  const [glitterSize, setGlitterSize]       = useState(0.55);
   const [glitterColor, setGlitterColor]     = useState('#ffffff');
   const [facemaskFinish, setFacemaskFinish] = useState('gloss'); // gloss | matte
 
@@ -3153,7 +3159,7 @@ export default function HelmetBuilder() {
         });
         return;
       }
-      const { ormTex, colorTex } = createFlakeTextures(glitter, glitterColor);
+      const { ormTex, colorTex } = createFlakeTextures(glitter, glitterSize, glitterColor);
       mats.forEach(mat => {
         if (mat.roughnessMap) mat.roughnessMap.dispose();
         if (mat.emissiveMap) mat.emissiveMap.dispose();
@@ -3172,7 +3178,7 @@ export default function HelmetBuilder() {
         mat.needsUpdate = true;
       });
     });
-  }, [glitter, glitterColor, finish, loaded]);
+  }, [glitter, glitterSize, glitterColor, finish, loaded]);
 
   const setColor = useCallback((zoneId, val) => setColors(c => ({ ...c, [zoneId]: val })), []);
 
@@ -3384,10 +3390,14 @@ export default function HelmetBuilder() {
                 {finish === 'carpaint' && (
                   <div>
                     <div style={{ height:1, background:'rgba(255,255,255,0.06)', marginBottom:14 }} />
-                    <SectionLabel>Glitter Intensity</SectionLabel>
+                    <SectionLabel>Glitter Controls</SectionLabel>
                     <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:10 }}>
                       <span style={{ fontSize:10, color:'#9ca3af', minWidth:48 }}>Amount</span>
                       <input type="range" min="0" max="100" value={Math.round(glitter*100)} onChange={e => setGlitter(parseInt(e.target.value)/100)} style={{ flex:1, minWidth:0 }} />
+                    </div>
+                    <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:10 }}>
+                      <span style={{ fontSize:10, color:'#9ca3af', minWidth:48 }}>Size</span>
+                      <input type="range" min="0" max="100" value={Math.round(glitterSize*100)} onChange={e => setGlitterSize(parseInt(e.target.value)/100)} style={{ flex:1, minWidth:0 }} />
                     </div>
                     <ColorSwatch color={glitterColor} onChange={setGlitterColor} label="Sparkle Color" />
                   </div>
@@ -3936,7 +3946,7 @@ export default function HelmetBuilder() {
             {[
               { icon:'◈', text:'Click any swatch or type a hex code to change colors' },
               { icon:'◎', text:'Car Paint + Chrome are the only finishes with reflections — Gloss/Matte/Satin use true flat color' },
-              { icon:'✦', text:'Glitter flakes only show up on the Car Paint finish' },
+              { icon:'✦', text:'Glitter flakes only show up on the Car Paint finish, with separate amount and size controls' },
               { icon:'◉', text:'Drag to rotate the helmet and check the finish from multiple angles' },
               { icon:'★', text:'Exports include watermark — upgrade to remove it' },
             ].map((tip,i) => (
