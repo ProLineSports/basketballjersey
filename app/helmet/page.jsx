@@ -1115,6 +1115,80 @@ function createSatinMicroTexture() {
   return tex;
 }
 
+
+function installShellFinishTriplanar(material) {
+  if (!material || material.userData?.shellFinishTriplanarInstalled) return;
+  material.userData.shellFinishTriplanarInstalled = true;
+
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uShellFinishProjectionScale = { value: 1.1 };
+
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+varying vec3 vShellFinishWorldPosition;
+varying vec3 vShellFinishWorldNormal;`
+      )
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+vShellFinishWorldPosition = (modelMatrix * vec4(transformed, 1.0)).xyz;
+vShellFinishWorldNormal = normalize(mat3(modelMatrix) * normal);`
+      );
+
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+varying vec3 vShellFinishWorldPosition;
+varying vec3 vShellFinishWorldNormal;
+uniform float uShellFinishProjectionScale;
+
+vec4 sampleShellFinishTriplanar(sampler2D tex, vec3 wp, vec3 wn, float scale) {
+  vec3 n = abs(normalize(wn));
+  n = pow(n, vec3(4.0));
+  n /= max(n.x + n.y + n.z, 0.0001);
+
+  vec2 uvX = wp.zy * scale;
+  vec2 uvY = wp.xz * scale;
+  vec2 uvZ = wp.xy * scale;
+
+  vec4 sampleX = texture2D(tex, uvX);
+  vec4 sampleY = texture2D(tex, uvY);
+  vec4 sampleZ = texture2D(tex, uvZ);
+  return sampleX * n.x + sampleY * n.y + sampleZ * n.z;
+}`
+      )
+      .replace(
+        '#include <roughnessmap_fragment>',
+        `float roughnessFactor = roughness;
+#ifdef USE_ROUGHNESSMAP
+  vec4 texelRoughness = sampleShellFinishTriplanar(roughnessMap, vShellFinishWorldPosition, vShellFinishWorldNormal, uShellFinishProjectionScale);
+  roughnessFactor *= texelRoughness.g;
+#endif`
+      )
+      .replace(
+        '#include <metalnessmap_fragment>',
+        `float metalnessFactor = metalness;
+#ifdef USE_METALNESSMAP
+  vec4 texelMetalness = sampleShellFinishTriplanar(metalnessMap, vShellFinishWorldPosition, vShellFinishWorldNormal, uShellFinishProjectionScale);
+  metalnessFactor *= texelMetalness.b;
+#endif`
+      )
+      .replace(
+        '#include <emissivemap_fragment>',
+        `#ifdef USE_EMISSIVEMAP
+  vec4 emissiveColor = sampleShellFinishTriplanar(emissiveMap, vShellFinishWorldPosition, vShellFinishWorldNormal, uShellFinishProjectionScale);
+  totalEmissiveRadiance *= emissiveColor.rgb;
+#endif`
+      );
+  };
+
+  material.customProgramCacheKey = () => 'helmet-shell-finish-triplanar-v1';
+  material.needsUpdate = true;
+}
+
 // ── COLOR SWATCH ──────────────────────────────────────────────────────────────
 function SectionLabel({ children }) {
   return <div style={{ fontSize:9, fontWeight:700, color:"#6b7280", letterSpacing:"0.1em", fontFamily:"'Barlow Condensed',sans-serif", marginBottom:10, marginTop:4 }}>{children}</div>;
@@ -2058,6 +2132,7 @@ export default function HelmetBuilder() {
         });
       });
       materialsRef.current.__ShellContinuousSurface = continuousShellMaterials;
+      continuousShellMaterials.forEach(mat => installShellFinishTriplanar(mat));
 
       // The full wrap remains on the real Shell. Stripes use a visible overlay cloned
       // from the hidden baked Decal Surface. The Decal Surface itself is the stripe mask:
@@ -3218,7 +3293,7 @@ export default function HelmetBuilder() {
           mat.bumpScale = 0;
           mat.roughnessMap = ormTex;
           mat.metalnessMap = ormTex;
-          mat.aoMap = ormTex;
+          mat.aoMap = null;
           mat.aoMapIntensity = 1.0;
           mat.emissiveMap = colorTex;
           mat.emissive.set(0xffffff);
@@ -3242,10 +3317,10 @@ export default function HelmetBuilder() {
 
           // Texture adds microscopic breakup to highlights; Metallic controls how
           // strongly the silver/metallic character comes through.
-          mat.bumpMap = satinTexture > 0.005 ? satinMicroTex : null;
-          mat.bumpScale = satinTexture * 0.0045;
+          mat.bumpMap = null;
+          mat.bumpScale = 0;
           mat.metalnessMap = satinTexture > 0.005 ? satinMicroTex : null;
-          mat.roughnessMap = null;
+          mat.roughnessMap = satinTexture > 0.005 ? satinMicroTex : null;
           mat.metalness = 0.08 + satinMetallic * 0.82;
           mat.roughness = 0.34 + satinTexture * 0.14;
           mat.clearcoat = 0.18;
