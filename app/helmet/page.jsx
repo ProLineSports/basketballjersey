@@ -577,15 +577,15 @@ function createSelectionBoxTexture() {
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, size, size);
   ctx.strokeStyle = '#efff00';
-  ctx.lineWidth = 6;
-  ctx.setLineDash([14, 9]);
-  ctx.strokeRect(14, 14, size - 28, size - 28);
+  ctx.lineWidth = 2.5;
+  ctx.setLineDash([9, 7]);
+  ctx.strokeRect(12, 12, size - 24, size - 24);
   ctx.setLineDash([]);
-  const handle = 20;
-  [[14,14],[size-14,14],[14,size-14],[size-14,size-14]].forEach(([x,y]) => {
+  const handle = 14;
+  [[12,12],[size-12,12],[12,size-12],[size-12,size-12]].forEach(([x,y]) => {
     ctx.fillStyle = '#111111';
     ctx.strokeStyle = '#efff00';
-    ctx.lineWidth = 5;
+    ctx.lineWidth = 2.5;
     ctx.beginPath();
     ctx.rect(x - handle/2, y - handle/2, handle, handle);
     ctx.fill();
@@ -703,6 +703,8 @@ function installSideLogoSurfaceProjection(material, uniforms, cacheKey) {
     shader.uniforms.uSideLogoUp = uniforms.up;
     shader.uniforms.uSideLogoWidth = uniforms.width;
     shader.uniforms.uSideLogoHeight = uniforms.height;
+    shader.uniforms.uSideLogoNormal = uniforms.normal;
+    shader.uniforms.uSideLogoDepth = uniforms.depth;
     shader.uniforms.uSideLogoLift = uniforms.lift;
 
     shader.vertexShader = shader.vertexShader
@@ -710,13 +712,15 @@ function installSideLogoSurfaceProjection(material, uniforms, cacheKey) {
         '#include <common>',
         `#include <common>
 uniform float uSideLogoLift;
-varying vec3 vSideLogoWorldPosition;`
+varying vec3 vSideLogoWorldPosition;
+varying vec3 vSideLogoWorldNormal;`
       )
       .replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
 transformed += normalize(normal) * uSideLogoLift;
-vSideLogoWorldPosition = (modelMatrix * vec4(transformed, 1.0)).xyz;`
+vSideLogoWorldPosition = (modelMatrix * vec4(transformed, 1.0)).xyz;
+vSideLogoWorldNormal = normalize(mat3(modelMatrix) * normal);`
       );
 
     shader.fragmentShader = shader.fragmentShader
@@ -728,7 +732,10 @@ uniform vec3 uSideLogoRight;
 uniform vec3 uSideLogoUp;
 uniform float uSideLogoWidth;
 uniform float uSideLogoHeight;
-varying vec3 vSideLogoWorldPosition;`
+uniform vec3 uSideLogoNormal;
+uniform float uSideLogoDepth;
+varying vec3 vSideLogoWorldPosition;
+varying vec3 vSideLogoWorldNormal;`
       )
       .replace(
         '#include <map_fragment>',
@@ -736,8 +743,18 @@ varying vec3 vSideLogoWorldPosition;`
 vec3 sideLogoDelta = vSideLogoWorldPosition - uSideLogoCenter;
 float sideLogoU = dot(sideLogoDelta, uSideLogoRight) / max(uSideLogoWidth, 0.000001) + 0.5;
 float sideLogoV = dot(sideLogoDelta, uSideLogoUp) / max(uSideLogoHeight, 0.000001) + 0.5;
+float sideLogoDepth = abs(dot(sideLogoDelta, normalize(uSideLogoNormal)));
+float sideLogoFacing = dot(normalize(vSideLogoWorldNormal), normalize(uSideLogoNormal));
 vec4 sideLogoSample = vec4(0.0);
-if (sideLogoU >= 0.0 && sideLogoU <= 1.0 && sideLogoV >= 0.0 && sideLogoV <= 1.0) {
+// Width/height define the artwork rectangle. Depth + facing only prevent the same
+// planar coordinates from landing on a second fold of the carrier shell; they do not
+// add a visible circular/elliptical mask to the logo itself.
+if (
+  sideLogoU >= 0.0 && sideLogoU <= 1.0 &&
+  sideLogoV >= 0.0 && sideLogoV <= 1.0 &&
+  sideLogoDepth <= uSideLogoDepth &&
+  sideLogoFacing > 0.05
+) {
   sideLogoSample = texture2D(map, vec2(sideLogoU, sideLogoV));
 }
 diffuseColor.rgb *= sideLogoSample.rgb;
@@ -1993,20 +2010,25 @@ export default function HelmetBuilder() {
       // The artwork is sampled on the *entire* baked carrier surface. Only transparent
       // pixels outside the image disappear; there is no geometric decal mask at all.
       const physicalDepth = Math.max(boundsModel.width * 0.00055, 0.00024);
+      const projectionDepth = Math.max(baseHeight * 0.32, boundsModel.width * 0.10);
       const shadowUniforms = {
         center: { value: logoCenter },
         right: { value: frameRight },
         up: { value: frameUp },
+        normal: { value: worldNormal },
         width: { value: baseWidth * 1.018 },
         height: { value: baseHeight * 1.018 },
+        depth: { value: projectionDepth },
         lift: { value: physicalDepth * 0.20 },
       };
       const mainUniforms = {
         center: { value: logoCenter },
         right: { value: frameRight },
         up: { value: frameUp },
+        normal: { value: worldNormal },
         width: { value: baseWidth },
         height: { value: baseHeight },
+        depth: { value: projectionDepth },
         lift: { value: physicalDepth * 0.55 },
       };
 
@@ -2025,7 +2047,7 @@ export default function HelmetBuilder() {
         roughness: 0.95,
         metalness: 0.0,
       });
-      installSideLogoSurfaceProjection(shadowMat, shadowUniforms, `side-logo-shadow-${side}`);
+      installSideLogoSurfaceProjection(shadowMat, shadowUniforms, `side-logo-shadow-v2-${side}`);
 
       const mainMat = new THREE.MeshPhysicalMaterial({
         color: 0xffffff,
@@ -2041,7 +2063,7 @@ export default function HelmetBuilder() {
         polygonOffsetUnits: -2,
       });
       mainMat.userData.sideLogoMainMaterial = true;
-      installSideLogoSurfaceProjection(mainMat, mainUniforms, `side-logo-main-${side}`);
+      installSideLogoSurfaceProjection(mainMat, mainUniforms, `side-logo-main-v2-${side}`);
       applyDecalFinishToMaterials([mainMat], scene, decalFinishRef.current);
 
       const shadowMeshes = createCarrierSurfaceLogoMeshes(scene, shellMeshes, shadowMat, side, 'Shadow', 39);
