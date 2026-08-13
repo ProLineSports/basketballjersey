@@ -224,11 +224,13 @@ function applyPanoramicShellWrapUV(model, roots) {
     // That guarantees no floating geometry and makes stripes layer above a full wrap.
     mesh.geometry.setAttribute('helmetModelPosition', new THREE.BufferAttribute(modelPositionValues, 3));
     mesh.geometry.setAttribute('helmetStripePath', new THREE.BufferAttribute(stripePathValues, 1));
+    mesh.geometry.setAttribute('helmetWrapUv', new THREE.BufferAttribute(uvValues.slice(), 2));
 
     mesh.geometry.attributes.uv.needsUpdate = true;
     mesh.geometry.attributes.uv2.needsUpdate = true;
     mesh.geometry.attributes.helmetModelPosition.needsUpdate = true;
     mesh.geometry.attributes.helmetStripePath.needsUpdate = true;
+    mesh.geometry.attributes.helmetWrapUv.needsUpdate = true;
   });
 
   return {
@@ -295,22 +297,23 @@ function applyStripeProjectionAttributes(model, roots, projection, xCompression 
 // is sampled. Result: it is exactly on the helmet surface, always above a wrap, naturally
 // below separate bumper geometry, and its rear endpoint can move forward without
 // deforming the stripe thickness.
-function installShellStripeOverlay(material, stripeUniforms) {
-  if (!material || material.userData?.helmetStripeOverlayInstalled) return;
-  material.userData.helmetStripeOverlayInstalled = true;
+function installDecalOverlayShader(material, decalUniforms) {
+  if (!material || material.userData?.helmetDecalOverlayInstalled) return;
+  material.userData.helmetDecalOverlayInstalled = true;
 
   material.onBeforeCompile = (shader) => {
-    shader.uniforms.uHelmetStripesEnabled = stripeUniforms.enabled;
-    shader.uniforms.uHelmetStripeBaseEnabled = stripeUniforms.baseEnabled;
-    shader.uniforms.uHelmetStripeWidthScale = stripeUniforms.widthScale;
-    shader.uniforms.uHelmetStripeLength = stripeUniforms.length;
-    shader.uniforms.uHelmetStripeCenterX = stripeUniforms.centerX;
-    shader.uniforms.uHelmetStripeLeftColor = stripeUniforms.leftColor;
-    shader.uniforms.uHelmetStripeCenterColor = stripeUniforms.centerColor;
-    shader.uniforms.uHelmetStripeRightColor = stripeUniforms.rightColor;
-    shader.uniforms.uHelmetStripeDesignEnabled = stripeUniforms.designEnabled;
-    shader.uniforms.uHelmetStripeDesignMap = stripeUniforms.designMap;
-    shader.uniforms.uHelmetWrapOccludesFinish = stripeUniforms.wrapOccludes;
+    shader.uniforms.uHelmetStripesEnabled = decalUniforms.enabled;
+    shader.uniforms.uHelmetStripeBaseEnabled = decalUniforms.baseEnabled;
+    shader.uniforms.uHelmetStripeWidthScale = decalUniforms.widthScale;
+    shader.uniforms.uHelmetStripeLength = decalUniforms.length;
+    shader.uniforms.uHelmetStripeCenterX = decalUniforms.centerX;
+    shader.uniforms.uHelmetStripeLeftColor = decalUniforms.leftColor;
+    shader.uniforms.uHelmetStripeCenterColor = decalUniforms.centerColor;
+    shader.uniforms.uHelmetStripeRightColor = decalUniforms.rightColor;
+    shader.uniforms.uHelmetStripeDesignEnabled = decalUniforms.designEnabled;
+    shader.uniforms.uHelmetStripeDesignMap = decalUniforms.designMap;
+    shader.uniforms.uHelmetWrapEnabled = decalUniforms.wrapEnabled;
+    shader.uniforms.uHelmetWrapMap = decalUniforms.wrapMap;
 
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -318,14 +321,17 @@ function installShellStripeOverlay(material, stripeUniforms) {
         `#include <common>
 attribute vec3 helmetModelPosition;
 attribute float helmetStripePath;
+attribute vec2 helmetWrapUv;
 varying vec3 vHelmetModelPosition;
-varying float vHelmetStripePath;`
+varying float vHelmetStripePath;
+varying vec2 vHelmetWrapUv;`
       )
       .replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
 vHelmetModelPosition = helmetModelPosition;
-vHelmetStripePath = helmetStripePath;`
+vHelmetStripePath = helmetStripePath;
+vHelmetWrapUv = helmetWrapUv;`
       );
 
     shader.fragmentShader = shader.fragmentShader
@@ -334,6 +340,7 @@ vHelmetStripePath = helmetStripePath;`
         `#include <common>
 varying vec3 vHelmetModelPosition;
 varying float vHelmetStripePath;
+varying vec2 vHelmetWrapUv;
 uniform float uHelmetStripesEnabled;
 uniform float uHelmetStripeBaseEnabled;
 uniform float uHelmetStripeWidthScale;
@@ -344,98 +351,122 @@ uniform vec3 uHelmetStripeCenterColor;
 uniform vec3 uHelmetStripeRightColor;
 uniform float uHelmetStripeDesignEnabled;
 uniform sampler2D uHelmetStripeDesignMap;
-uniform float uHelmetWrapOccludesFinish;
-float helmetDecalOcclusion = 0.0;`
+uniform float uHelmetWrapEnabled;
+uniform sampler2D uHelmetWrapMap;`
       )
       .replace(
         '#include <map_fragment>',
         `#include <map_fragment>
 
+vec4 helmetDecal = vec4(0.0);
+
+// Full wrap is the lowest decal layer. Its generated canvas is opaque because it
+// already includes the user's shell color behind transparent uploaded pixels.
+if (uHelmetWrapEnabled > 0.5) {
+  helmetDecal = texture2D(uHelmetWrapMap, vHelmetWrapUv);
+}
+
 if (uHelmetStripesEnabled > 0.5) {
-  // Three equal-width touching bands. Base width is in the Shell's model-space units.
   float stripeW = 0.020 * uHelmetStripeWidthScale;
   float stripeX = vHelmetModelPosition.x - uHelmetStripeCenterX;
   float totalHalfWidth = stripeW * 1.5;
-
-  // Antialias only the outside edge of the complete 3-stripe pack; internal color
-  // boundaries remain touching with no shell-colored gap.
   float edgeAA = max(fwidth(stripeX) * 1.5, 0.00030);
   float widthMask = 1.0 - smoothstep(totalHalfWidth - edgeAA, totalHalfWidth + edgeAA, abs(stripeX));
 
-  // Length=1 reaches the deepest rear extent. Lower values pull only the rear endpoint
-  // toward the crown/front; the front endpoint remains fixed.
   float pathAA = max(fwidth(vHelmetStripePath) * 1.5, 0.0020);
   float lengthMask = 1.0 - smoothstep(
     uHelmetStripeLength - pathAA,
     uHelmetStripeLength + pathAA,
     vHelmetStripePath
   );
-
   float stripeMask = widthMask * lengthMask;
 
   vec3 stripeColor = uHelmetStripeCenterColor;
-  if (stripeX < -0.5 * stripeW) {
-    stripeColor = uHelmetStripeLeftColor;
-  } else if (stripeX > 0.5 * stripeW) {
-    stripeColor = uHelmetStripeRightColor;
-  }
+  if (stripeX < -0.5 * stripeW) stripeColor = uHelmetStripeLeftColor;
+  else if (stripeX > 0.5 * stripeW) stripeColor = uHelmetStripeRightColor;
 
-  // Base preset stripes are optional. This lets a custom stripe design be used by
-  // itself without forcing the preset 3-color stripes underneath.
+  // Preset stripes sit above the wrap.
   if (uHelmetStripeBaseEnabled > 0.5) {
-    diffuseColor.rgb = mix(diffuseColor.rgb, stripeColor, stripeMask);
-    helmetDecalOcclusion = max(helmetDecalOcclusion, stripeMask);
+    helmetDecal.rgb = mix(helmetDecal.rgb, stripeColor, stripeMask);
+    helmetDecal.a = max(helmetDecal.a, stripeMask);
   }
 
+  // Uploaded stripe artwork is the top stripe layer. Transparent PNG areas reveal
+  // the preset stripe or wrap below it; fully opaque pixels completely cover them.
   if (uHelmetStripeDesignEnabled > 0.5) {
     float localU = (stripeX + totalHalfWidth) / max(totalHalfWidth * 2.0, 0.0001);
-    // Front/back orientation for uploaded stripe art should match the flat editor:
-    // top of the preview = front of helmet, bottom = back of helmet.
     float localV = 1.0 - (vHelmetStripePath / max(uHelmetStripeLength, 0.0001));
     if (localU >= 0.0 && localU <= 1.0 && localV >= 0.0 && localV <= 1.0) {
       vec4 designSample = texture2D(uHelmetStripeDesignMap, vec2(localU, localV));
       float designMask = stripeMask * designSample.a;
-      diffuseColor.rgb = mix(diffuseColor.rgb, designSample.rgb, designMask);
-      helmetDecalOcclusion = max(helmetDecalOcclusion, designMask);
+      helmetDecal.rgb = mix(helmetDecal.rgb, designSample.rgb, designMask);
+      helmetDecal.a = max(helmetDecal.a, designMask);
     }
   }
-
-  // A very narrow edge contrast gives a slight vinyl/bevel read without lifting geometry
-  // away from the shell surface.
-  float edgeDistance = abs(abs(stripeX) - totalHalfWidth);
-  float bevelBand = (1.0 - smoothstep(0.0, edgeAA * 3.0, edgeDistance)) * stripeMask;
-  diffuseColor.rgb *= 1.0 + bevelBand * 0.035;
 }
 
-if (uHelmetWrapOccludesFinish > 0.5) {
-  helmetDecalOcclusion = 1.0;
-}`
-      )
-      .replace(
-        '#include <roughnessmap_fragment>',
-        `#include <roughnessmap_fragment>
-if (helmetDecalOcclusion > 0.001) {
-  roughnessFactor = mix(roughnessFactor, 0.18, helmetDecalOcclusion);
-}`
-      )
-      .replace(
-        '#include <metalnessmap_fragment>',
-        `#include <metalnessmap_fragment>
-if (helmetDecalOcclusion > 0.001) {
-  metalnessFactor = mix(metalnessFactor, 0.0, helmetDecalOcclusion);
-}`
-      )
-      .replace(
-        '#include <emissivemap_fragment>',
-        `#include <emissivemap_fragment>
-if (helmetDecalOcclusion > 0.001) {
-  totalEmissiveRadiance *= (1.0 - helmetDecalOcclusion);
-}`
+// There is no decal at this fragment, so do not render the overlay at all. This is
+// what prevents the Shell's Car Paint/glitter material from leaking into opaque decals:
+// the decal is now a separate physical surface/material in front of the Shell.
+if (helmetDecal.a <= 0.001) discard;
+
+diffuseColor.rgb = helmetDecal.rgb;
+diffuseColor.a *= helmetDecal.a;`
       );
   };
 
-  material.customProgramCacheKey = () => 'helmet-standard-three-stripe-surface-v5';
+  material.customProgramCacheKey = () => 'helmet-decal-overlay-v1';
   material.needsUpdate = true;
+}
+
+function createShellDecalOverlays(roots, decalUniforms) {
+  const overlays = [];
+  const materials = [];
+  const sources = [];
+  const seen = new Set();
+
+  roots.forEach(root => {
+    root.traverse(obj => {
+      if (!obj.isMesh || !obj.geometry?.attributes?.helmetModelPosition || seen.has(obj)) return;
+      seen.add(obj);
+      sources.push(obj);
+    });
+  });
+
+  sources.forEach(source => {
+    const material = new THREE.MeshPhysicalMaterial({
+      color: 0xffffff,
+      roughness: 0.08,
+      metalness: 0.0,
+      clearcoat: 1.0,
+      clearcoatRoughness: 0.04,
+      transparent: true,
+      opacity: 1.0,
+      alphaTest: 0.001,
+      side: THREE.FrontSide,
+      depthTest: true,
+      depthWrite: true,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
+    });
+    installDecalOverlayShader(material, decalUniforms);
+
+    const overlay = new THREE.Mesh(source.geometry, material);
+    overlay.name = `${source.name || 'Shell'}_DecalOverlay`;
+    overlay.position.copy(source.position);
+    overlay.quaternion.copy(source.quaternion);
+    overlay.scale.copy(source.scale);
+    overlay.renderOrder = (source.renderOrder || 0) + 1;
+    overlay.castShadow = false;
+    overlay.receiveShadow = false;
+    source.parent?.add(overlay);
+
+    overlays.push(overlay);
+    materials.push(material);
+  });
+
+  return { overlays, materials };
 }
 
 const FINISHES = [
@@ -447,6 +478,35 @@ const FINISHES = [
   { id: 'carpaint', label: 'Car Paint', roughness: 0.15, metalness: 0.2,  clearcoat: 1.0, clearcoatRoughness: 0.02, iridescence: 0.35, iridescenceIOR: 1.8, iridescenceThicknessRange: [100, 300] },
   { id: 'chrome',   label: 'Chrome',    roughness: 0.0,  metalness: 1.0,  clearcoat: 0.0, clearcoatRoughness: 0.0,  iridescence: 0.0 },
 ];
+
+const DECAL_FINISHES = [
+  { id: 'gloss',  label: 'Gloss',  roughness: 0.08, metalness: 0.0, clearcoat: 1.0, clearcoatRoughness: 0.04 },
+  { id: 'satin',  label: 'Satin',  roughness: 0.38, metalness: 0.0, clearcoat: 0.25, clearcoatRoughness: 0.20 },
+  { id: 'matte',  label: 'Matte',  roughness: 0.88, metalness: 0.0, clearcoat: 0.0, clearcoatRoughness: 0.0 },
+  { id: 'chrome', label: 'Chrome', roughness: 0.02, metalness: 1.0, clearcoat: 0.0, clearcoatRoughness: 0.0 },
+];
+
+function applyDecalFinishToMaterials(materials, scene, finishId) {
+  const def = DECAL_FINISHES.find(f => f.id === finishId) || DECAL_FINISHES[0];
+  materials.forEach(mat => {
+    mat.roughness = def.roughness;
+    mat.metalness = def.metalness;
+    mat.clearcoat = def.clearcoat;
+    mat.clearcoatRoughness = def.clearcoatRoughness;
+    mat.iridescence = 0;
+    mat.emissive?.set(0x000000);
+    mat.emissiveMap = null;
+    mat.roughnessMap = null;
+    mat.metalnessMap = null;
+    mat.aoMap = null;
+    mat.envMap = finishId === 'chrome'
+      ? (scene?.userData?.chromeEnvTexture || scene?.userData?.envTexture || null)
+      : null;
+    mat.envMapIntensity = finishId === 'chrome' ? 1.6 : 0;
+    mat.needsUpdate = true;
+  });
+}
+
 
 const CREDITS_INITIAL = 3;
 
@@ -622,6 +682,8 @@ export default function HelmetBuilder() {
   const stripeDesignCanvasRef    = useRef(null);
   const stripeDesignTextureRef   = useRef(null);
   const stripeDesignObjectUrlRef = useRef(null);
+  const decalOverlayMeshesRef    = useRef([]);
+  const decalOverlayMaterialsRef = useRef([]);
 
   // Shared shader-uniform objects for Shell stripe decals. The renderer keeps references
   // to these objects across material recompiles (wrap on/off, finish changes, etc.).
@@ -636,7 +698,8 @@ export default function HelmetBuilder() {
     rightColor:      { value: new THREE.Color('#efff00') },
     designEnabled:   { value: 0 },
     designMap:       { value: null },
-    wrapOccludes:    { value: 0 },
+    wrapEnabled:     { value: 0 },
+    wrapMap:         { value: null },
   });
 
   const [activeTab, setActiveTab]     = useState('colors');
@@ -683,11 +746,14 @@ export default function HelmetBuilder() {
   const [helmetStripeDesignOpacity, setHelmetStripeDesignOpacity] = useState(1);
   const [helmetStripeDesignRevision, setHelmetStripeDesignRevision] = useState(0);
   const [activeViewPreset, setActiveViewPreset] = useState('sideA');
+  const [decalFinish, setDecalFinish] = useState('gloss');
 
   const finishRef = useRef(finish);
   useEffect(() => { finishRef.current = finish; }, [finish]);
   const facemaskFinishRef = useRef(facemaskFinish);
   useEffect(() => { facemaskFinishRef.current = facemaskFinish; }, [facemaskFinish]);
+  const decalFinishRef = useRef(decalFinish);
+  useEffect(() => { decalFinishRef.current = decalFinish; }, [decalFinish]);
 
   // ── AUTH + CREDITS (Clerk + Supabase) — mirrors /jersey ──
   const [credits, setCredits]             = useState(0);
@@ -958,6 +1024,7 @@ export default function HelmetBuilder() {
         // Refresh in case Chrome is already the active finish and materials already exist
         applyShellEnvMap(materialsRef.current, scene, finishRef.current);
         applyFacemaskEnvMap(materialsRef.current, scene, facemaskFinishRef.current);
+        applyDecalFinishToMaterials(decalOverlayMaterialsRef.current, scene, decalFinishRef.current);
       },
       undefined,
       () => console.warn('No /chrome-reflection.jpg found — Chrome will fall back to the gradient env map until you add one.')
@@ -1119,13 +1186,17 @@ export default function HelmetBuilder() {
         partObjectsRef.current[partKey('Shell')] || []
       );
 
-      // Apply helmet stripes only to the Shell. The Top Screws remain real visible
-      // hardware instead of trying to fake vinyl thickness over protruding geometry.
-      // Bumpers are separate GLB geometry and naturally stay above the stripe decal.
+      // Build a second, coincident Shell surface used only for decal layers. Because
+      // this overlay has its own material, Shell glitter/Car Paint can never bleed through
+      // an opaque wrap or stripe. Polygon offset keeps it visually flush without floating.
       stripeUniformsRef.current.centerX.value = shellProjection?.centerX || 0;
-      (partsRef.current[partKey('Shell')] || []).forEach(mat => {
-        installShellStripeOverlay(mat, stripeUniformsRef.current);
-      });
+      const decalOverlays = createShellDecalOverlays(
+        partObjectsRef.current[partKey('Shell')] || [],
+        stripeUniformsRef.current
+      );
+      decalOverlayMeshesRef.current = decalOverlays.overlays;
+      decalOverlayMaterialsRef.current = decalOverlays.materials;
+      applyDecalFinishToMaterials(decalOverlayMaterialsRef.current, scene, decalFinishRef.current);
 
       scene.add(model);
       // Now that all shell/facemask materials exist, route env maps per current finish
@@ -1161,6 +1232,10 @@ export default function HelmetBuilder() {
     return () => {
       cancelAnimationFrame(frameRef.current);
       window.removeEventListener('resize', onResize);
+      decalOverlayMeshesRef.current.forEach(mesh => mesh.parent?.remove(mesh));
+      decalOverlayMaterialsRef.current.forEach(mat => mat.dispose());
+      decalOverlayMeshesRef.current = [];
+      decalOverlayMaterialsRef.current = [];
       renderer.dispose();
       if (el.contains(renderer.domElement)) el.removeChild(renderer.domElement);
     };
@@ -1172,33 +1247,23 @@ export default function HelmetBuilder() {
       zone.parts.forEach(partName => {
         const mats = partsRef.current[partKey(partName)];
         if (mats) mats.forEach(mat => {
-          // While a full wrap is active, the Shell map already contains the selected
-          // shell base color. Keep the material itself white so Three.js doesn't tint
-          // / multiply the uploaded artwork. Side Screws + Top Screws still use the
-          // normal Shell color because they are separate GLB parts.
-          const wrappedShell = wrapEnabled && partKey(partName) === partKey('Shell');
-          mat.color.set(wrappedShell ? '#ffffff' : colors[zone.id]);
+          // Decals now render on their own overlay material, so the base Shell always
+          // retains its actual selected color/finish underneath.
+          mat.color.set(colors[zone.id]);
           mat.needsUpdate = true;
         });
       });
     });
-  }, [colors, loaded, wrapEnabled]);
+  }, [colors, loaded]);
 
   // ── FULL WRAP TEXTURE ───────────────────────────────────────────────────────
   useEffect(() => {
     if (!loaded) return;
+    const uniforms = stripeUniformsRef.current;
 
-    const shellMats = partsRef.current[partKey('Shell')] || [];
-    if (!shellMats.length) return;
-
-    // Removing / disabling the wrap restores a plain shell while preserving the
-    // linked shell color on Shell, Side Screws, and Top Screws.
     if (!wrapEnabled || !wrapImageRef.current) {
-      shellMats.forEach(mat => {
-        if (mat.map === wrapTextureRef.current) mat.map = null;
-        mat.color.set(colors.shell);
-        mat.needsUpdate = true;
-      });
+      uniforms.wrapEnabled.value = 0;
+      uniforms.wrapMap.value = wrapTextureRef.current || null;
       return;
     }
 
@@ -1213,20 +1278,13 @@ export default function HelmetBuilder() {
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-
     const w = canvas.width;
     const h = canvas.height;
 
-    // Base shell color remains visible anywhere a transparent PNG or transformed
-    // image leaves uncovered space.
     ctx.clearRect(0, 0, w, h);
     ctx.fillStyle = colors.shell;
     ctx.fillRect(0, 0, w, h);
 
-    // Scale 1.0 means "cover the full 2:1 panoramic wrap canvas" without
-    // distorting the uploaded artwork. Horizontal movement behaves like rotating the
-    // design around the helmet, so duplicate draws on either side keep artwork flowing
-    // cleanly across the editor's left/right back seam.
     const coverScale = Math.max(w / img.naturalWidth, h / img.naturalHeight);
     const drawScale = coverScale * wrapScale;
     const drawW = img.naturalWidth * drawScale;
@@ -1247,21 +1305,14 @@ export default function HelmetBuilder() {
     if (!texture) {
       texture = new THREE.CanvasTexture(canvas);
       texture.colorSpace = THREE.SRGBColorSpace;
-      // glTF UVs use the top-left texture origin convention. CanvasTexture defaults
-      // to flipY=true, so disable the flip to keep the 2D orientation guide aligned
-      // with the exported Shell UVs.
       texture.flipY = false;
       texture.wrapS = THREE.RepeatWrapping;
       texture.wrapT = THREE.ClampToEdgeWrapping;
       wrapTextureRef.current = texture;
     }
     texture.needsUpdate = true;
-
-    shellMats.forEach(mat => {
-      mat.map = texture;
-      mat.color.set('#ffffff');
-      mat.needsUpdate = true;
-    });
+    uniforms.wrapMap.value = texture;
+    uniforms.wrapEnabled.value = 1;
   }, [loaded, colors.shell, wrapEnabled, wrapRevision, wrapScale, wrapRotation, wrapOffsetX, wrapOffsetY, wrapOpacity]);
 
 
@@ -1332,8 +1383,12 @@ export default function HelmetBuilder() {
     uniforms.centerColor.value.set(helmetStripeCenterColor);
     uniforms.rightColor.value.set(helmetStripeRightColor);
     uniforms.designEnabled.value = helmetStripeDesignEnabled && hasDesign ? 1 : 0;
-    uniforms.wrapOccludes.value = wrapEnabled ? 1 : 0;
-  }, [loaded, helmetStripesEnabled, helmetStripeWidth, helmetStripeLength, helmetStripeLeftColor, helmetStripeCenterColor, helmetStripeRightColor, helmetStripeDesignEnabled, helmetStripeDesignRevision, wrapEnabled]);
+  }, [loaded, helmetStripesEnabled, helmetStripeWidth, helmetStripeLength, helmetStripeLeftColor, helmetStripeCenterColor, helmetStripeRightColor, helmetStripeDesignEnabled, helmetStripeDesignRevision]);
+
+  // ── DECAL FINISH ────────────────────────────────────────────────────────────
+  useEffect(() => {
+    applyDecalFinishToMaterials(decalOverlayMaterialsRef.current, sceneRef.current, decalFinish);
+  }, [loaded, decalFinish]);
 
   // ── SHADOW SURFACE ON/OFF ────────────────────────────────────────────────────
   // Was previously just UI state with nothing reading it — floor/wall never actually
@@ -1669,6 +1724,33 @@ export default function HelmetBuilder() {
             {/* DECALS */}
             {activeTab === 'decals' && (
               <div>
+                <SectionLabel>Decal Finish</SectionLabel>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:6, marginBottom:8 }}>
+                  {DECAL_FINISHES.map(f => (
+                    <button
+                      key={f.id}
+                      onClick={() => setDecalFinish(f.id)}
+                      style={{
+                        background: decalFinish===f.id ? 'rgba(239,255,0,0.10)' : 'rgba(255,255,255,0.04)',
+                        border: decalFinish===f.id ? '1px solid rgba(239,255,0,0.40)' : '1px solid rgba(255,255,255,0.08)',
+                        borderRadius:6,
+                        padding:'8px 6px',
+                        cursor:'pointer',
+                        fontSize:9,
+                        fontWeight:800,
+                        fontFamily:"'Barlow Condensed',sans-serif",
+                        color:decalFinish===f.id ? '#efff00' : '#9ca3af',
+                        letterSpacing:'0.06em'
+                      }}
+                    >
+                      {f.label.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+                <div style={{ fontSize:8, color:'#4b5563', lineHeight:1.45, marginBottom:14 }}>
+                  Applies to full wraps, preset stripes and uploaded stripe designs. Decals use their own finish and never inherit Shell glitter or Car Paint effects.
+                </div>
+
                 <SectionLabel>Full Wrap</SectionLabel>
                 <div style={{ fontSize:10, color:'#6b7280', lineHeight:1.55, marginBottom:10 }}>
                   Upload a PNG or JPEG of at least 1080×1080px. For best results use a wide image (around 2:1). The center maps to the front of the helmet and the left/right edges meet at the back.
@@ -1776,7 +1858,7 @@ export default function HelmetBuilder() {
                   </div>
 
                   <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.5 }}>
-                    This preset uses three equal-width stripes with no gaps. Stripes are rendered directly on the shell surface, above any full wrap and beneath the bumpers. Sparkles and underlying finish effects are suppressed beneath decal coverage. Crown screw hardware remains visible.
+                    This preset uses three equal-width stripes with no gaps. Stripes use a dedicated decal surface above any full wrap and beneath the bumpers, so Shell glitter and Car Paint effects cannot show through. Crown screw hardware remains visible.
                   </div>
 
                   <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:10 }}>
