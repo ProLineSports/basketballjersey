@@ -3367,7 +3367,7 @@ export default function HelmetBuilder() {
               <div>
                 <CollapsibleSection title="SHELL FINISH">
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {DECAL_FINISHES.map(f => (
+                  {FINISHES.map(f => (
                     <button key={f.id} onClick={() => setFinish(f.id)} style={{ background: finish === f.id ? 'rgba(239,255,0,0.1)' : 'rgba(255,255,255,0.04)', border: finish === f.id ? '1px solid rgba(239,255,0,0.4)' : '1px solid rgba(255,255,255,0.08)', borderRadius: 8, padding: '10px 14px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span style={{ fontSize: 12, fontWeight: 700, fontFamily: "'Barlow Condensed', sans-serif", color: finish === f.id ? '#efff00' : '#9ca3af', letterSpacing: '0.04em' }}>{f.label.toUpperCase()}</span>
                       <div style={{ width: 24, height: 24, borderRadius: '50%', background: finish === f.id ? '#efff00' : 'rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -3377,7 +3377,7 @@ export default function HelmetBuilder() {
                   ))}
                 </div>
                 <div style={{ marginTop: 14, marginBottom: 14, fontSize: 10, color: '#4b5563', lineHeight: 1.6 }}>
-                  Finish applies to the main shell only. All other parts retain their own properties.
+                  Finish applies to the Shell plus Side Screws and Top Screws as one continuous painted surface. Other parts retain their own finish controls.
                 </div>
                 {finish === 'carpaint' && (
                   <div>
