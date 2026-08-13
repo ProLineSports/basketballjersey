@@ -1977,6 +1977,24 @@ export default function HelmetBuilder() {
     };
   }, []);
 
+  // ── VIEWPORT / EXPORT BACKGROUND ────────────────────────────────────────────
+  // Keep the actual Three.js scene background synchronized with the UI. The previous
+  // version only changed the surrounding DOM container, so the WebGL canvas and PNG
+  // capture continued using the original dark scene background.
+  useEffect(() => {
+    const scene = sceneRef.current;
+    const renderer = rendererRef.current;
+    if (!scene || !renderer) return;
+
+    if (transparentBg) {
+      scene.background = null;
+      renderer.setClearColor(0x000000, 0);
+    } else {
+      scene.background = new THREE.Color(viewportBgColor);
+      renderer.setClearColor(new THREE.Color(viewportBgColor), 1);
+    }
+  }, [transparentBg, viewportBgColor, loaded]);
+
   // ── UPDATE COLORS ────────────────────────────────────────────────────────────
   useEffect(() => {
     ZONES.forEach(zone => {
@@ -2968,10 +2986,22 @@ export default function HelmetBuilder() {
     const scene = sceneRef.current;
     const camera = cameraRef.current;
     const previousBackground = scene.background;
-    scene.background = transparentBg ? null : new THREE.Color(viewportBgColor);
+    const previousClearColor = renderer.getClearColor(new THREE.Color()).clone();
+    const previousClearAlpha = renderer.getClearAlpha();
+
+    if (transparentBg) {
+      scene.background = null;
+      renderer.setClearColor(0x000000, 0);
+    } else {
+      scene.background = new THREE.Color(viewportBgColor);
+      renderer.setClearColor(new THREE.Color(viewportBgColor), 1);
+    }
+
     renderer.render(scene, camera);
     const rawDataURL = renderer.domElement.toDataURL('image/png');
+
     scene.background = previousBackground;
+    renderer.setClearColor(previousClearColor, previousClearAlpha);
 
     // Tile the watermark onto the captured frame for free (unpaid) exports
     let finalDataURL = rawDataURL;
@@ -3014,7 +3044,7 @@ export default function HelmetBuilder() {
     setExporting(false);
     setExported(true);
     setTimeout(() => setExported(false), 2500);
-  }, [isSignedIn, isUnlimited, credits, openSignIn]);
+  }, [isSignedIn, isUnlimited, credits, openSignIn, transparentBg, viewportBgColor]);
 
   const handleGetCredits = () => {
     if (!isSignedIn) { openSignIn({ afterSignInUrl: '/helmet?upgrade=true', afterSignUpUrl: '/helmet?upgrade=true' }); return; }
@@ -3681,13 +3711,13 @@ export default function HelmetBuilder() {
             <div style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:9, padding:'10px 12px', marginBottom:10 }}>
               <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:10, marginBottom:10 }}>
                 <div>
-                  <div style={{ fontSize:11, color:'#9ca3af', marginBottom:2 }}>Transparent PNG</div>
-                  <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.4 }}>Turn off the background for transparent exports.</div>
+                  <div style={{ fontSize:11, color:'#9ca3af', marginBottom:2 }}>Background Color</div>
+                  <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.4 }}>Turn off for a transparent-background PNG export.</div>
                 </div>
-                <button onClick={() => setTransparentBg(v => !v)} style={{ background:transparentBg?'rgba(239,255,0,0.12)':'rgba(255,255,255,0.06)', border:transparentBg?'1px solid rgba(239,255,0,0.40)':'1px solid rgba(255,255,255,0.12)', borderRadius:20, padding:'6px 12px', cursor:'pointer', fontSize:10, fontWeight:800, color:transparentBg?'#efff00':'#9ca3af', fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.08em' }}>{transparentBg ? 'ON' : 'OFF'}</button>
+                <button onClick={() => setTransparentBg(v => !v)} style={{ background:!transparentBg?'rgba(239,255,0,0.12)':'rgba(255,255,255,0.06)', border:!transparentBg?'1px solid rgba(239,255,0,0.40)':'1px solid rgba(255,255,255,0.12)', borderRadius:20, padding:'6px 12px', cursor:'pointer', fontSize:10, fontWeight:800, color:!transparentBg?'#efff00':'#9ca3af', fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.08em' }}>{transparentBg ? 'OFF' : 'ON'}</button>
               </div>
               <div style={{ opacity: transparentBg ? 0.45 : 1, pointerEvents: transparentBg ? 'none' : 'auto' }}>
-                <ColorSwatch color={viewportBgColor} onChange={setViewportBgColor} label="Viewport Background" />
+                <ColorSwatch color={viewportBgColor} onChange={setViewportBgColor} label="Color" />
               </div>
             </div>
             <div style={{ background:'rgba(239,255,0,0.05)', border:'1px solid rgba(239,255,0,0.14)', borderRadius:9, padding:'10px 12px', marginBottom:10 }}>
