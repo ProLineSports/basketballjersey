@@ -1133,6 +1133,82 @@ function applyFacemaskEnvMap(materialsMap, scene, facemaskFinishId) {
   applyEnvMapToMaterials(FACEMASK_MATERIAL_NAMES, materialsMap, scene, facemaskFinishId === 'chrome', false);
 }
 
+// ── PREMIUM PART MATERIAL CALIBRATION ────────────────────────────────────────
+// Shell, Side/Top Screws, Facemask, decals, and bumper logos keep their existing
+// user-selectable finish systems. The remaining physical parts get distinct PBR
+// personalities so rubber, metal, foam, straps, molded plastic, and visor no longer
+// read like the same generic glossy material.
+const PREMIUM_PART_MATERIAL_PRESETS = [
+  {
+    parts: ['Bumpers'],
+    props: { roughness:0.48, metalness:0.0, clearcoat:0.18, clearcoatRoughness:0.38, envMapIntensity:0.72, specularIntensity:0.42 }
+  },
+  {
+    parts: ['Facemask Clips'],
+    props: { roughness:0.34, metalness:0.02, clearcoat:0.36, clearcoatRoughness:0.20, envMapIntensity:0.88, specularIntensity:0.50 }
+  },
+  {
+    parts: ['Facemask Clips Hardware'],
+    props: { roughness:0.22, metalness:0.88, clearcoat:0.08, clearcoatRoughness:0.08, envMapIntensity:1.18, specularIntensity:1.0 }
+  },
+  {
+    parts: ['Inner Pads'],
+    props: { roughness:0.92, metalness:0.0, clearcoat:0.0, clearcoatRoughness:0.0, envMapIntensity:0.24, specularIntensity:0.22, sheen:0.18, sheenRoughness:0.94 }
+  },
+  {
+    parts: ['Visor'],
+    props: { roughness:0.10, metalness:0.02, clearcoat:1.0, clearcoatRoughness:0.045, envMapIntensity:1.15, specularIntensity:0.85, ior:1.48, transmission:0.06, thickness:0.018, opacity:0.56 }
+  },
+  {
+    parts: ['Visor Clips'],
+    props: { roughness:0.30, metalness:0.04, clearcoat:0.42, clearcoatRoughness:0.16, envMapIntensity:0.94, specularIntensity:0.55 }
+  },
+  {
+    parts: ['Chin Guard - Inner'],
+    props: { roughness:0.88, metalness:0.0, clearcoat:0.0, clearcoatRoughness:0.0, envMapIntensity:0.28, specularIntensity:0.24 }
+  },
+  {
+    parts: ['Chin Guard - Outer'],
+    props: { roughness:0.35, metalness:0.01, clearcoat:0.46, clearcoatRoughness:0.18, envMapIntensity:0.90, specularIntensity:0.52 }
+  },
+  {
+    parts: ['Metal Parts'],
+    props: { roughness:0.20, metalness:0.92, clearcoat:0.06, clearcoatRoughness:0.06, envMapIntensity:1.24, specularIntensity:1.0 }
+  },
+  {
+    parts: ['Strap Clips - Lower', 'Strap Clips - Upper'],
+    props: { roughness:0.38, metalness:0.03, clearcoat:0.28, clearcoatRoughness:0.22, envMapIntensity:0.82, specularIntensity:0.46 }
+  },
+  {
+    parts: ['Straps'],
+    props: { roughness:0.70, metalness:0.0, clearcoat:0.06, clearcoatRoughness:0.45, envMapIntensity:0.46, specularIntensity:0.30, sheen:0.12, sheenRoughness:0.88 }
+  },
+];
+
+function applyPremiumPartMaterialCalibration(partsMap) {
+  PREMIUM_PART_MATERIAL_PRESETS.forEach(({ parts, props }) => {
+    parts.forEach(partName => {
+      const mats = partsMap[partKey(partName)] || [];
+      mats.forEach(mat => {
+        // Let scene.environment drive IBL consistently. Dedicated Chrome/Car Paint
+        // materials still route their own env maps through their finish systems.
+        mat.envMap = null;
+
+        Object.entries(props).forEach(([key, value]) => {
+          if (key in mat) mat[key] = value;
+        });
+
+        if (partKey(partName) === partKey('Visor')) {
+          mat.transparent = true;
+          mat.side = THREE.DoubleSide;
+        }
+
+        mat.needsUpdate = true;
+      });
+    });
+  });
+}
+
 // ── CAR PAINT GLITTER FLAKE TEXTURES ────────────────────────────────────────
 // Packs the standard glTF "ORM" layout — R = Ambient Occlusion, G = Roughness, B =
 // Metalness — into one tileable canvas, used as aoMap + roughnessMap + metalnessMap
@@ -1519,6 +1595,7 @@ export default function HelmetBuilder() {
   const [finish, setFinish]           = useState('gloss');
   const [loaded, setLoaded]           = useState(false);
   const [showProductMenu, setShowProductMenu] = useState(false);
+  const [showTipsModal, setShowTipsModal]     = useState(false);
   const [showShadows, setShowShadows]         = useState(true);
   const [shadowOpacity, setShadowOpacity]     = useState(0.35);
   const [shadowSoftness, setShadowSoftness]   = useState(0.45);
@@ -3638,6 +3715,13 @@ export default function HelmetBuilder() {
     });
   }, [loaded]);
 
+
+  // ── PREMIUM MATERIAL CALIBRATION ────────────────────────────────────────────
+  useEffect(() => {
+    if (!loaded) return;
+    applyPremiumPartMaterialCalibration(partsRef.current);
+  }, [loaded]);
+
   // ── UPDATE FACEMASK FINISH ─────────────────────────────────────────────────
   useEffect(() => {
     FACEMASK_MATERIAL_NAMES.forEach(matName => {
@@ -4690,177 +4774,181 @@ export default function HelmetBuilder() {
           </button>
         </div>
 
-        {/* RIGHT PANEL — mirrors /jersey: current colors → active finish → tips → credits meter → export */}
-        <div style={{ background:'#161314', borderLeft:'1px solid rgba(255,255,255,0.07)', display:'flex', flexDirection:'column', overflow:'hidden' }}>
-          <div style={{ padding:'12px 14px', borderBottom:'1px solid rgba(255,255,255,0.07)', flexShrink:0 }}>
-            <SectionLabel>Current Colors</SectionLabel>
-            <div style={{ display:'flex', gap:5, flexWrap:'wrap' }}>
-              {ZONES.map(zone => (
-                <div key={zone.id} style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:3 }}>
-                  <div style={{ width:24, height:24, borderRadius:5, background:colors[zone.id], border:'1px solid rgba(255,255,255,0.12)' }} title={zone.label} />
-                  <span style={{ fontSize:7, color:'#6b7280', fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.03em', textTransform:'uppercase', maxWidth:30, textAlign:'center', lineHeight:1.1 }}>{zone.label.split(' ')[0]}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
+        {/* RIGHT PANEL — compact summary + collapsible settings + always-visible export */}
+        <div style={{ background:'#161314', borderLeft:'1px solid rgba(255,255,255,0.07)', display:'flex', flexDirection:'column', overflow:'hidden', minHeight:0 }}>
           <div style={{ padding:'10px 14px', borderBottom:'1px solid rgba(255,255,255,0.07)', flexShrink:0 }}>
-            <SectionLabel>Active Finish</SectionLabel>
-            <div style={{ background:'rgba(239,255,0,0.07)', border:'1px solid rgba(239,255,0,0.2)', borderRadius:7, padding:'9px 12px', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-              <span style={{ fontSize:13, fontWeight:700, fontFamily:"'Barlow Condensed',sans-serif", color:'#efff00', letterSpacing:'0.05em' }}>{FINISHES.find(f => f.id === finish)?.label.toUpperCase()}</span>
-              <button onClick={() => setActiveTab('finish')} style={{ background:'none', border:'1px solid rgba(239,255,0,0.25)', borderRadius:4, padding:'3px 8px', cursor:'pointer', fontSize:9, fontWeight:700, color:'#efff00', fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.06em' }}>CHANGE</button>
+            <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ fontSize:8, color:'#6b7280', letterSpacing:'0.10em', fontFamily:"'Barlow Condensed',sans-serif", marginBottom:3 }}>ACTIVE FINISH</div>
+                <div style={{ fontSize:13, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif", color:'#efff00', letterSpacing:'0.05em' }}>
+                  {FINISHES.find(f => f.id === finish)?.label.toUpperCase()}
+                </div>
+              </div>
+              <button onClick={() => setActiveTab('finish')} style={{ background:'rgba(239,255,0,0.06)', border:'1px solid rgba(239,255,0,0.25)', borderRadius:5, padding:'5px 9px', cursor:'pointer', fontSize:9, fontWeight:700, color:'#efff00', fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.06em' }}>CHANGE</button>
+              <button
+                onClick={() => setShowTipsModal(true)}
+                title="Builder Tips"
+                style={{ width:28, height:28, flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.10)', borderRadius:6, cursor:'pointer', color:'#efff00', fontSize:18, lineHeight:1 }}
+              >
+                +
+              </button>
             </div>
           </div>
 
-          <div style={{ padding:'14px 16px', overflowY:'auto', flex:1, minHeight:0 }}>
-            <SectionLabel>Tips</SectionLabel>
-            {[
-              { icon:'◈', text:'Click any swatch or type a hex code to change colors' },
-              { icon:'◎', text:'Car Paint + Chrome are the only finishes with reflections — Gloss/Matte/Satin use true flat color' },
-              { icon:'✦', text:'Car Paint uses discrete glitter; Satin can add dense metallic micro-texture for fine-grain finishes' },
-              { icon:'◉', text:'Drag to rotate the helmet and check the finish from multiple angles. Use Studio Lighting to choose an HDRI, tune environment/exposure, adjust the virtual softboxes, or tint the accent rim light.' },
-              { icon:'★', text:'Use the Export Quality controls for higher-resolution, supersampled PNGs. Free exports include a ProLine watermark.' },
-            ].map((tip,i) => (
-              <div key={i} style={{ display:'flex', gap:9, marginBottom:10, alignItems:'flex-start' }}>
-                <span style={{ color:'#efff00', fontSize:12, lineHeight:1.5, flexShrink:0 }}>{tip.icon}</span>
-                <span style={{ fontSize:11, color:'#4b5563', lineHeight:1.5 }}>{tip.text}</span>
+          <div style={{ padding:'5px 14px 10px', overflowY:'auto', flex:1, minHeight:0 }}>
+            <CollapsibleSection title="CURRENT COLORS" defaultOpen={false}>
+              <div style={{ display:'flex', gap:5, flexWrap:'wrap', paddingBottom:3 }}>
+                {ZONES.map(zone => (
+                  <div key={zone.id} style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:3 }}>
+                    <div style={{ width:24, height:24, borderRadius:5, background:colors[zone.id], border:'1px solid rgba(255,255,255,0.12)' }} title={zone.label} />
+                    <span style={{ fontSize:7, color:'#6b7280', fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.03em', textTransform:'uppercase', maxWidth:30, textAlign:'center', lineHeight:1.1 }}>{zone.label.split(' ')[0]}</span>
+                  </div>
+                ))}
               </div>
-            ))}
+            </CollapsibleSection>
+
+            <CollapsibleSection title="BACKGROUND" defaultOpen={false}>
+              <div style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:9, padding:'10px 12px' }}>
+                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:10, marginBottom:10 }}>
+                  <div>
+                    <div style={{ fontSize:11, color:'#9ca3af', marginBottom:2 }}>Background Color</div>
+                    <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.4 }}>Turn off for a transparent-background PNG export.</div>
+                  </div>
+                  <button onClick={() => setTransparentBg(v => !v)} style={{ background:!transparentBg?'rgba(239,255,0,0.12)':'rgba(255,255,255,0.06)', border:!transparentBg?'1px solid rgba(239,255,0,0.40)':'1px solid rgba(255,255,255,0.12)', borderRadius:20, padding:'6px 12px', cursor:'pointer', fontSize:10, fontWeight:800, color:!transparentBg?'#efff00':'#9ca3af', fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.08em' }}>{transparentBg ? 'OFF' : 'ON'}</button>
+                </div>
+                <div style={{ opacity: transparentBg ? 0.45 : 1, pointerEvents: transparentBg ? 'none' : 'auto' }}>
+                  <ColorSwatch color={viewportBgColor} onChange={setViewportBgColor} label="Color" />
+                </div>
+              </div>
+            </CollapsibleSection>
+
+            <CollapsibleSection title="STUDIO LIGHTING" defaultOpen={false}>
+              <div style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:9, padding:'10px 12px' }}>
+                <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.4, marginBottom:8 }}>
+                  HDRIs provide the reflections/fill while virtual softboxes create broad product-photography highlights.
+                </div>
+
+                <div style={{ marginBottom:10 }}>
+                  <div style={{ fontSize:9, color:'#9ca3af', marginBottom:5 }}>Environment</div>
+                  <select
+                    value={hdriPreset}
+                    onChange={e => setHdriPreset(e.target.value)}
+                    style={{ width:'100%', background:'rgba(0,0,0,0.22)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:6, padding:'8px 10px', color:'#e5e7eb', fontSize:10, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.04em' }}
+                  >
+                    {HDRI_PRESETS.map(preset => (
+                      <option key={preset.id} value={preset.id}>{preset.label}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {hdriLoading && <div style={{ fontSize:9, color:'#efff00', marginBottom:8 }}>Loading HDRI…</div>}
+                {hdriError && <div style={{ fontSize:9, color:'#ef4444', lineHeight:1.35, marginBottom:8 }}>{hdriError}</div>}
+
+                <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:9 }}>
+                  <span style={{ width:58, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Intensity</span>
+                  <input type="range" min="0" max="200" value={Math.round(hdriIntensity * 100)} onChange={e => setHdriIntensity(parseInt(e.target.value) / 100)} style={{ flex:1, minWidth:0 }} />
+                </div>
+
+                <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:9 }}>
+                  <span style={{ width:58, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Exposure</span>
+                  <input type="range" min="70" max="210" value={Math.round(sceneExposure * 100)} onChange={e => setSceneExposure(parseInt(e.target.value) / 100)} style={{ flex:1, minWidth:0 }} />
+                </div>
+
+                <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12 }}>
+                  <span style={{ width:58, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Softboxes</span>
+                  <input type="range" min="0" max="200" value={Math.round(studioLightStrength * 100)} onChange={e => setStudioLightStrength(parseInt(e.target.value) / 100)} style={{ flex:1, minWidth:0 }} />
+                </div>
+
+                <div style={{ height:1, background:'rgba(255,255,255,0.06)', marginBottom:10 }} />
+                <ColorSwatch color={rimLightColor} onChange={setRimLightColor} label="Accent Light" />
+              </div>
+            </CollapsibleSection>
+
+            <CollapsibleSection title="EXPORT QUALITY" defaultOpen={false}>
+              <div style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:9, padding:'10px 12px' }}>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:8 }}>
+                  <div>
+                    <div style={{ fontSize:10, color:'#9ca3af', marginBottom:5 }}>Final Size</div>
+                    <select
+                      value={String(exportResolution)}
+                      onChange={e => setExportResolution(parseInt(e.target.value))}
+                      style={{ width:'100%', background:'rgba(0,0,0,0.22)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:6, padding:'8px 10px', color:'#e5e7eb', fontSize:10, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.04em' }}
+                    >
+                      <option value="1500">1500 px</option>
+                      <option value="2048">2048 px</option>
+                      <option value="3000">3000 px</option>
+                      <option value="4096">4096 px</option>
+                    </select>
+                  </div>
+                  <div>
+                    <div style={{ fontSize:10, color:'#9ca3af', marginBottom:5 }}>Supersample</div>
+                    <select
+                      value={String(exportSupersample)}
+                      onChange={e => setExportSupersample(parseInt(e.target.value))}
+                      style={{ width:'100%', background:'rgba(0,0,0,0.22)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:6, padding:'8px 10px', color:'#e5e7eb', fontSize:10, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.04em' }}
+                    >
+                      <option value="1">1× Standard</option>
+                      <option value="2">2× High</option>
+                      <option value="3">3× Ultra</option>
+                    </select>
+                  </div>
+                </div>
+                <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.45 }}>
+                  High-resolution supersampled exports render through the same lighting/material pipeline as the live viewport.
+                </div>
+              </div>
+            </CollapsibleSection>
           </div>
 
-          <div style={{ padding:'12px 14px', borderTop:'1px solid rgba(255,255,255,0.07)', flexShrink:0 }}>
-            <SectionLabel>Background</SectionLabel>
-            <div style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:9, padding:'10px 12px', marginBottom:10 }}>
-              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:10, marginBottom:10 }}>
-                <div>
-                  <div style={{ fontSize:11, color:'#9ca3af', marginBottom:2 }}>Background Color</div>
-                  <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.4 }}>Turn off for a transparent-background PNG export.</div>
-                </div>
-                <button onClick={() => setTransparentBg(v => !v)} style={{ background:!transparentBg?'rgba(239,255,0,0.12)':'rgba(255,255,255,0.06)', border:!transparentBg?'1px solid rgba(239,255,0,0.40)':'1px solid rgba(255,255,255,0.12)', borderRadius:20, padding:'6px 12px', cursor:'pointer', fontSize:10, fontWeight:800, color:!transparentBg?'#efff00':'#9ca3af', fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.08em' }}>{transparentBg ? 'OFF' : 'ON'}</button>
+          {/* Export actions remain pinned and visible regardless of the settings-panel height. */}
+          <div style={{ padding:'9px 12px 11px', borderTop:'1px solid rgba(255,255,255,0.08)', flexShrink:0, background:'#161314', boxShadow:'0 -8px 18px rgba(0,0,0,0.18)' }}>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:7, gap:8 }}>
+              <div>
+                <div style={{ fontSize:8, color:'#6b7280', letterSpacing:'0.08em', fontFamily:"'Barlow Condensed',sans-serif" }}>EXPORT CREDITS</div>
+                <div style={{ fontSize:9, color:'#4b5563', marginTop:2 }}>{isUnlimited ? 'Unlimited watermark-free exports' : 'Free exports include watermark'}</div>
               </div>
-              <div style={{ opacity: transparentBg ? 0.45 : 1, pointerEvents: transparentBg ? 'none' : 'auto' }}>
-                <ColorSwatch color={viewportBgColor} onChange={setViewportBgColor} label="Color" />
-              </div>
-            </div>
-            <div style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:9, padding:'10px 12px', marginBottom:10 }}>
-              <SectionLabel>Studio Lighting</SectionLabel>
-
-              <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.4, marginBottom:8 }}>
-                HDRIs provide the overall reflections and fill; large virtual softboxes add controlled product-photography highlights without replacing your selected background.
-              </div>
-
-              <div style={{ marginBottom:10 }}>
-                <div style={{ fontSize:9, color:'#9ca3af', marginBottom:5 }}>Environment</div>
-                <select
-                  value={hdriPreset}
-                  onChange={e => setHdriPreset(e.target.value)}
-                  style={{ width:'100%', background:'rgba(0,0,0,0.22)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:6, padding:'8px 10px', color:'#e5e7eb', fontSize:10, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.04em' }}
-                >
-                  {HDRI_PRESETS.map(preset => (
-                    <option key={preset.id} value={preset.id}>{preset.label}</option>
-                  ))}
-                </select>
-              </div>
-
-              {hdriLoading && (
-                <div style={{ fontSize:9, color:'#efff00', marginBottom:8 }}>Loading HDRI…</div>
-              )}
-              {hdriError && (
-                <div style={{ fontSize:9, color:'#ef4444', lineHeight:1.35, marginBottom:8 }}>{hdriError}</div>
-              )}
-
-              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:9 }}>
-                <span style={{ width:58, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Intensity</span>
-                <input
-                  type="range"
-                  min="0"
-                  max="200"
-                  value={Math.round(hdriIntensity * 100)}
-                  onChange={e => setHdriIntensity(parseInt(e.target.value) / 100)}
-                  style={{ flex:1, minWidth:0 }}
-                />
-              </div>
-
-              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:9 }}>
-                <span style={{ width:58, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Exposure</span>
-                <input
-                  type="range"
-                  min="70"
-                  max="210"
-                  value={Math.round(sceneExposure * 100)}
-                  onChange={e => setSceneExposure(parseInt(e.target.value) / 100)}
-                  style={{ flex:1, minWidth:0 }}
-                />
-              </div>
-
-              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12 }}>
-                <span style={{ width:58, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Softboxes</span>
-                <input
-                  type="range"
-                  min="0"
-                  max="200"
-                  value={Math.round(studioLightStrength * 100)}
-                  onChange={e => setStudioLightStrength(parseInt(e.target.value) / 100)}
-                  style={{ flex:1, minWidth:0 }}
-                />
-              </div>
-
-              <div style={{ height:1, background:'rgba(255,255,255,0.06)', marginBottom:10 }} />
-              <ColorSwatch color={rimLightColor} onChange={setRimLightColor} label="Accent Light" />
-            </div>
-            <div style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:9, padding:'10px 12px', marginBottom:10 }}>
-              <SectionLabel>Export Quality</SectionLabel>
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:8 }}>
-                <div>
-                  <div style={{ fontSize:10, color:'#9ca3af', marginBottom:5 }}>Final Size</div>
-                  <select
-                    value={String(exportResolution)}
-                    onChange={e => setExportResolution(parseInt(e.target.value))}
-                    style={{ width:'100%', background:'rgba(0,0,0,0.22)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:6, padding:'8px 10px', color:'#e5e7eb', fontSize:10, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.04em' }}
-                  >
-                    <option value="1500">1500 px</option>
-                    <option value="2048">2048 px</option>
-                    <option value="3000">3000 px</option>
-                    <option value="4096">4096 px</option>
-                  </select>
-                </div>
-                <div>
-                  <div style={{ fontSize:10, color:'#9ca3af', marginBottom:5 }}>Supersample</div>
-                  <select
-                    value={String(exportSupersample)}
-                    onChange={e => setExportSupersample(parseInt(e.target.value))}
-                    style={{ width:'100%', background:'rgba(0,0,0,0.22)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:6, padding:'8px 10px', color:'#e5e7eb', fontSize:10, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.04em' }}
-                  >
-                    <option value="1">1× Standard</option>
-                    <option value="2">2× High</option>
-                    <option value="3">3× Ultra</option>
-                  </select>
-                </div>
-              </div>
-              <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.45 }}>
-                Exports now render offscreen at a higher resolution, then downsample for cleaner edges and a more polished final PNG. Higher settings look better but take longer. The final PNG is rendered offscreen and supersampled for cleaner overall edges.
-              </div>
+              <div style={{ fontSize:20, fontWeight:900, color:credits>0?'#efff00':'#ef4444', fontFamily:"'Barlow Condensed',sans-serif" }}>{isUnlimited ? '∞' : credits}</div>
             </div>
 
-            <div style={{ background:'rgba(239,255,0,0.05)', border:'1px solid rgba(239,255,0,0.14)', borderRadius:9, padding:'10px 12px', marginBottom:10 }}>
-              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:5 }}>
-                <span style={{ fontSize:11, color:'#9ca3af' }}>Credits remaining</span>
-                <span style={{ fontSize:20, fontWeight:900, color:credits>0?'#efff00':'#ef4444', fontFamily:"'Barlow Condensed',sans-serif" }}>{isUnlimited ? '∞' : credits}</span>
-              </div>
-              <div style={{ height:3, background:'rgba(255,255,255,0.06)', borderRadius:2 }}>
-                <div style={{ height:'100%', width:isUnlimited ? '100%' : `${Math.min(100,(credits/CREDITS_INITIAL)*100)}%`, background:isUnlimited?'#10b981':'#efff00', borderRadius:2, transition:'width 0.4s ease' }} />
-              </div>
-              <div style={{ fontSize:9, color:'#6b7280', marginTop:4 }}>{isUnlimited ? 'Unlimited watermark-free exports' : 'FREE EXPORTS INCLUDE PROLINE WATERMARK'}</div>
-            </div>
-            <button onClick={handleExport} disabled={exporting || !loaded} style={{ width:'100%', background:credits>0?(exporting?'rgba(239,255,0,0.45)':'linear-gradient(135deg,#efff00,#c8d900)'):'rgba(239,68,68,0.12)', border:credits>0?'none':'1px solid rgba(239,68,68,0.3)', borderRadius:8, padding:'13px', fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:14, letterSpacing:'0.08em', color:credits>0?'#000':'#ef4444', cursor:'pointer', animation:exporting?'pulse 0.9s infinite':'none' }}>
+            <button onClick={handleExport} disabled={exporting || !loaded} style={{ width:'100%', background:credits>0?(exporting?'rgba(239,255,0,0.45)':'linear-gradient(135deg,#efff00,#c8d900)'):'rgba(239,68,68,0.12)', border:credits>0?'none':'1px solid rgba(239,68,68,0.3)', borderRadius:8, padding:'12px', fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:14, letterSpacing:'0.08em', color:credits>0?'#000':'#ef4444', cursor:'pointer', animation:exporting?'pulse 0.9s infinite':'none' }}>
               {exported ? '✓ DOWNLOADED!' : exporting ? 'EXPORTING...' : credits>0 ? '↓ EXPORT PNG' : 'NO CREDITS — UPGRADE'}
             </button>
+
             {credits<=1 && credits>0 && (
-              <button onClick={handleGetCredits} style={{ width:'100%', marginTop:7, background:'none', border:'1px solid rgba(255,255,255,0.09)', borderRadius:8, padding:'9px', fontFamily:"'Barlow Condensed',sans-serif", fontWeight:700, fontSize:11, color:'#6b7280', cursor:'pointer', letterSpacing:'0.05em' }}>UPGRADE → REMOVE WATERMARK</button>
+              <button onClick={handleGetCredits} style={{ width:'100%', marginTop:6, background:'none', border:'1px solid rgba(255,255,255,0.09)', borderRadius:8, padding:'8px', fontFamily:"'Barlow Condensed',sans-serif", fontWeight:700, fontSize:11, color:'#6b7280', cursor:'pointer', letterSpacing:'0.05em' }}>UPGRADE → REMOVE WATERMARK</button>
             )}
           </div>
         </div>
       </div>
+
+      {/* TIPS MODAL */}
+      {showTipsModal && (
+        <div onClick={() => setShowTipsModal(false)} style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.76)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1001, padding:18 }}>
+          <div onClick={e => e.stopPropagation()} style={{ width:460, maxWidth:'92vw', maxHeight:'82vh', overflowY:'auto', background:'#161314', border:'1px solid rgba(255,255,255,0.10)', borderRadius:14, padding:'20px 22px', boxShadow:'0 24px 70px rgba(0,0,0,0.50)' }}>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:12, marginBottom:14 }}>
+              <div>
+                <div style={{ fontSize:9, color:'#6b7280', letterSpacing:'0.12em', fontFamily:"'Barlow Condensed',sans-serif", marginBottom:3 }}>HELMET BUILDER</div>
+                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:21, letterSpacing:'0.05em' }}>TIPS</div>
+              </div>
+              <button onClick={() => setShowTipsModal(false)} style={{ width:30, height:30, background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.10)', borderRadius:7, cursor:'pointer', color:'#9ca3af', fontSize:18 }}>×</button>
+            </div>
+
+            {[
+              { icon:'◈', text:'Click any swatch or type a hex code to change colors.' },
+              { icon:'◎', text:'Shell finishes control the painted shell, Side Screws, and Top Screws as one continuous surface.' },
+              { icon:'✦', text:'Car Paint uses discrete glitter; Satin can add dense metallic micro-texture for fine-grain finishes.' },
+              { icon:'◉', text:'Studio Lighting combines HDRI reflections with large virtual softboxes. Use Exposure and Intensity sparingly for the most photographic result.' },
+              { icon:'◇', text:'Rubber, metal, padding, molded plastic, straps, visor, and other physical components now use independently calibrated PBR material properties for more realistic contrast.' },
+              { icon:'★', text:'For final graphics, use 2048–4096 px with 2× supersampling. Higher settings improve edge quality but take longer to render.' },
+            ].map((tip,i) => (
+              <div key={i} style={{ display:'flex', gap:11, padding:'10px 0', borderTop:i===0?'none':'1px solid rgba(255,255,255,0.05)', alignItems:'flex-start' }}>
+                <span style={{ color:'#efff00', fontSize:13, lineHeight:1.5, flexShrink:0 }}>{tip.icon}</span>
+                <span style={{ fontSize:12, color:'#9ca3af', lineHeight:1.55 }}>{tip.text}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* UPGRADE MODAL — identical flow to /jersey (same Stripe products, same shared credit pool) */}
       {showUpgrade && (
