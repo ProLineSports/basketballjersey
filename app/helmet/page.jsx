@@ -583,6 +583,9 @@ function createShellDecalOverlays(roots, decalUniforms) {
     overlay.renderOrder = (source.renderOrder || 0) + 1;
     overlay.castShadow = false;
     overlay.receiveShadow = false;
+    // The shell-wrap overlay is expensive even when its shader discards every pixel.
+    // Keep it out of the render list until a wrap is actually enabled.
+    overlay.visible = false;
     source.parent?.add(overlay);
 
     overlays.push(overlay);
@@ -636,6 +639,9 @@ function createWorldSpaceDecalOverlays(scene, roots, decalUniforms, options = {}
       overlay.renderOrder = renderOrder;
       overlay.castShadow = false;
       overlay.receiveShadow = false;
+      // Stripe carrier geometry can be relatively dense after subdivision. Do not
+      // submit it to WebGL at all until a built-in or uploaded stripe is active.
+      overlay.visible = false;
       scene.add(overlay);
       overlays.push(overlay);
       materials.push(material);
@@ -2638,6 +2644,25 @@ export default function HelmetBuilder() {
       debugStaticRef.current.glbDownloadMs = Math.max(0, downloadDoneAt - glbLoadStartedAt);
       debugStaticRef.current.glbParseMs = Math.max(0, glbOnLoadAt - downloadDoneAt);
 
+      // GLTFLoader's final progress event is not guaranteed to give us a clean
+      // download-vs-parse boundary. On the production builder the GLB is same-origin,
+      // so Resource Timing gives a more accurate responseEnd timestamp.
+      try {
+        const glbUrl = new URL('/SpeedFlex.glb', window.location.href).href;
+        const resourceEntries = performance.getEntriesByName(glbUrl);
+        const resourceEntry = resourceEntries[resourceEntries.length - 1];
+        if (resourceEntry) {
+          const measuredDownload = Math.max(0, resourceEntry.responseEnd - glbLoadStartedAt);
+          const measuredParse = Math.max(0, glbOnLoadAt - resourceEntry.responseEnd);
+          if (Number.isFinite(measuredDownload)) debugStaticRef.current.glbDownloadMs = measuredDownload;
+          if (Number.isFinite(measuredParse)) debugStaticRef.current.glbParseMs = measuredParse;
+
+          if (resourceEntry.decodedBodySize > 0) {
+            debugStaticRef.current.glbBytesTotal = resourceEntry.decodedBodySize;
+          }
+        }
+      } catch {}
+
       const model = gltf.scene;
       const baseStats = getBaseModelStats(model);
       debugStaticRef.current.modelMeshes = baseStats.meshes;
@@ -3168,8 +3193,13 @@ export default function HelmetBuilder() {
   useEffect(() => {
     if (!loaded) return;
     const uniforms = shellWrapUniformsRef.current;
+    const wrapActive = !!(wrapEnabled && wrapImageRef.current);
 
-    if (!wrapEnabled || !wrapImageRef.current) {
+    decalOverlayMeshesRef.current.forEach(mesh => {
+      mesh.visible = wrapActive;
+    });
+
+    if (!wrapActive) {
       uniforms.wrapEnabled.value = 0;
       uniforms.wrapMap.value = wrapTextureRef.current || null;
       return;
@@ -3302,7 +3332,13 @@ export default function HelmetBuilder() {
   useEffect(() => {
     const uniforms = stripeUniformsRef.current;
     const hasDesign = !!stripeDesignImageRef.current;
-    uniforms.enabled.value = (helmetStripesEnabled || (helmetStripeDesignEnabled && hasDesign)) ? 1 : 0;
+    const stripeActive = helmetStripesEnabled || (helmetStripeDesignEnabled && hasDesign);
+
+    stripeCarrierOverlayMeshesRef.current.forEach(mesh => {
+      mesh.visible = stripeActive;
+    });
+
+    uniforms.enabled.value = stripeActive ? 1 : 0;
     uniforms.baseEnabled.value = helmetStripesEnabled ? 1 : 0;
     uniforms.widthScale.value = helmetStripeWidth;
     uniforms.length.value = helmetStripeLength;
@@ -5271,7 +5307,7 @@ export default function HelmetBuilder() {
             }}>
               <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, marginBottom:8 }}>
                 <div>
-                  <div style={{ fontSize:9, color:'#efff00', fontWeight:900, letterSpacing:'0.12em' }}>DEBUG MODE · v72</div>
+                  <div style={{ fontSize:9, color:'#efff00', fontWeight:900, letterSpacing:'0.12em' }}>DEBUG MODE · v73</div>
                   <div style={{ fontSize:8, color:'#6b7280', marginTop:2 }}>Live renderer + asset timing · Ctrl+Shift+D toggles</div>
                 </div>
                 <button
