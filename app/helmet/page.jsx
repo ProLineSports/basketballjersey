@@ -2137,12 +2137,21 @@ export default function HelmetBuilder() {
       modelRef.current = model;
       decalSurfaceObjectsRef.current = [];
 
-      // Smooth normals + enable shadows
+      // Preserve the authored GLB normals exactly as exported from Blender.
+      // Khronos glTF Viewer already proves the model's shading is smooth, so blindly
+      // recomputing vertex normals here can destroy Blender's split/custom normals and
+      // introduce the faceting that only appears in our builder.
       model.traverse(child => {
         if (child.isMesh) {
-          child.geometry.computeVertexNormals();
+          if (!child.geometry.attributes.normal) {
+            child.geometry.computeVertexNormals();
+          } else {
+            child.geometry.normalizeNormals();
+          }
+
           child.castShadow = true;
           child.receiveShadow = true;
+
           // aoMap (used below to mask the car paint flake glints) requires a second UV
           // channel — most GLBs only ship one, so alias it if uv2 is missing.
           if (!child.geometry.attributes.uv2 && child.geometry.attributes.uv) {
@@ -2160,7 +2169,8 @@ export default function HelmetBuilder() {
       model.scale.setScalar(scale);
       model.position.sub(center.multiplyScalar(scale));
 
-      // Replace materials with MeshPhysicalMaterial for full PBR control
+      // Replace materials with MeshPhysicalMaterial for full PBR control.
+      // Geometry normals are intentionally left authored/imported from the GLB.
       const finishDef = FINISHES.find(f => f.id === 'gloss');
       model.traverse(child => {
         if (!child.isMesh) return;
