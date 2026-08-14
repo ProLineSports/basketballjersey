@@ -1518,6 +1518,7 @@ export default function HelmetBuilder() {
   const [exportResolution, setExportResolution] = useState(2048);
   const [exportSupersample, setExportSupersample] = useState(2);
   const [viewportBgColor, setViewportBgColor] = useState('#1f1c1e');
+  const [rimLightColor, setRimLightColor]     = useState('#ffffff');
   const [transparentBg, setTransparentBg]     = useState(false);
   const [visorOn, setVisorOn]               = useState(true);
   const [glitter, setGlitter]               = useState(0.3);
@@ -2099,9 +2100,10 @@ export default function HelmetBuilder() {
     const fill = new THREE.DirectionalLight(0xffffff, 0.8);
     fill.position.set(-3, 2, -2);
     scene.add(fill);
-    const rim = new THREE.DirectionalLight(0xefff00, 0.3);
+    const rim = new THREE.DirectionalLight(0xffffff, 0.3);
     rim.position.set(0, -2, -3);
     scene.add(rim);
+    scene.userData.rimLight = rim;
     // Shadow-catching floor
     const floorGeo = new THREE.PlaneGeometry(10, 10);
     const floorMat = new THREE.ShadowMaterial({ opacity: shadowOpacity });
@@ -2413,6 +2415,11 @@ export default function HelmetBuilder() {
       renderer.setClearColor(new THREE.Color(viewportBgColor), 1);
     }
   }, [transparentBg, viewportBgColor, loaded]);
+
+  useEffect(() => {
+    const rim = sceneRef.current?.userData?.rimLight;
+    if (rim) rim.color.set(rimLightColor);
+  }, [rimLightColor, loaded]);
 
   // ── UPDATE COLORS ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -4512,7 +4519,7 @@ export default function HelmetBuilder() {
               { icon:'◈', text:'Click any swatch or type a hex code to change colors' },
               { icon:'◎', text:'Car Paint + Chrome are the only finishes with reflections — Gloss/Matte/Satin use true flat color' },
               { icon:'✦', text:'Car Paint uses discrete glitter; Satin can add dense metallic micro-texture for fine-grain finishes' },
-              { icon:'◉', text:'Drag to rotate the helmet and check the finish from multiple angles' },
+              { icon:'◉', text:'Drag to rotate the helmet and check the finish from multiple angles. Use Scene Light to tint the accent rim light if desired.' },
               { icon:'★', text:'Use the Export Quality controls for higher-resolution, supersampled PNGs. Free exports include a ProLine watermark.' },
             ].map((tip,i) => (
               <div key={i} style={{ display:'flex', gap:9, marginBottom:10, alignItems:'flex-start' }}>
@@ -4535,6 +4542,13 @@ export default function HelmetBuilder() {
               <div style={{ opacity: transparentBg ? 0.45 : 1, pointerEvents: transparentBg ? 'none' : 'auto' }}>
                 <ColorSwatch color={viewportBgColor} onChange={setViewportBgColor} label="Color" />
               </div>
+            </div>
+            <div style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:9, padding:'10px 12px', marginBottom:10 }}>
+              <SectionLabel>Scene Light</SectionLabel>
+              <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.4, marginBottom:8 }}>
+                Adjust the accent rim light color for the scene. Default is neutral white to avoid tinting the helmet.
+              </div>
+              <ColorSwatch color={rimLightColor} onChange={setRimLightColor} label="Accent Light" />
             </div>
             <div style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:9, padding:'10px 12px', marginBottom:10 }}>
               <SectionLabel>Export Quality</SectionLabel>
