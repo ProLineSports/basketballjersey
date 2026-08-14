@@ -2056,9 +2056,9 @@ export default function HelmetBuilder() {
       // drag naturally into a custom angle afterwards.
       top:   { position: [0.0, 3.2, 0.42], up: [0, 1, 0] },
 
-      // Refined hero angle: a touch lower, slightly more frontal, and a little closer
-      // so it feels more like a polished 3/4 product shot.
-      hero:  { position: [-1.72, 0.96, 2.42], up: [0, 1, 0] },
+      // Side-forward hero angle: keep the premium 3/4 presentation but reveal more
+      // of the helmet's side profile, closer to a traditional equipment beauty shot.
+      hero:  { position: [-2.18, 0.92, 1.88], up: [0, 1, 0] },
     };
 
     const preset = presets[presetId] || presets.sideA;
@@ -4788,9 +4788,9 @@ export default function HelmetBuilder() {
               <button
                 onClick={() => setShowTipsModal(true)}
                 title="Builder Tips"
-                style={{ width:28, height:28, flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.10)', borderRadius:6, cursor:'pointer', color:'#efff00', fontSize:18, lineHeight:1 }}
+                style={{ height:28, flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.10)', borderRadius:6, padding:'0 9px', cursor:'pointer', color:'#efff00', fontSize:9, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.08em', lineHeight:1 }}
               >
-                +
+                TIPS
               </button>
             </div>
           </div>
