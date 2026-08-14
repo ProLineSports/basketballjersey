@@ -4,6 +4,7 @@ import { useUser, useClerk, UserButton } from '@clerk/nextjs';
 import { useRouter } from 'next/navigation';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { EXRLoader } from 'three/addons/loaders/EXRLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { DecalGeometry } from 'three/addons/geometries/DecalGeometry.js';
 
@@ -1062,6 +1063,14 @@ const STRIPE_PRESET_OPTIONS = [
   { id: 'fivePiped', label: '5 Stripe — Center + Piping' },
 ];
 
+const HDRI_PRESETS = [
+  { id: 'neutral', label: 'Neutral Studio', url: null },
+  { id: 'studio01', label: 'Studio 01', url: '/hdri/studio_small_01_4k.exr' },
+  { id: 'studio08', label: 'Studio 08', url: '/hdri/studio_small_08_4k.exr' },
+  { id: 'probeSoft', label: 'Light Probe — Soft', url: '/hdri/DTLP6-LightProbe03-Soft.exr' },
+  { id: 'probeDirect', label: 'Light Probe — Direct', url: '/hdri/DTLP6-LightProbe03-Direct.exr' },
+];
+
 function applyDecalFinishToMaterials(materials, scene, finishId) {
   const def = DECAL_FINISHES.find(f => f.id === finishId) || DECAL_FINISHES[0];
   materials.forEach(mat => {
@@ -1078,7 +1087,9 @@ function applyDecalFinishToMaterials(materials, scene, finishId) {
     mat.envMap = finishId === 'chrome'
       ? (scene?.userData?.chromeEnvTexture || scene?.userData?.envTexture || null)
       : null;
-    mat.envMapIntensity = finishId === 'chrome' ? 1.6 : 0;
+    // Non-chrome decals use scene.environment for realistic IBL; Chrome keeps its
+    // dedicated reflection map and stronger response.
+    mat.envMapIntensity = finishId === 'chrome' ? 1.6 : 1.0;
     mat.needsUpdate = true;
   });
 }
@@ -1103,7 +1114,7 @@ function applyEnvMapToMaterials(materialNames, materialsMap, scene, useChrome, u
     : useCarPaint
       ? (scene.userData.envTexture || null)
       : null;
-  const intensity = useChrome ? 1.6 : useCarPaint ? 0.85 : 0;
+  const intensity = useChrome ? 1.6 : useCarPaint ? 0.85 : 1.0;
   materialNames.forEach(name => {
     const mats = materialsMap[name]; // array — a name can be shared by multiple meshes on purpose
     if (!mats) return;
@@ -1519,6 +1530,13 @@ export default function HelmetBuilder() {
   const [exportSupersample, setExportSupersample] = useState(2);
   const [viewportBgColor, setViewportBgColor] = useState('#1f1c1e');
   const [rimLightColor, setRimLightColor]     = useState('#ffffff');
+  const [hdriPreset, setHdriPreset]           = useState('studio01');
+  const [hdriIntensity, setHdriIntensity]     = useState(0.75);
+  const [sceneExposure, setSceneExposure]     = useState(1.4);
+  const [hdriLoading, setHdriLoading]         = useState(false);
+  const [hdriError, setHdriError]             = useState('');
+  const hdriCacheRef                          = useRef(new Map());
+  const hdriLoadTokenRef                      = useRef(0);
   const [transparentBg, setTransparentBg]     = useState(false);
   const [visorOn, setVisorOn]               = useState(true);
   const [glitter, setGlitter]               = useState(0.3);
@@ -1996,7 +2014,7 @@ export default function HelmetBuilder() {
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.4;
+    renderer.toneMappingExposure = sceneExposure;
     renderer.physicallyCorrectLights = true;
     renderer.setClearColor(0x000000, 0);
 
@@ -2018,6 +2036,10 @@ export default function HelmetBuilder() {
     const envRT = pmremGenerator.fromEquirectangular(envTex);
     // Store env texture for selective use on metallic materials only
     scene.userData.envTexture = envRT.texture;
+    scene.userData.neutralEnvTexture = envRT.texture;
+    scene.userData.neutralEnvRenderTarget = envRT;
+    scene.environment = envRT.texture;
+    scene.environmentIntensity = hdriIntensity;
     envTex.dispose();
     pmremGenerator.dispose();
 
@@ -2438,6 +2460,112 @@ export default function HelmetBuilder() {
     const rim = sceneRef.current?.userData?.rimLight;
     if (rim) rim.color.set(rimLightColor);
   }, [rimLightColor, loaded]);
+
+
+  // ── HDRI ENVIRONMENT / IBL ─────────────────────────────────────────────────
+  // EXRs load only when selected, then their PMREM render targets are cached so
+  // switching back to a previously used studio is instant. The visible scene
+  // background remains completely independent of the HDRI.
+  useEffect(() => {
+    const scene = sceneRef.current;
+    const renderer = rendererRef.current;
+    if (!scene || !renderer || !loaded) return;
+
+    const preset = HDRI_PRESETS.find(p => p.id === hdriPreset) || HDRI_PRESETS[0];
+    const token = ++hdriLoadTokenRef.current;
+
+    const applyEnvironment = (texture) => {
+      if (token !== hdriLoadTokenRef.current) return;
+      scene.userData.envTexture = texture || scene.userData.neutralEnvTexture || null;
+      scene.environment = scene.userData.envTexture;
+      scene.environmentIntensity = hdriIntensity;
+
+      // Re-route any finishes that explicitly use the environment texture.
+      applyShellEnvMap(materialsRef.current, scene, finishRef.current);
+      applyFacemaskEnvMap(materialsRef.current, scene, facemaskFinishRef.current);
+
+      applyDecalFinishToMaterials([
+        ...decalOverlayMaterialsRef.current,
+        ...stripeCarrierOverlayMaterialsRef.current,
+        ...sideLogoMaterialsRef.current.filter(mat => mat.userData?.sideLogoMainMaterial),
+      ], scene, decalFinishRef.current);
+
+      applyDecalFinishToMaterials([
+        ...bumperLogoMaterialsRef.current.filter(mat => mat.userData?.bumperLogoMainMaterial),
+      ], scene, bumperLogoFinishRef.current);
+
+      setHdriLoading(false);
+      setHdriError('');
+    };
+
+    if (!preset.url) {
+      applyEnvironment(scene.userData.neutralEnvTexture || null);
+      return;
+    }
+
+    const cached = hdriCacheRef.current.get(preset.id);
+    if (cached?.texture) {
+      applyEnvironment(cached.texture);
+      return;
+    }
+
+    setHdriLoading(true);
+    setHdriError('');
+
+    const loader = new EXRLoader();
+    loader.load(
+      preset.url,
+      (texture) => {
+        if (token !== hdriLoadTokenRef.current) {
+          texture.dispose?.();
+          return;
+        }
+
+        texture.mapping = THREE.EquirectangularReflectionMapping;
+
+        const pmrem = new THREE.PMREMGenerator(renderer);
+        pmrem.compileEquirectangularShader();
+        const rt = pmrem.fromEquirectangular(texture);
+        pmrem.dispose();
+        texture.dispose();
+
+        hdriCacheRef.current.set(preset.id, {
+          renderTarget: rt,
+          texture: rt.texture,
+        });
+
+        applyEnvironment(rt.texture);
+      },
+      undefined,
+      (error) => {
+        console.warn(`Could not load HDRI: ${preset.url}`, error);
+        if (token !== hdriLoadTokenRef.current) return;
+        setHdriLoading(false);
+        setHdriError('HDRI file not found — using Neutral Studio.');
+        applyEnvironment(scene.userData.neutralEnvTexture || null);
+      }
+    );
+  }, [loaded, hdriPreset]);
+
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    scene.environmentIntensity = hdriIntensity;
+
+    // Materials with their own envMap use their own material intensity, so refresh
+    // those mappings too when the global environment strength changes.
+    applyShellEnvMap(materialsRef.current, scene, finishRef.current);
+    applyFacemaskEnvMap(materialsRef.current, scene, facemaskFinishRef.current);
+  }, [hdriIntensity, loaded]);
+
+  useEffect(() => {
+    if (rendererRef.current) rendererRef.current.toneMappingExposure = sceneExposure;
+  }, [sceneExposure, loaded]);
+
+  useEffect(() => () => {
+    hdriCacheRef.current.forEach(entry => entry?.renderTarget?.dispose?.());
+    hdriCacheRef.current.clear();
+  }, []);
 
   // ── UPDATE COLORS ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -4541,7 +4669,7 @@ export default function HelmetBuilder() {
               { icon:'◈', text:'Click any swatch or type a hex code to change colors' },
               { icon:'◎', text:'Car Paint + Chrome are the only finishes with reflections — Gloss/Matte/Satin use true flat color' },
               { icon:'✦', text:'Car Paint uses discrete glitter; Satin can add dense metallic micro-texture for fine-grain finishes' },
-              { icon:'◉', text:'Drag to rotate the helmet and check the finish from multiple angles. Use Scene Light to tint the accent rim light if desired.' },
+              { icon:'◉', text:'Drag to rotate the helmet and check the finish from multiple angles. Use Studio Lighting to choose an HDRI, tune environment intensity/exposure, or tint the accent rim light.' },
               { icon:'★', text:'Use the Export Quality controls for higher-resolution, supersampled PNGs. Free exports include a ProLine watermark.' },
             ].map((tip,i) => (
               <div key={i} style={{ display:'flex', gap:9, marginBottom:10, alignItems:'flex-start' }}>
@@ -4566,10 +4694,57 @@ export default function HelmetBuilder() {
               </div>
             </div>
             <div style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:9, padding:'10px 12px', marginBottom:10 }}>
-              <SectionLabel>Scene Light</SectionLabel>
+              <SectionLabel>Studio Lighting</SectionLabel>
+
               <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.4, marginBottom:8 }}>
-                Adjust the accent rim light color for the scene. Default is neutral white to avoid tinting the helmet.
+                HDRIs light and reflect in the helmet without replacing your selected background color.
               </div>
+
+              <div style={{ marginBottom:10 }}>
+                <div style={{ fontSize:9, color:'#9ca3af', marginBottom:5 }}>Environment</div>
+                <select
+                  value={hdriPreset}
+                  onChange={e => setHdriPreset(e.target.value)}
+                  style={{ width:'100%', background:'rgba(0,0,0,0.22)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:6, padding:'8px 10px', color:'#e5e7eb', fontSize:10, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.04em' }}
+                >
+                  {HDRI_PRESETS.map(preset => (
+                    <option key={preset.id} value={preset.id}>{preset.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              {hdriLoading && (
+                <div style={{ fontSize:9, color:'#efff00', marginBottom:8 }}>Loading HDRI…</div>
+              )}
+              {hdriError && (
+                <div style={{ fontSize:9, color:'#ef4444', lineHeight:1.35, marginBottom:8 }}>{hdriError}</div>
+              )}
+
+              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:9 }}>
+                <span style={{ width:58, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Intensity</span>
+                <input
+                  type="range"
+                  min="0"
+                  max="200"
+                  value={Math.round(hdriIntensity * 100)}
+                  onChange={e => setHdriIntensity(parseInt(e.target.value) / 100)}
+                  style={{ flex:1, minWidth:0 }}
+                />
+              </div>
+
+              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12 }}>
+                <span style={{ width:58, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Exposure</span>
+                <input
+                  type="range"
+                  min="70"
+                  max="210"
+                  value={Math.round(sceneExposure * 100)}
+                  onChange={e => setSceneExposure(parseInt(e.target.value) / 100)}
+                  style={{ flex:1, minWidth:0 }}
+                />
+              </div>
+
+              <div style={{ height:1, background:'rgba(255,255,255,0.06)', marginBottom:10 }} />
               <ColorSwatch color={rimLightColor} onChange={setRimLightColor} label="Accent Light" />
             </div>
             <div style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:9, padding:'10px 12px', marginBottom:10 }}>
