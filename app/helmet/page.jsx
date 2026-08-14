@@ -3641,38 +3641,33 @@ export default function HelmetBuilder() {
       const previousBackground = scene.background;
       const previousClearColor = liveRenderer.getClearColor(new THREE.Color()).clone();
       const previousClearAlpha = liveRenderer.getClearAlpha();
+      const previousPixelRatio = liveRenderer.getPixelRatio();
+      const previousRendererSize = liveRenderer.getSize(new THREE.Vector2());
+      const previousCameraAspect = camera.aspect;
 
       if (transparentBg) {
         scene.background = null;
+        liveRenderer.setClearColor(0x000000, 0);
       } else {
         scene.background = new THREE.Color(viewportBgColor);
+        liveRenderer.setClearColor(new THREE.Color(viewportBgColor), 1);
       }
 
-      const exportRenderer = new THREE.WebGLRenderer({
-        antialias: true,
-        preserveDrawingBuffer: true,
-        alpha: true,
-        powerPreference: 'high-performance',
-      });
-      exportRenderer.setPixelRatio(1);
-      exportRenderer.setSize(renderWidth, renderHeight, false);
-      exportRenderer.shadowMap.enabled = true;
-      exportRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
-      exportRenderer.outputColorSpace = liveRenderer.outputColorSpace;
-      exportRenderer.toneMapping = liveRenderer.toneMapping;
-      exportRenderer.toneMappingExposure = liveRenderer.toneMappingExposure;
-      exportRenderer.physicallyCorrectLights = liveRenderer.physicallyCorrectLights;
-      exportRenderer.setClearColor(
-        transparentBg ? 0x000000 : new THREE.Color(viewportBgColor),
-        transparentBg ? 0 : 1
-      );
+      // IMPORTANT: render the export through the same WebGLRenderer used by the live
+      // viewport. PMREM environment maps and other render-target textures are created
+      // inside this renderer's WebGL context. A second renderer/context can lose those
+      // resources, which is why earlier high-res exports looked noticeably dimmer.
+      //
+      // `updateStyle=false` keeps the canvas's CSS dimensions unchanged, so the page
+      // does not visually jump while its drawing buffer temporarily becomes 2x/3x/4K.
+      liveRenderer.setPixelRatio(1);
+      liveRenderer.setSize(renderWidth, renderHeight, false);
 
-      const exportCamera = camera.clone();
-      exportCamera.aspect = renderWidth / Math.max(renderHeight, 1);
-      exportCamera.updateProjectionMatrix();
-      exportCamera.updateMatrixWorld(true);
+      camera.aspect = renderWidth / Math.max(renderHeight, 1);
+      camera.updateProjectionMatrix();
+      camera.updateMatrixWorld(true);
 
-      // Sharpen export shadows a bit without permanently changing the live scene.
+      // Sharpen export shadows without permanently changing the live scene.
       const keyLight = scene.userData.keyLight;
       let prevShadowW = null;
       let prevShadowH = null;
@@ -3689,9 +3684,9 @@ export default function HelmetBuilder() {
         keyLight.shadow.needsUpdate = true;
       }
 
-      exportRenderer.render(scene, exportCamera);
+      liveRenderer.render(scene, camera);
 
-      // Downsample from the supersampled render to the final delivery size.
+      // Downsample from the supersampled live-renderer buffer to the final delivery size.
       const finalCanvas = document.createElement('canvas');
       finalCanvas.width = finalWidth;
       finalCanvas.height = finalHeight;
@@ -3699,13 +3694,14 @@ export default function HelmetBuilder() {
       finalCtx.imageSmoothingEnabled = true;
       finalCtx.imageSmoothingQuality = 'high';
       finalCtx.clearRect(0, 0, finalWidth, finalHeight);
-      finalCtx.drawImage(exportRenderer.domElement, 0, 0, finalWidth, finalHeight);
+      finalCtx.drawImage(liveRenderer.domElement, 0, 0, finalWidth, finalHeight);
 
       let rawDataURL = finalCanvas.toDataURL('image/png');
 
-      // Restore live-scene settings.
+      // Restore the exact live renderer / camera state immediately after capture.
       scene.background = previousBackground;
       liveRenderer.setClearColor(previousClearColor, previousClearAlpha);
+
       if (keyLight?.shadow?.mapSize && prevShadowW && prevShadowH) {
         keyLight.shadow.mapSize.width = prevShadowW;
         keyLight.shadow.mapSize.height = prevShadowH;
@@ -3716,8 +3712,12 @@ export default function HelmetBuilder() {
         keyLight.shadow.needsUpdate = true;
       }
 
-      exportRenderer.dispose();
-      exportRenderer.forceContextLoss?.();
+      liveRenderer.setPixelRatio(previousPixelRatio);
+      liveRenderer.setSize(previousRendererSize.x, previousRendererSize.y, false);
+      camera.aspect = previousCameraAspect;
+      camera.updateProjectionMatrix();
+      camera.updateMatrixWorld(true);
+      liveRenderer.render(scene, camera);
 
       // Tile the watermark onto the captured frame for free (unpaid) exports
       let finalDataURL = rawDataURL;
