@@ -1210,6 +1210,43 @@ function applyPremiumPartMaterialCalibration(partsMap) {
   });
 }
 
+function applyStripeBumperStencilMask(partsMap, stripeMaterials) {
+  // The optimized GLB can change the exact proximity between the baked Decal Surface
+  // and the real bumper mesh by tiny amounts. Relying only on physical depth therefore
+  // risks the raised stripe carrier poking through the bumper again.
+  //
+  // Use the actual visible Bumpers as a stencil mask instead: wherever a bumper fragment
+  // is visible, the stripe shader is forbidden from drawing. This keeps the masking tied
+  // to the production bumper geometry and remains correct from every camera angle.
+  const bumperMaterials = partsMap[partKey('Bumpers')] || [];
+
+  bumperMaterials.forEach(mat => {
+    mat.stencilWrite = true;
+    mat.stencilWriteMask = 0xff;
+    mat.stencilFunc = THREE.AlwaysStencilFunc;
+    mat.stencilRef = 1;
+    mat.stencilFuncMask = 0xff;
+    mat.stencilFail = THREE.KeepStencilOp;
+    mat.stencilZFail = THREE.KeepStencilOp;
+    mat.stencilZPass = THREE.ReplaceStencilOp;
+    mat.needsUpdate = true;
+  });
+
+  stripeMaterials.forEach(mat => {
+    if (!mat) return;
+    // Enable stencil testing, but never modify the stencil buffer from the stripe pass.
+    mat.stencilWrite = true;
+    mat.stencilWriteMask = 0x00;
+    mat.stencilFunc = THREE.NotEqualStencilFunc;
+    mat.stencilRef = 1;
+    mat.stencilFuncMask = 0xff;
+    mat.stencilFail = THREE.KeepStencilOp;
+    mat.stencilZFail = THREE.KeepStencilOp;
+    mat.stencilZPass = THREE.KeepStencilOp;
+    mat.needsUpdate = true;
+  });
+}
+
 // ── CAR PAINT GLITTER FLAKE TEXTURES ────────────────────────────────────────
 // Packs the standard glTF "ORM" layout — R = Ambient Occlusion, G = Roughness, B =
 // Metalness — into one tileable canvas, used as aoMap + roughnessMap + metalnessMap
@@ -2157,7 +2194,7 @@ export default function HelmetBuilder() {
     cameraRef.current = camera;
 
     // Renderer
-    const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, alpha: true });
+    const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, alpha: true, stencil: true });
     renderer.setPixelRatio(window.devicePixelRatio);
     renderer.setSize(el.clientWidth, el.clientHeight);
     renderer.shadowMap.enabled = true;
@@ -2558,6 +2595,14 @@ export default function HelmetBuilder() {
         ...decalOverlayMaterialsRef.current,
         ...stripeCarrierOverlayMaterialsRef.current,
       ], scene, decalFinishRef.current);
+
+      // Hard-mask stripe artwork with the real front/rear bumper geometry. This is more
+      // robust than relying on the Decal Surface cutout alone and survives mesh
+      // optimization/subdivision changes in future GLBs.
+      applyStripeBumperStencilMask(
+        partsRef.current,
+        stripeCarrierOverlayMaterialsRef.current
+      );
 
       scene.add(model);
       // Now that all shell/facemask materials exist, route env maps per current finish
@@ -3732,6 +3777,11 @@ export default function HelmetBuilder() {
       ...stripeCarrierOverlayMaterialsRef.current,
       ...sideLogoMaterialsRef.current.filter(mat => mat.userData?.sideLogoMainMaterial),
     ], sceneRef.current, decalFinish);
+
+    applyStripeBumperStencilMask(
+      partsRef.current,
+      stripeCarrierOverlayMaterialsRef.current
+    );
   }, [loaded, decalFinish]);
 
   // ── BUMPER LOGO FINISH ─────────────────────────────────────────────────────
