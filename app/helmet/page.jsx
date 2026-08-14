@@ -3256,9 +3256,10 @@ export default function HelmetBuilder() {
       // Intentionally no max-width clamp. The physical bumper geometry is the mask,
       // so scaling can continue smoothly until the user visually fills/crops the bumper.
 
-      // Front bumper looked best with the carrier-surface projection used before the
-      // DecalGeometry rewrite. Keep that method, but add a mild aspect compensation and
-      // a shallower projection so the art reads less squished and doesn't over-wrap.
+      // Front bumper uses the carrier-surface projection because it tracks that part's
+      // geometry cleanly, but the cylindrical wrap visually compresses artwork width in
+      // the common frontal/hero views. Counter that with a view-calibrated horizontal
+      // expansion while preserving the uploaded artwork's native aspect relationship.
       if (isFront) {
         const center = hit.point.clone();
         const frontNormal = new THREE.Vector3(0, 0, 1).transformDirection(model.matrixWorld).normalize();
@@ -3273,19 +3274,22 @@ export default function HelmetBuilder() {
           up.applyAxisAngle(frontNormal, rot);
         }
 
-        const widthCompensated = baseWidth * 1.16;
-        const heightCompensated = baseHeight * 0.94;
-        const projectionDepth = Math.max(boundsModel.depth * 0.085, heightCompensated * 0.48);
+        // Keep the logo's vertical size true and only compensate horizontally for the
+        // visual narrowing introduced by the bumper's curvature.
+        const frontAspectCompensation = 1.30;
+        const projectedWidth = baseWidth * frontAspectCompensation;
+        const projectedHeight = baseHeight;
+        const projectionDepth = Math.max(boundsModel.depth * 0.072, projectedHeight * 0.40);
         const lift = Math.max(boundsModel.width * 0.00045, 0.00018);
 
         const shadowUniforms = {
           center:{ value:center }, right:{ value:right }, up:{ value:up }, normal:{ value:frontNormal },
-          width:{ value:widthCompensated * 1.018 }, height:{ value:heightCompensated * 1.018 },
+          width:{ value:projectedWidth * 1.018 }, height:{ value:projectedHeight * 1.018 },
           depth:{ value:projectionDepth }, lift:{ value:lift * 0.20 },
         };
         const mainUniforms = {
           center:{ value:center }, right:{ value:right }, up:{ value:up }, normal:{ value:frontNormal },
-          width:{ value:widthCompensated }, height:{ value:heightCompensated },
+          width:{ value:projectedWidth }, height:{ value:projectedHeight },
           depth:{ value:projectionDepth }, lift:{ value:lift * 0.55 },
         };
 
