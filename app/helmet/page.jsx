@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { EXRLoader } from 'three/addons/loaders/EXRLoader.js';
+import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { DecalGeometry } from 'three/addons/geometries/DecalGeometry.js';
 
@@ -1533,6 +1534,7 @@ export default function HelmetBuilder() {
   const [hdriPreset, setHdriPreset]           = useState('studio01');
   const [hdriIntensity, setHdriIntensity]     = useState(0.75);
   const [sceneExposure, setSceneExposure]     = useState(1.4);
+  const [studioLightStrength, setStudioLightStrength] = useState(1.0);
   const [hdriLoading, setHdriLoading]         = useState(false);
   const [hdriError, setHdriError]             = useState('');
   const hdriCacheRef                          = useRef(new Map());
@@ -2018,6 +2020,9 @@ export default function HelmetBuilder() {
     renderer.physicallyCorrectLights = true;
     renderer.setClearColor(0x000000, 0);
 
+    // Required by WebGLRenderer before RectAreaLight can be used.
+    RectAreaLightUniformsLib.init();
+
     // Build environment map manually using PMREMGenerator + a simple scene
     const pmremGenerator = new THREE.PMREMGenerator(renderer);
     pmremGenerator.compileEquirectangularShader();
@@ -2110,27 +2115,54 @@ export default function HelmetBuilder() {
     controls.maxDistance = 8.0;
     controlsRef.current = controls;
 
-    // Lighting
-    const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+    // ── PREMIUM STUDIO LIGHTING RIG ───────────────────────────────────────────
+    // HDRI supplies the overall image-based lighting/reflections. These large area
+    // lights act like real photography softboxes, creating broad controlled highlights
+    // across the shell instead of small point-like hotspots.
+    const lightTarget = new THREE.Vector3(0, 0.08, 0);
+
+    // Keep ambient low — the HDRI is now responsible for most global fill.
+    const ambient = new THREE.AmbientLight(0xffffff, 0.14);
     scene.add(ambient);
-    const key = new THREE.DirectionalLight(0xffffff, 2.0);
-    key.position.set(3, 5, 3);
-    key.castShadow = true;
-    key.shadow.mapSize.width = 2048;
-    key.shadow.mapSize.height = 2048;
-    key.shadow.camera.near = 0.1;
-    key.shadow.camera.far = 20;
-    key.shadow.camera.left = -3;
-    key.shadow.camera.right = 3;
-    key.shadow.camera.top = 3;
-    key.shadow.camera.bottom = -3;
-    key.shadow.radius = 0.5 + shadowSoftness * 11.5;
-    scene.add(key);
-    scene.userData.keyLight = key;
-    const fill = new THREE.DirectionalLight(0xffffff, 0.8);
-    fill.position.set(-3, 2, -2);
-    scene.add(fill);
-    const rim = new THREE.DirectionalLight(0xffffff, 0.3);
+    scene.userData.ambientLight = ambient;
+
+    // Large front/key softbox.
+    const keySoftbox = new THREE.RectAreaLight(0xffffff, 5.5, 4.2, 2.4);
+    keySoftbox.position.set(3.15, 2.75, 3.35);
+    keySoftbox.lookAt(lightTarget);
+    scene.add(keySoftbox);
+    scene.userData.keySoftbox = keySoftbox;
+
+    // Opposite-side fill softbox, larger/softer and intentionally dimmer.
+    const fillSoftbox = new THREE.RectAreaLight(0xffffff, 2.7, 3.2, 3.8);
+    fillSoftbox.position.set(-3.05, 1.55, 1.65);
+    fillSoftbox.lookAt(lightTarget);
+    scene.add(fillSoftbox);
+    scene.userData.fillSoftbox = fillSoftbox;
+
+    // RectAreaLight does not cast shadows, so use a low-intensity neutral directional
+    // light only to generate the contact/floor shadow. Existing shadow controls and
+    // high-resolution export shadow maps continue to target this light via keyLight.
+    const shadowLight = new THREE.DirectionalLight(0xffffff, 0.55);
+    shadowLight.position.set(3.2, 5.0, 3.0);
+    shadowLight.target.position.copy(lightTarget);
+    scene.add(shadowLight.target);
+    shadowLight.castShadow = true;
+    shadowLight.shadow.mapSize.width = 2048;
+    shadowLight.shadow.mapSize.height = 2048;
+    shadowLight.shadow.camera.near = 0.1;
+    shadowLight.shadow.camera.far = 20;
+    shadowLight.shadow.camera.left = -3;
+    shadowLight.shadow.camera.right = 3;
+    shadowLight.shadow.camera.top = 3;
+    shadowLight.shadow.camera.bottom = -3;
+    shadowLight.shadow.radius = 0.5 + shadowSoftness * 11.5;
+    scene.add(shadowLight);
+    scene.userData.keyLight = shadowLight;
+    scene.userData.shadowLight = shadowLight;
+
+    // User-adjustable accent/rim light remains separate from the neutral studio rig.
+    const rim = new THREE.DirectionalLight(0xffffff, 0.24);
     rim.position.set(0, -2, -3);
     scene.add(rim);
     scene.userData.rimLight = rim;
@@ -2561,6 +2593,23 @@ export default function HelmetBuilder() {
   useEffect(() => {
     if (rendererRef.current) rendererRef.current.toneMappingExposure = sceneExposure;
   }, [sceneExposure, loaded]);
+
+
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+
+    const strength = THREE.MathUtils.clamp(studioLightStrength, 0, 2);
+    if (scene.userData.keySoftbox)  scene.userData.keySoftbox.intensity = 5.5 * strength;
+    if (scene.userData.fillSoftbox) scene.userData.fillSoftbox.intensity = 2.7 * strength;
+    if (scene.userData.shadowLight) scene.userData.shadowLight.intensity = 0.55 * strength;
+
+    // Preserve a small neutral baseline even with studio lights turned down, while
+    // allowing the HDRI to remain the dominant fill source.
+    if (scene.userData.ambientLight) {
+      scene.userData.ambientLight.intensity = 0.08 + 0.06 * strength;
+    }
+  }, [studioLightStrength, loaded]);
 
   useEffect(() => () => {
     hdriCacheRef.current.forEach(entry => entry?.renderTarget?.dispose?.());
@@ -4669,7 +4718,7 @@ export default function HelmetBuilder() {
               { icon:'◈', text:'Click any swatch or type a hex code to change colors' },
               { icon:'◎', text:'Car Paint + Chrome are the only finishes with reflections — Gloss/Matte/Satin use true flat color' },
               { icon:'✦', text:'Car Paint uses discrete glitter; Satin can add dense metallic micro-texture for fine-grain finishes' },
-              { icon:'◉', text:'Drag to rotate the helmet and check the finish from multiple angles. Use Studio Lighting to choose an HDRI, tune environment intensity/exposure, or tint the accent rim light.' },
+              { icon:'◉', text:'Drag to rotate the helmet and check the finish from multiple angles. Use Studio Lighting to choose an HDRI, tune environment/exposure, adjust the virtual softboxes, or tint the accent rim light.' },
               { icon:'★', text:'Use the Export Quality controls for higher-resolution, supersampled PNGs. Free exports include a ProLine watermark.' },
             ].map((tip,i) => (
               <div key={i} style={{ display:'flex', gap:9, marginBottom:10, alignItems:'flex-start' }}>
@@ -4697,7 +4746,7 @@ export default function HelmetBuilder() {
               <SectionLabel>Studio Lighting</SectionLabel>
 
               <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.4, marginBottom:8 }}>
-                HDRIs light and reflect in the helmet without replacing your selected background color.
+                HDRIs provide the overall reflections and fill; large virtual softboxes add controlled product-photography highlights without replacing your selected background.
               </div>
 
               <div style={{ marginBottom:10 }}>
@@ -4732,7 +4781,7 @@ export default function HelmetBuilder() {
                 />
               </div>
 
-              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12 }}>
+              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:9 }}>
                 <span style={{ width:58, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Exposure</span>
                 <input
                   type="range"
@@ -4740,6 +4789,18 @@ export default function HelmetBuilder() {
                   max="210"
                   value={Math.round(sceneExposure * 100)}
                   onChange={e => setSceneExposure(parseInt(e.target.value) / 100)}
+                  style={{ flex:1, minWidth:0 }}
+                />
+              </div>
+
+              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12 }}>
+                <span style={{ width:58, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Softboxes</span>
+                <input
+                  type="range"
+                  min="0"
+                  max="200"
+                  value={Math.round(studioLightStrength * 100)}
+                  onChange={e => setStudioLightStrength(parseInt(e.target.value) / 100)}
                   style={{ flex:1, minWidth:0 }}
                 />
               </div>
