@@ -1041,13 +1041,14 @@ const DEFAULT_SIDE_LOGO_PLACEMENT = Object.freeze({ yNorm: 0.64, zNorm: -0.18, s
 const cloneDefaultSideLogoPlacement = () => ({ ...DEFAULT_SIDE_LOGO_PLACEMENT });
 
 const FINISHES = [
-  { id: 'gloss',    label: 'Gloss',     roughness: 0.05, metalness: 0.1,  clearcoat: 1.0, clearcoatRoughness: 0.05, iridescence: 0.0 },
-  { id: 'matte',    label: 'Matte',     roughness: 0.9,  metalness: 0.0,  clearcoat: 0.0, clearcoatRoughness: 0.0,  iridescence: 0.0 },
-  { id: 'satin',    label: 'Satin',     roughness: 0.4,  metalness: 0.05, clearcoat: 0.3, clearcoatRoughness: 0.2,  iridescence: 0.0 },
+  { id: 'gloss',      label: 'Gloss',         roughness: 0.05, metalness: 0.1,  clearcoat: 1.0,  clearcoatRoughness: 0.05, iridescence: 0.0 },
+  { id: 'matte',      label: 'Matte',         roughness: 0.9,  metalness: 0.0,  clearcoat: 0.0,  clearcoatRoughness: 0.0,  iridescence: 0.0 },
+  { id: 'satin',      label: 'Satin',         roughness: 0.4,  metalness: 0.05, clearcoat: 0.3,  clearcoatRoughness: 0.2,  iridescence: 0.0 },
+  { id: 'carbonfiber',label: 'Carbon Fiber',  roughness: 0.34, metalness: 0.18, clearcoat: 0.92, clearcoatRoughness: 0.08, iridescence: 0.0 },
   // iridescence dialed way down from 1.0 — full-strength iridescence produced a rainbow oil-slick
   // look that read as "broken" rather than sparkly metallic paint. 0.35 gives a subtle pearlescent shift.
-  { id: 'carpaint', label: 'Car Paint', roughness: 0.15, metalness: 0.2,  clearcoat: 1.0, clearcoatRoughness: 0.02, iridescence: 0.35, iridescenceIOR: 1.8, iridescenceThicknessRange: [100, 300] },
-  { id: 'chrome',   label: 'Chrome',    roughness: 0.0,  metalness: 1.0,  clearcoat: 0.0, clearcoatRoughness: 0.0,  iridescence: 0.0 },
+  { id: 'carpaint',   label: 'Car Paint',     roughness: 0.15, metalness: 0.2,  clearcoat: 1.0,  clearcoatRoughness: 0.02, iridescence: 0.35, iridescenceIOR: 1.8, iridescenceThicknessRange: [100, 300] },
+  { id: 'chrome',     label: 'Chrome',        roughness: 0.0,  metalness: 1.0,  clearcoat: 0.0,  clearcoatRoughness: 0.0,  iridescence: 0.0 },
 ];
 
 const DECAL_FINISHES = [
@@ -1351,6 +1352,71 @@ function createSatinMicroTexture() {
 }
 
 
+function createCarbonFiberWeaveTexture() {
+  // A subtle 2x2 twill weave encoded as a linear texture that can be sampled through
+  // the shell's triplanar finish projection. The green channel modulates roughness,
+  // the blue channel modulates metalness, letting the weave appear in reflections
+  // while preserving the user's chosen shell color.
+  const size = 512;
+  const cell = 24;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const image = ctx.createImageData(size, size);
+  const data = image.data;
+
+  const fract = (v) => v - Math.floor(v);
+  const smooth = (a, b, x) => {
+    const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+    return t * t * (3 - 2 * t);
+  };
+
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const cx = Math.floor(x / cell);
+      const cy = Math.floor(y / cell);
+      const u = fract(x / cell);
+      const v = fract(y / cell);
+
+      // Alternate the diagonal direction per checker cell to mimic woven twill.
+      const parity = (cx + cy) & 1;
+      const diag = parity === 0 ? (u + v) * 0.5 : (u + (1 - v)) * 0.5;
+      const ridge = 1.0 - smooth(0.18, 0.50, Math.abs(diag - 0.50));
+
+      // Add a subtle fiber-strand modulation along the ribbon direction so it doesn't
+      // read as a flat checkerboard.
+      const strand = parity === 0 ? fract((u - v + 1) * 5.0) : fract((u + v) * 5.0);
+      const strandPulse = 0.72 + 0.28 * Math.sin(strand * Math.PI * 2.0);
+
+      const weave = Math.min(1, ridge * strandPulse);
+
+      // Base channels:
+      // G = roughness multiplier, B = metalness multiplier
+      const roughVal = Math.round(132 + weave * 78); // 132..210
+      const metalVal = Math.round(118 + weave * 112); // 118..230
+
+      const idx = (y * size + x) * 4;
+      data[idx + 0] = 255;
+      data[idx + 1] = roughVal;
+      data[idx + 2] = metalVal;
+      data[idx + 3] = 255;
+    }
+  }
+
+  ctx.putImageData(image, 0, 0);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(20.0, 20.0);
+  tex.center.set(0.5, 0.5);
+  tex.rotation = Math.PI * 0.25;
+  tex.anisotropy = 8;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+
 function installShellFinishTriplanar(material) {
   if (!material || material.userData?.shellFinishTriplanarInstalled) return;
   material.userData.shellFinishTriplanarInstalled = true;
@@ -1624,6 +1690,7 @@ export default function HelmetBuilder() {
   const [satinMetallic, setSatinMetallic]   = useState(0.62);
   const [satinTexture, setSatinTexture]     = useState(0.45);
   const satinMicroTextureRef                = useRef(null);
+  const carbonWeaveTextureRef               = useRef(null);
   const [facemaskFinish, setFacemaskFinish] = useState('gloss'); // gloss | matte
 
   const [wrapEnabled, setWrapEnabled]       = useState(false);
@@ -3776,7 +3843,11 @@ export default function HelmetBuilder() {
     if (!satinMicroTextureRef.current) {
       satinMicroTextureRef.current = createSatinMicroTexture();
     }
+    if (!carbonWeaveTextureRef.current) {
+      carbonWeaveTextureRef.current = createCarbonFiberWeaveTexture();
+    }
     const satinMicroTex = satinMicroTextureRef.current;
+    const carbonWeaveTex = carbonWeaveTextureRef.current;
 
     SHELL_MATERIAL_NAMES.forEach(name => {
       const mats = materialsRef.current[name];
@@ -3833,6 +3904,34 @@ export default function HelmetBuilder() {
         return;
       }
 
+      if (finish === 'carbonfiber') {
+        mats.forEach(mat => {
+          if (mat.roughnessMap && mat.roughnessMap !== carbonWeaveTex) mat.roughnessMap.dispose?.();
+          if (mat.emissiveMap) mat.emissiveMap.dispose?.();
+
+          mat.emissiveMap = null;
+          mat.emissive.set(0x000000);
+          mat.emissiveIntensity = 1;
+          mat.aoMap = null;
+
+          // Carbon Fiber uses a subtle twill weave in the roughness/metalness response
+          // so the pattern lives in reflections and clearcoat rather than overriding the
+          // chosen shell color with a baked diffuse image.
+          mat.bumpMap = null;
+          mat.bumpScale = 0;
+          mat.roughnessMap = carbonWeaveTex;
+          mat.metalnessMap = carbonWeaveTex;
+          mat.metalness = 0.34;
+          mat.roughness = 0.54;
+          mat.clearcoat = 0.96;
+          mat.clearcoatRoughness = 0.06;
+          mat.envMap = sceneRef.current?.userData?.envTexture || null;
+          mat.envMapIntensity = 0.92;
+          mat.needsUpdate = true;
+        });
+        return;
+      }
+
       // Plain Gloss / Matte / Chrome: clear all procedural surface maps.
       mats.forEach(mat => {
         if (mat.roughnessMap && mat.roughnessMap !== satinMicroTex) mat.roughnessMap.dispose?.();
@@ -3859,6 +3958,8 @@ export default function HelmetBuilder() {
   useEffect(() => () => {
     satinMicroTextureRef.current?.dispose?.();
     satinMicroTextureRef.current = null;
+    carbonWeaveTextureRef.current?.dispose?.();
+    carbonWeaveTextureRef.current = null;
   }, []);
 
   const setColor = useCallback((zoneId, val) => setColors(c => ({ ...c, [zoneId]: val })), []);
@@ -4214,6 +4315,15 @@ export default function HelmetBuilder() {
                     <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:4 }}>
                       <span style={{ fontSize:10, color:'#9ca3af', minWidth:48 }}>Texture</span>
                       <input type="range" min="0" max="100" value={Math.round(satinTexture*100)} onChange={e => setSatinTexture(parseInt(e.target.value)/100)} style={{ flex:1, minWidth:0 }} />
+                    </div>
+                  </div>
+                )}
+                {finish === 'carbonfiber' && (
+                  <div>
+                    <div style={{ height:1, background:'rgba(255,255,255,0.06)', marginBottom:14 }} />
+                    <SectionLabel>Carbon Fiber</SectionLabel>
+                    <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.45 }}>
+                      Applies a subtle twill-weave reflection pattern while preserving your shell color. Best results usually come with darker shell colors and strong studio lighting.
                     </div>
                   </div>
                 )}
@@ -4936,7 +5046,7 @@ export default function HelmetBuilder() {
             {[
               { icon:'◈', text:'Click any swatch or type a hex code to change colors.' },
               { icon:'◎', text:'Shell finishes control the painted shell, Side Screws, and Top Screws as one continuous surface.' },
-              { icon:'✦', text:'Car Paint uses discrete glitter; Satin can add dense metallic micro-texture for fine-grain finishes.' },
+              { icon:'✦', text:'Car Paint uses discrete glitter; Satin adds dense metallic micro-texture; Carbon Fiber adds a subtle twill weave in the shell reflections.' },
               { icon:'◉', text:'Studio Lighting combines HDRI reflections with large virtual softboxes. Use Exposure and Intensity sparingly for the most photographic result.' },
               { icon:'◇', text:'Rubber, metal, padding, molded plastic, straps, visor, and other physical components now use independently calibrated PBR material properties for more realistic contrast.' },
               { icon:'★', text:'For final graphics, use 2048–4096 px with 2× supersampling. Higher settings improve edge quality but take longer to render.' },
