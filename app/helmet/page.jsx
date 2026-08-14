@@ -1952,8 +1952,16 @@ export default function HelmetBuilder() {
       sideB: { position: [3.2, 0.1, 0.0], up: [0, 1, 0] },
       front: { position: [0.0, 0.08, 3.15], up: [0, 1, 0] },
       back:  { position: [0.0, 0.08, -3.15], up: [0, 1, 0] },
-      top:   { position: [0.0, 3.25, 0.001], up: [0, 0, 1] },
-      hero:  { position: [-1.95, 1.18, 2.15], up: [0, 1, 0] },
+
+      // Keep the top view near-overhead rather than perfectly pole-on. OrbitControls
+      // becomes unintuitive at the exact pole because azimuth loses meaning there.
+      // A small forward offset preserves a clear "top" preset while letting the user
+      // drag naturally into a custom angle afterwards.
+      top:   { position: [0.0, 3.2, 0.42], up: [0, 1, 0] },
+
+      // Refined hero angle: a touch lower, slightly more frontal, and a little closer
+      // so it feels more like a polished 3/4 product shot.
+      hero:  { position: [-1.72, 0.96, 2.42], up: [0, 1, 0] },
     };
 
     const preset = presets[presetId] || presets.sideA;
