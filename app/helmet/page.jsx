@@ -431,8 +431,6 @@ if (uHelmetStripesEnabled > 0.5) {
   }
 }
 
-}
-
 // There is no decal at this fragment, so do not render the overlay at all. This is
 // what prevents the Shell's Car Paint/glitter material from leaking into opaque decals:
 // the decal is now a separate physical surface/material in front of the Shell.
@@ -1508,9 +1506,9 @@ export default function HelmetBuilder() {
     centerX:         { value: 0 },
     preset:          { value: 1 },
     leftColor:       { value: new THREE.Color('#efff00') },
-    centerColor:     { value: new THREE.Color('#eaeaea') },
+    centerColor:     { value: new THREE.Color('#fcfcfc') },
     rightColor:      { value: new THREE.Color('#efff00') },
-    pipingColor:     { value: new THREE.Color('#7a2f2f') },
+    pipingColor:     { value: new THREE.Color('#151515') },
     designEnabled:   { value: 0 },
     designMap:       { value: null },
     wrapEnabled:     { value: 0 },
@@ -1578,10 +1576,10 @@ export default function HelmetBuilder() {
   const [helmetStripePreset, setHelmetStripePreset]     = useState('threeEqual');
   const [helmetStripeWidth, setHelmetStripeWidth]       = useState(2);
   const [helmetStripeLength, setHelmetStripeLength]     = useState(1);
-  const [helmetStripeSingleColor, setHelmetStripeSingleColor] = useState('#151515');
+  const [helmetStripeSingleColor, setHelmetStripeSingleColor] = useState('#efff00');
   const [helmetStripeOuterColor, setHelmetStripeOuterColor]   = useState('#efff00');
-  const [helmetStripeCenterColor, setHelmetStripeCenterColor] = useState('#eaeaea');
-  const [helmetStripePipingColor, setHelmetStripePipingColor] = useState('#7a2f2f');
+  const [helmetStripeCenterColor, setHelmetStripeCenterColor] = useState('#fcfcfc');
+  const [helmetStripePipingColor, setHelmetStripePipingColor] = useState('#151515');
   const [helmetStripeDesignEnabled, setHelmetStripeDesignEnabled] = useState(false);
   const [helmetStripeDesignPreviewUrl, setHelmetStripeDesignPreviewUrl] = useState(null);
   const [helmetStripeDesignFileName, setHelmetStripeDesignFileName] = useState('');
@@ -2535,6 +2533,7 @@ export default function HelmetBuilder() {
     }
 
     let cancelled = false;
+    uniforms.baseEnabled.value = 0;
 
     const build = async () => {
       if (!rendererRef.current) return;
@@ -2573,7 +2572,13 @@ export default function HelmetBuilder() {
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
       let texture = stripePresetTextureRef.current;
-      if (!texture) {
+      if (
+        !texture ||
+        texture.image !== canvas ||
+        texture.userData?.sourceWidth !== canvas.width ||
+        texture.userData?.sourceHeight !== canvas.height
+      ) {
+        texture?.dispose?.();
         texture = new THREE.CanvasTexture(canvas);
         texture.colorSpace = THREE.SRGBColorSpace;
         texture.wrapS = THREE.ClampToEdgeWrapping;
@@ -2585,6 +2590,8 @@ export default function HelmetBuilder() {
           16,
           rendererRef.current?.capabilities?.getMaxAnisotropy?.() || 8
         );
+        texture.userData.sourceWidth = canvas.width;
+        texture.userData.sourceHeight = canvas.height;
         stripePresetTextureRef.current = texture;
       }
       texture.needsUpdate = true;
