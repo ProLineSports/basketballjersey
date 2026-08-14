@@ -1960,8 +1960,61 @@ export default function HelmetBuilder() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const params = new URLSearchParams(window.location.search);
-    setDebugMode(params.get('debug') === '1');
+
+    // Read the debug flag from the full browser URL rather than relying on the
+    // first value of window.location.search during hydration. Some production
+    // routing/auth layers can update the URL around the time this client
+    // component mounts.
+    const syncDebugFromLocation = () => {
+      try {
+        const url = new URL(window.location.href);
+        if (url.searchParams.get('debug') === '1') {
+          setDebugMode(true);
+          window.sessionStorage.setItem('helmetBuilderDebug', '1');
+          return true;
+        }
+      } catch {}
+
+      if (window.sessionStorage.getItem('helmetBuilderDebug') === '1') {
+        setDebugMode(true);
+        return true;
+      }
+
+      return false;
+    };
+
+    syncDebugFromLocation();
+
+    // Re-check after hydration/navigation settles. Once enabled, debug mode is
+    // intentionally latched for the current tab via sessionStorage.
+    const retryTimers = [
+      window.setTimeout(syncDebugFromLocation, 0),
+      window.setTimeout(syncDebugFromLocation, 250),
+      window.setTimeout(syncDebugFromLocation, 1000),
+    ];
+
+    const onKeyDown = (event) => {
+      if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'd') {
+        event.preventDefault();
+        setDebugMode(current => {
+          const next = !current;
+          if (next) window.sessionStorage.setItem('helmetBuilderDebug', '1');
+          else window.sessionStorage.removeItem('helmetBuilderDebug');
+          return next;
+        });
+      }
+    };
+
+    window.addEventListener('pageshow', syncDebugFromLocation);
+    window.addEventListener('popstate', syncDebugFromLocation);
+    window.addEventListener('keydown', onKeyDown);
+
+    return () => {
+      retryTimers.forEach(window.clearTimeout);
+      window.removeEventListener('pageshow', syncDebugFromLocation);
+      window.removeEventListener('popstate', syncDebugFromLocation);
+      window.removeEventListener('keydown', onKeyDown);
+    };
   }, []);
 
   useEffect(() => {
@@ -5218,8 +5271,8 @@ export default function HelmetBuilder() {
             }}>
               <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, marginBottom:8 }}>
                 <div>
-                  <div style={{ fontSize:9, color:'#efff00', fontWeight:900, letterSpacing:'0.12em' }}>DEBUG MODE</div>
-                  <div style={{ fontSize:8, color:'#6b7280', marginTop:2 }}>Live renderer + asset timing</div>
+                  <div style={{ fontSize:9, color:'#efff00', fontWeight:900, letterSpacing:'0.12em' }}>DEBUG MODE · v72</div>
+                  <div style={{ fontSize:8, color:'#6b7280', marginTop:2 }}>Live renderer + asset timing · Ctrl+Shift+D toggles</div>
                 </div>
                 <button
                   onClick={copyDebugReport}
