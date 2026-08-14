@@ -1031,6 +1031,70 @@ const STRIPE_PRESET_SVG_SOURCE = `<?xml version="1.0" encoding="UTF-8"?>
   </g>
 </svg>`;
 
+function createStripePresetSvgDataUrl({
+  preset,
+  singleColor,
+  outerColor,
+  centerColor,
+  pipingColor,
+}) {
+  // This runs only in the browser from a useEffect. Build a standalone SVG containing
+  // only the selected group so the other preset folders cannot accidentally render.
+  const parser = new DOMParser();
+  const parsed = parser.parseFromString(STRIPE_PRESET_SVG_SOURCE, 'image/svg+xml');
+  const parserError = parsed.querySelector('parsererror');
+  if (parserError) throw new Error('Could not parse preset stripe SVG');
+
+  const groupId =
+    preset === 'single' ? 'stripe-single' :
+    preset === 'threeEqual' ? 'stripe-three-equal' :
+    preset === 'threeThickCenter' ? 'stripe-three-thick-center' :
+    'stripe-five-piped';
+
+  const sourceGroup = parsed.getElementById(groupId);
+  if (!sourceGroup) throw new Error(`Stripe preset group not found: ${groupId}`);
+
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const outDoc = document.implementation.createDocument(svgNS, 'svg', null);
+  const outRoot = outDoc.documentElement;
+  outRoot.setAttribute('xmlns', svgNS);
+  outRoot.setAttribute('width', '1200');
+  outRoot.setAttribute('height', '3600');
+  outRoot.setAttribute('viewBox', '0 0 1200 3600');
+
+  const group = sourceGroup.cloneNode(true);
+
+  if (preset === 'single') {
+    group.querySelectorAll('rect,path,polygon,circle,ellipse').forEach(el => {
+      el.setAttribute('fill', singleColor);
+    });
+  } else {
+    group.querySelectorAll('[id^="outer-stripes"], [data-name="outer-stripes"]').forEach(el => {
+      el.setAttribute('fill', outerColor);
+    });
+    group.querySelectorAll('[id^="inner-stripe"], [data-name="inner-stripe"]').forEach(el => {
+      el.setAttribute('fill', centerColor);
+    });
+    group.querySelectorAll('#piping, [data-name="piping"]').forEach(el => {
+      el.setAttribute('fill', pipingColor);
+    });
+  }
+
+  outRoot.appendChild(group);
+  const svgText = new XMLSerializer().serializeToString(outDoc);
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgText)}`;
+}
+
+function loadImageFromDataUrl(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.decoding = 'async';
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('Could not rasterize preset stripe SVG'));
+    img.src = dataUrl;
+  });
+}
+
 function applyDecalFinishToMaterials(materials, scene, finishId) {
   const def = DECAL_FINISHES.find(f => f.id === finishId) || DECAL_FINISHES[0];
   materials.forEach(mat => {
@@ -1458,6 +1522,7 @@ export default function HelmetBuilder() {
   const shellWrapUniformsRef = useRef({
     enabled:         { value: 0 },
     baseEnabled:     { value: 0 },
+    baseMap:         { value: null },
     widthScale:      { value: 1 },
     length:          { value: 1 },
     centerX:         { value: 0 },
@@ -2465,13 +2530,15 @@ export default function HelmetBuilder() {
 
     if (!helmetStripesEnabled) {
       uniforms.baseEnabled.value = 0;
-      uniforms.baseMap.value = stripePresetTextureRef.current || null;
+      uniforms.baseMap.value = null;
       return;
     }
 
     let cancelled = false;
 
     const build = async () => {
+      if (!rendererRef.current) return;
+
       const dataUrl = createStripePresetSvgDataUrl({
         preset: helmetStripePreset,
         singleColor: helmetStripeSingleColor,
@@ -2481,7 +2548,7 @@ export default function HelmetBuilder() {
       });
       if (!dataUrl) return;
 
-      const img = await dataURLToImage(dataUrl);
+      const img = await loadImageFromDataUrl(dataUrl);
       if (cancelled) return;
 
       let canvas = stripePresetCanvasRef.current;
