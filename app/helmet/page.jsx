@@ -33,6 +33,48 @@ const ZONES = [
 // become underscores). Compare part names through a stable key so the UI can keep
 // using the clean Blender/GLB names above while still matching the runtime objects.
 const partKey = (name = '') => name.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+const formatDebugMs = (value) => Number.isFinite(value) ? `${Math.round(value)} ms` : '—';
+
+const formatDebugBytes = (value) => {
+  if (!Number.isFinite(value) || value <= 0) return '—';
+  if (value >= 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  if (value >= 1024) return `${(value / 1024).toFixed(0)} KB`;
+  return `${Math.round(value)} B`;
+};
+
+const formatDebugCount = (value) =>
+  Number.isFinite(value) ? Math.round(value).toLocaleString() : '—';
+
+function getBaseModelStats(model) {
+  if (!model) return { meshes:0, triangles:0, vertices:0 };
+
+  const seenGeometries = new Set();
+  let meshes = 0;
+  let triangles = 0;
+  let vertices = 0;
+
+  model.traverse(obj => {
+    if (!obj.isMesh || !obj.geometry) return;
+    meshes += 1;
+
+    const geo = obj.geometry;
+    if (seenGeometries.has(geo)) return;
+    seenGeometries.add(geo);
+
+    const pos = geo.attributes?.position;
+    if (pos) vertices += pos.count;
+
+    triangles += geo.index
+      ? Math.floor(geo.index.count / 3)
+      : pos
+        ? Math.floor(pos.count / 3)
+        : 0;
+  });
+
+  return { meshes, triangles, vertices };
+}
+
 // Build part references from the loaded scene hierarchy AFTER materials have been
 // replaced. This is intentionally hierarchy-based instead of assuming the named GLB
 // node itself is always a THREE.Mesh. GLTFLoader may represent a named part as a Group
@@ -1700,6 +1742,70 @@ export default function HelmetBuilder() {
   const [colors, setColors]           = useState(() => Object.fromEntries(ZONES.map(z => [z.id, z.defaultColor])));
   const [finish, setFinish]           = useState('gloss');
   const [loaded, setLoaded]           = useState(false);
+  const [debugMode, setDebugMode]     = useState(false);
+  const [debugStats, setDebugStats]   = useState({
+    fps:0,
+    drawCalls:0,
+    visibleTriangles:0,
+    geometries:0,
+    textures:0,
+    programs:0,
+    cssSize:'—',
+    bufferSize:'—',
+    dpr:1,
+    modelMeshes:0,
+    modelTriangles:0,
+    modelVertices:0,
+    glbBytesLoaded:0,
+    glbBytesTotal:0,
+    glbDownloadMs:null,
+    glbParseMs:null,
+    builderSetupMs:null,
+    interactiveMs:null,
+    firstRenderMs:null,
+    hdriDownloadMs:null,
+    hdriDecodeMs:null,
+    hdriPmremMs:null,
+    hdriReadyMs:null,
+    hdriBytesLoaded:0,
+    hdriBytesTotal:0,
+    hdriCacheHit:false,
+    hdriName:'—',
+  });
+  const debugTimingRef = useRef({
+    componentStart: typeof performance !== 'undefined' ? performance.now() : 0,
+    glbStart:null,
+    glbDownloadDone:null,
+    glbOnLoad:null,
+    modelSetupDone:null,
+    firstRenderAt:null,
+    hdriStart:null,
+    hdriDownloadDone:null,
+  });
+  const debugFrameRef = useRef({
+    frames:0,
+    lastSampleAt: typeof performance !== 'undefined' ? performance.now() : 0,
+  });
+  const debugStaticRef = useRef({
+    modelMeshes:0,
+    modelTriangles:0,
+    modelVertices:0,
+    glbBytesLoaded:0,
+    glbBytesTotal:0,
+    glbDownloadMs:null,
+    glbParseMs:null,
+    builderSetupMs:null,
+    interactiveMs:null,
+    firstRenderMs:null,
+    hdriDownloadMs:null,
+    hdriDecodeMs:null,
+    hdriPmremMs:null,
+    hdriReadyMs:null,
+    hdriBytesLoaded:0,
+    hdriBytesTotal:0,
+    hdriCacheHit:false,
+    hdriName:'—',
+  });
   const [showProductMenu, setShowProductMenu] = useState(false);
   const [showTipsModal, setShowTipsModal]     = useState(false);
   const [showShadows, setShowShadows]         = useState(true);
@@ -1851,6 +1957,93 @@ export default function HelmetBuilder() {
       }
     }
   }, [isSignedIn]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    setDebugMode(params.get('debug') === '1');
+  }, []);
+
+  useEffect(() => {
+    if (!debugMode) return;
+
+    debugFrameRef.current.frames = 0;
+    debugFrameRef.current.lastSampleAt = performance.now();
+
+    const sample = () => {
+      const renderer = rendererRef.current;
+      if (!renderer) return;
+
+      const now = performance.now();
+      const deltaMs = Math.max(1, now - debugFrameRef.current.lastSampleAt);
+      const fps = debugFrameRef.current.frames * 1000 / deltaMs;
+      debugFrameRef.current.frames = 0;
+      debugFrameRef.current.lastSampleAt = now;
+
+      const canvas = renderer.domElement;
+      const size = renderer.getSize(new THREE.Vector2());
+      const info = renderer.info;
+
+      setDebugStats({
+        fps,
+        drawCalls: info.render.calls || 0,
+        visibleTriangles: info.render.triangles || 0,
+        geometries: info.memory.geometries || 0,
+        textures: info.memory.textures || 0,
+        programs: Array.isArray(info.programs) ? info.programs.length : 0,
+        cssSize: `${Math.round(size.x)}×${Math.round(size.y)}`,
+        bufferSize: `${canvas.width}×${canvas.height}`,
+        dpr: renderer.getPixelRatio(),
+        ...debugStaticRef.current,
+      });
+    };
+
+    sample();
+    const interval = window.setInterval(sample, 750);
+    return () => window.clearInterval(interval);
+  }, [debugMode, loaded, hdriPreset]);
+
+  const copyDebugReport = useCallback(async () => {
+    const s = debugStats;
+    const report = [
+      'ProLine Helmet Builder Debug Report',
+      `URL: ${typeof window !== 'undefined' ? window.location.href : ''}`,
+      `User agent: ${typeof navigator !== 'undefined' ? navigator.userAgent : ''}`,
+      '',
+      `FPS: ${Number(s.fps || 0).toFixed(1)}`,
+      `Draw calls: ${s.drawCalls}`,
+      `Visible triangles: ${s.visibleTriangles}`,
+      `Renderer geometries: ${s.geometries}`,
+      `Renderer textures: ${s.textures}`,
+      `Shader programs: ${s.programs}`,
+      `CSS viewport: ${s.cssSize}`,
+      `Render buffer: ${s.bufferSize}`,
+      `DPR: ${s.dpr}`,
+      '',
+      `Base GLB meshes: ${s.modelMeshes}`,
+      `Base GLB triangles: ${s.modelTriangles}`,
+      `Base GLB vertices: ${s.modelVertices}`,
+      `GLB transfer: ${formatDebugBytes(s.glbBytesTotal || s.glbBytesLoaded)}`,
+      `GLB download: ${formatDebugMs(s.glbDownloadMs)}`,
+      `GLB parse: ${formatDebugMs(s.glbParseMs)}`,
+      `Builder setup: ${formatDebugMs(s.builderSetupMs)}`,
+      `Interactive: ${formatDebugMs(s.interactiveMs)}`,
+      `First rendered helmet: ${formatDebugMs(s.firstRenderMs)}`,
+      '',
+      `HDRI: ${s.hdriName}${s.hdriCacheHit ? ' (cached)' : ''}`,
+      `HDRI transfer: ${formatDebugBytes(s.hdriBytesTotal || s.hdriBytesLoaded)}`,
+      `HDRI download: ${formatDebugMs(s.hdriDownloadMs)}`,
+      `HDRI decode: ${formatDebugMs(s.hdriDecodeMs)}`,
+      `HDRI PMREM: ${formatDebugMs(s.hdriPmremMs)}`,
+      `HDRI ready: ${formatDebugMs(s.hdriReadyMs)}`,
+    ].join('\n');
+
+    try {
+      await navigator.clipboard.writeText(report);
+    } catch {
+      console.log(report);
+    }
+  }, [debugStats]);
 
   // ── FULL WRAP UPLOAD + CONTROLS ─────────────────────────────────────────────
   const resetWrapTransform = useCallback(() => {
@@ -2379,8 +2572,24 @@ export default function HelmetBuilder() {
 
     // Load GLB
     const loader = new GLTFLoader();
+    const glbLoadStartedAt = performance.now();
+    debugTimingRef.current.glbStart = glbLoadStartedAt;
+    debugTimingRef.current.glbDownloadDone = null;
+    debugTimingRef.current.glbOnLoad = null;
+
     loader.load('/SpeedFlex.glb', (gltf) => {
+      const glbOnLoadAt = performance.now();
+      debugTimingRef.current.glbOnLoad = glbOnLoadAt;
+
+      const downloadDoneAt = debugTimingRef.current.glbDownloadDone || glbOnLoadAt;
+      debugStaticRef.current.glbDownloadMs = Math.max(0, downloadDoneAt - glbLoadStartedAt);
+      debugStaticRef.current.glbParseMs = Math.max(0, glbOnLoadAt - downloadDoneAt);
+
       const model = gltf.scene;
+      const baseStats = getBaseModelStats(model);
+      debugStaticRef.current.modelMeshes = baseStats.meshes;
+      debugStaticRef.current.modelTriangles = baseStats.triangles;
+      debugStaticRef.current.modelVertices = baseStats.vertices;
       modelRef.current = model;
       decalSurfaceObjectsRef.current = [];
 
@@ -2609,8 +2818,28 @@ export default function HelmetBuilder() {
       // (scoped to car paint / chrome only — see applyShellEnvMap above).
       applyShellEnvMap(materialsRef.current, scene, finishRef.current);
       applyFacemaskEnvMap(materialsRef.current, scene, facemaskFinishRef.current);
+
+      const modelSetupDoneAt = performance.now();
+      debugTimingRef.current.modelSetupDone = modelSetupDoneAt;
+      debugStaticRef.current.builderSetupMs = Math.max(0, modelSetupDoneAt - glbOnLoadAt);
+      debugStaticRef.current.interactiveMs = Math.max(
+        0,
+        modelSetupDoneAt - debugTimingRef.current.componentStart
+      );
+
       setLoaded(true);
-    }, undefined, (err) => console.error('GLB load error:', err));
+    }, (progress) => {
+      debugStaticRef.current.glbBytesLoaded = progress.loaded || 0;
+      debugStaticRef.current.glbBytesTotal = progress.total || 0;
+
+      if (
+        !debugTimingRef.current.glbDownloadDone &&
+        progress.total > 0 &&
+        progress.loaded >= progress.total
+      ) {
+        debugTimingRef.current.glbDownloadDone = performance.now();
+      }
+    }, (err) => console.error('GLB load error:', err));
 
     // Animation loop
     let t = 0;
@@ -2623,6 +2852,19 @@ export default function HelmetBuilder() {
         sparkleLight.position.set(Math.sin(t) * 2, 1.5 + Math.sin(t * 0.7) * 0.5, Math.cos(t) * 2);
       }
       renderer.render(scene, camera);
+      debugFrameRef.current.frames += 1;
+
+      if (
+        debugTimingRef.current.modelSetupDone &&
+        !debugTimingRef.current.firstRenderAt
+      ) {
+        const firstRenderAt = performance.now();
+        debugTimingRef.current.firstRenderAt = firstRenderAt;
+        debugStaticRef.current.firstRenderMs = Math.max(
+          0,
+          firstRenderAt - debugTimingRef.current.componentStart
+        );
+      }
     };
     animate();
 
@@ -2724,18 +2966,42 @@ export default function HelmetBuilder() {
     };
 
     if (!preset.url) {
+      debugStaticRef.current.hdriName = preset.label;
+      debugStaticRef.current.hdriCacheHit = true;
+      debugStaticRef.current.hdriBytesLoaded = 0;
+      debugStaticRef.current.hdriBytesTotal = 0;
+      debugStaticRef.current.hdriDownloadMs = 0;
+      debugStaticRef.current.hdriDecodeMs = 0;
+      debugStaticRef.current.hdriPmremMs = 0;
+      debugStaticRef.current.hdriReadyMs = 0;
       applyEnvironment(scene.userData.neutralEnvTexture || null);
       return;
     }
 
     const cached = hdriCacheRef.current.get(preset.id);
     if (cached?.texture) {
+      debugStaticRef.current.hdriName = preset.label;
+      debugStaticRef.current.hdriCacheHit = true;
+      debugStaticRef.current.hdriBytesLoaded = 0;
+      debugStaticRef.current.hdriBytesTotal = 0;
+      debugStaticRef.current.hdriDownloadMs = 0;
+      debugStaticRef.current.hdriDecodeMs = 0;
+      debugStaticRef.current.hdriPmremMs = 0;
+      debugStaticRef.current.hdriReadyMs = 0;
       applyEnvironment(cached.texture);
       return;
     }
 
     setHdriLoading(true);
     setHdriError('');
+
+    const hdriStartedAt = performance.now();
+    debugTimingRef.current.hdriStart = hdriStartedAt;
+    debugTimingRef.current.hdriDownloadDone = null;
+    debugStaticRef.current.hdriName = preset.label;
+    debugStaticRef.current.hdriCacheHit = false;
+    debugStaticRef.current.hdriBytesLoaded = 0;
+    debugStaticRef.current.hdriBytesTotal = 0;
 
     const loader = new EXRLoader();
     loader.load(
@@ -2746,13 +3012,23 @@ export default function HelmetBuilder() {
           return;
         }
 
+        const decodedAt = performance.now();
+        const hdriDownloadDoneAt = debugTimingRef.current.hdriDownloadDone || decodedAt;
+        debugStaticRef.current.hdriDownloadMs = Math.max(0, hdriDownloadDoneAt - hdriStartedAt);
+        debugStaticRef.current.hdriDecodeMs = Math.max(0, decodedAt - hdriDownloadDoneAt);
+
         texture.mapping = THREE.EquirectangularReflectionMapping;
 
+        const pmremStartedAt = performance.now();
         const pmrem = new THREE.PMREMGenerator(renderer);
         pmrem.compileEquirectangularShader();
         const rt = pmrem.fromEquirectangular(texture);
+        const pmremDoneAt = performance.now();
         pmrem.dispose();
         texture.dispose();
+
+        debugStaticRef.current.hdriPmremMs = Math.max(0, pmremDoneAt - pmremStartedAt);
+        debugStaticRef.current.hdriReadyMs = Math.max(0, pmremDoneAt - hdriStartedAt);
 
         hdriCacheRef.current.set(preset.id, {
           renderTarget: rt,
@@ -2761,7 +3037,18 @@ export default function HelmetBuilder() {
 
         applyEnvironment(rt.texture);
       },
-      undefined,
+      (progress) => {
+        debugStaticRef.current.hdriBytesLoaded = progress.loaded || 0;
+        debugStaticRef.current.hdriBytesTotal = progress.total || 0;
+
+        if (
+          !debugTimingRef.current.hdriDownloadDone &&
+          progress.total > 0 &&
+          progress.loaded >= progress.total
+        ) {
+          debugTimingRef.current.hdriDownloadDone = performance.now();
+        }
+      },
       (error) => {
         console.warn(`Could not load HDRI: ${preset.url}`, error);
         if (token !== hdriLoadTokenRef.current) return;
@@ -4908,6 +5195,72 @@ export default function HelmetBuilder() {
               <div style={{ textAlign: 'center' }}>
                 <div style={{ fontSize: 32, marginBottom: 12 }}>🏈</div>
                 <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, fontSize: 14, color: '#6b7280', letterSpacing: '0.1em' }}>LOADING HELMET...</div>
+              </div>
+            </div>
+          )}
+
+          {debugMode && (
+            <div style={{
+              position:'absolute',
+              top:16,
+              left:16,
+              zIndex:25,
+              width:285,
+              maxWidth:'calc(100% - 32px)',
+              background:'rgba(8,8,9,0.92)',
+              border:'1px solid rgba(239,255,0,0.28)',
+              borderRadius:10,
+              padding:'10px 11px',
+              boxShadow:'0 12px 30px rgba(0,0,0,0.28)',
+              backdropFilter:'blur(8px)',
+              fontFamily:"'Barlow Condensed',sans-serif",
+              pointerEvents:'auto'
+            }}>
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, marginBottom:8 }}>
+                <div>
+                  <div style={{ fontSize:9, color:'#efff00', fontWeight:900, letterSpacing:'0.12em' }}>DEBUG MODE</div>
+                  <div style={{ fontSize:8, color:'#6b7280', marginTop:2 }}>Live renderer + asset timing</div>
+                </div>
+                <button
+                  onClick={copyDebugReport}
+                  style={{ background:'rgba(239,255,0,0.08)', border:'1px solid rgba(239,255,0,0.25)', borderRadius:5, padding:'5px 7px', color:'#efff00', cursor:'pointer', fontSize:8, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.06em' }}
+                >
+                  COPY REPORT
+                </button>
+              </div>
+
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'4px 12px', fontSize:9, lineHeight:1.35 }}>
+                <span style={{ color:'#6b7280' }}>FPS</span><span style={{ color:debugStats.fps >= 50 ? '#10b981' : debugStats.fps >= 30 ? '#efff00' : '#ef4444', textAlign:'right' }}>{Number(debugStats.fps || 0).toFixed(1)}</span>
+                <span style={{ color:'#6b7280' }}>Draw Calls</span><span style={{ color:'#d1d5db', textAlign:'right' }}>{formatDebugCount(debugStats.drawCalls)}</span>
+                <span style={{ color:'#6b7280' }}>Visible Tris</span><span style={{ color:'#d1d5db', textAlign:'right' }}>{formatDebugCount(debugStats.visibleTriangles)}</span>
+                <span style={{ color:'#6b7280' }}>GPU Textures</span><span style={{ color:'#d1d5db', textAlign:'right' }}>{formatDebugCount(debugStats.textures)}</span>
+                <span style={{ color:'#6b7280' }}>Geometries</span><span style={{ color:'#d1d5db', textAlign:'right' }}>{formatDebugCount(debugStats.geometries)}</span>
+                <span style={{ color:'#6b7280' }}>Programs</span><span style={{ color:'#d1d5db', textAlign:'right' }}>{formatDebugCount(debugStats.programs)}</span>
+                <span style={{ color:'#6b7280' }}>Viewport</span><span style={{ color:'#d1d5db', textAlign:'right' }}>{debugStats.cssSize}</span>
+                <span style={{ color:'#6b7280' }}>Buffer / DPR</span><span style={{ color:'#d1d5db', textAlign:'right' }}>{debugStats.bufferSize} / {Number(debugStats.dpr || 1).toFixed(2)}</span>
+              </div>
+
+              <div style={{ height:1, background:'rgba(255,255,255,0.07)', margin:'8px 0' }} />
+
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'4px 12px', fontSize:9, lineHeight:1.35 }}>
+                <span style={{ color:'#6b7280' }}>GLB Triangles</span><span style={{ color:'#d1d5db', textAlign:'right' }}>{formatDebugCount(debugStats.modelTriangles)}</span>
+                <span style={{ color:'#6b7280' }}>GLB Transfer</span><span style={{ color:'#d1d5db', textAlign:'right' }}>{formatDebugBytes(debugStats.glbBytesTotal || debugStats.glbBytesLoaded)}</span>
+                <span style={{ color:'#6b7280' }}>Download</span><span style={{ color:'#d1d5db', textAlign:'right' }}>{formatDebugMs(debugStats.glbDownloadMs)}</span>
+                <span style={{ color:'#6b7280' }}>Parse</span><span style={{ color:'#d1d5db', textAlign:'right' }}>{formatDebugMs(debugStats.glbParseMs)}</span>
+                <span style={{ color:'#6b7280' }}>Builder Setup</span><span style={{ color:'#d1d5db', textAlign:'right' }}>{formatDebugMs(debugStats.builderSetupMs)}</span>
+                <span style={{ color:'#6b7280' }}>Interactive</span><span style={{ color:'#d1d5db', textAlign:'right' }}>{formatDebugMs(debugStats.interactiveMs)}</span>
+                <span style={{ color:'#6b7280' }}>First Render</span><span style={{ color:'#d1d5db', textAlign:'right' }}>{formatDebugMs(debugStats.firstRenderMs)}</span>
+              </div>
+
+              <div style={{ height:1, background:'rgba(255,255,255,0.07)', margin:'8px 0' }} />
+
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'4px 12px', fontSize:9, lineHeight:1.35 }}>
+                <span style={{ color:'#6b7280' }}>HDRI</span><span style={{ color:'#d1d5db', textAlign:'right', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={debugStats.hdriName}>{debugStats.hdriName}{debugStats.hdriCacheHit ? ' ⚡' : ''}</span>
+                <span style={{ color:'#6b7280' }}>HDRI Transfer</span><span style={{ color:'#d1d5db', textAlign:'right' }}>{formatDebugBytes(debugStats.hdriBytesTotal || debugStats.hdriBytesLoaded)}</span>
+                <span style={{ color:'#6b7280' }}>HDRI Download</span><span style={{ color:'#d1d5db', textAlign:'right' }}>{formatDebugMs(debugStats.hdriDownloadMs)}</span>
+                <span style={{ color:'#6b7280' }}>EXR Decode</span><span style={{ color:'#d1d5db', textAlign:'right' }}>{formatDebugMs(debugStats.hdriDecodeMs)}</span>
+                <span style={{ color:'#6b7280' }}>PMREM</span><span style={{ color:'#d1d5db', textAlign:'right' }}>{formatDebugMs(debugStats.hdriPmremMs)}</span>
+                <span style={{ color:'#6b7280' }}>HDRI Ready</span><span style={{ color:'#d1d5db', textAlign:'right' }}>{formatDebugMs(debugStats.hdriReadyMs)}</span>
               </div>
             </div>
           )}
