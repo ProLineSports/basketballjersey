@@ -1067,10 +1067,10 @@ const STRIPE_PRESET_OPTIONS = [
 
 const HDRI_PRESETS = [
   { id: 'neutral', label: 'Neutral Studio', url: null },
-  { id: 'studio01', label: 'Studio 01', url: '/hdri/studio_small_01_4k.exr' },
-  { id: 'studio08', label: 'Studio 08', url: '/hdri/studio_small_08_4k.exr' },
-  { id: 'probeSoft', label: 'Light Probe — Soft', url: '/hdri/DTLP6-LightProbe03-Soft.exr' },
-  { id: 'probeDirect', label: 'Light Probe — Direct', url: '/hdri/DTLP6-LightProbe03-Direct.exr' },
+  { id: 'studio01', label: 'Studio 01', url: '/hdri/studio_small_01_2k.exr' },
+  { id: 'studio08', label: 'Studio 08', url: '/hdri/studio_small_08_2k.exr' },
+  { id: 'probeSoft', label: 'Light Probe — Soft', url: '/hdri/DTLP6-LightProbe03-Soft-2k.exr' },
+  { id: 'probeDirect', label: 'Light Probe — Direct', url: '/hdri/DTLP6-LightProbe03-Direct-2k.exr' },
 ];
 
 function applyDecalFinishToMaterials(materials, scene, finishId) {
@@ -1421,8 +1421,11 @@ function installShellFinishTriplanar(material) {
   if (!material || material.userData?.shellFinishTriplanarInstalled) return;
   material.userData.shellFinishTriplanarInstalled = true;
 
+  const projectionScaleUniform = { value: 1.1 };
+  material.userData.shellFinishProjectionScaleUniform = projectionScaleUniform;
+
   material.onBeforeCompile = (shader) => {
-    shader.uniforms.uShellFinishProjectionScale = { value: 1.1 };
+    shader.uniforms.uShellFinishProjectionScale = projectionScaleUniform;
 
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -1689,6 +1692,7 @@ export default function HelmetBuilder() {
   const [glitterColor, setGlitterColor]     = useState('#ffffff');
   const [satinMetallic, setSatinMetallic]   = useState(0.62);
   const [satinTexture, setSatinTexture]     = useState(0.45);
+  const [carbonFiberSize, setCarbonFiberSize] = useState(1.0);
   const satinMicroTextureRef                = useRef(null);
   const carbonWeaveTextureRef               = useRef(null);
   const [facemaskFinish, setFacemaskFinish] = useState('gloss'); // gloss | matte
@@ -3853,6 +3857,18 @@ export default function HelmetBuilder() {
       const mats = materialsRef.current[name];
       if (!mats) return;
 
+      // Carbon Fiber size is controlled by triplanar sampling frequency.
+      // Moving the slider right makes the visible weave larger; moving it left
+      // creates a tighter/denser weave.
+      mats.forEach(mat => {
+        const scaleUniform = mat.userData?.shellFinishProjectionScaleUniform;
+        if (scaleUniform) {
+          scaleUniform.value = finish === 'carbonfiber'
+            ? 1.1 / THREE.MathUtils.clamp(carbonFiberSize, 0.4, 2.5)
+            : 1.1;
+        }
+      });
+
       if (finish === 'carpaint') {
         const { ormTex, colorTex } = createFlakeTextures(glitter, glitterSize, glitterColor);
         mats.forEach(mat => {
@@ -3953,7 +3969,7 @@ export default function HelmetBuilder() {
         mat.needsUpdate = true;
       });
     });
-  }, [glitter, glitterSize, glitterColor, satinMetallic, satinTexture, finish, loaded]);
+  }, [glitter, glitterSize, glitterColor, satinMetallic, satinTexture, carbonFiberSize, finish, loaded]);
 
   useEffect(() => () => {
     satinMicroTextureRef.current?.dispose?.();
@@ -4321,9 +4337,20 @@ export default function HelmetBuilder() {
                 {finish === 'carbonfiber' && (
                   <div>
                     <div style={{ height:1, background:'rgba(255,255,255,0.06)', marginBottom:14 }} />
-                    <SectionLabel>Carbon Fiber</SectionLabel>
-                    <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.45 }}>
-                      Applies a subtle twill-weave reflection pattern while preserving your shell color. Best results usually come with darker shell colors and strong studio lighting.
+                    <SectionLabel>Carbon Fiber Controls</SectionLabel>
+                    <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.45, marginBottom:10 }}>
+                      Applies a subtle twill-weave reflection pattern while preserving your shell color. Smaller weave sizes create a tighter, denser carbon pattern.
+                    </div>
+                    <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:4 }}>
+                      <span style={{ fontSize:10, color:'#9ca3af', minWidth:58 }}>Weave Size</span>
+                      <input
+                        type="range"
+                        min="40"
+                        max="250"
+                        value={Math.round(carbonFiberSize * 100)}
+                        onChange={e => setCarbonFiberSize(parseInt(e.target.value) / 100)}
+                        style={{ flex:1, minWidth:0 }}
+                      />
                     </div>
                   </div>
                 )}
@@ -4935,15 +4962,16 @@ export default function HelmetBuilder() {
             <CollapsibleSection title="STUDIO LIGHTING" defaultOpen={false}>
               <div style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:9, padding:'10px 12px' }}>
                 <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.4, marginBottom:8 }}>
-                  HDRIs provide the reflections/fill while virtual softboxes create broad product-photography highlights.
+                  Optimized HDRIs provide the reflections/fill while virtual softboxes create broad product-photography highlights.
                 </div>
 
                 <div style={{ marginBottom:10 }}>
                   <div style={{ fontSize:9, color:'#9ca3af', marginBottom:5 }}>Environment</div>
                   <select
                     value={hdriPreset}
+                    disabled={hdriLoading}
                     onChange={e => setHdriPreset(e.target.value)}
-                    style={{ width:'100%', background:'rgba(0,0,0,0.22)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:6, padding:'8px 10px', color:'#e5e7eb', fontSize:10, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.04em' }}
+                    style={{ width:'100%', background:'rgba(0,0,0,0.22)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:6, padding:'8px 10px', color:'#e5e7eb', fontSize:10, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.04em', opacity:hdriLoading?0.55:1, cursor:hdriLoading?'wait':'pointer' }}
                   >
                     {HDRI_PRESETS.map(preset => (
                       <option key={preset.id} value={preset.id}>{preset.label}</option>
