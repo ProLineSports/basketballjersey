@@ -327,6 +327,7 @@ function installDecalOverlayShader(material, decalUniforms) {
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uHelmetStripesEnabled = decalUniforms.enabled;
     shader.uniforms.uHelmetStripeBaseEnabled = decalUniforms.baseEnabled;
+    shader.uniforms.uHelmetStripeBaseMap = decalUniforms.baseMap;
     shader.uniforms.uHelmetStripeWidthScale = decalUniforms.widthScale;
     shader.uniforms.uHelmetStripeLength = decalUniforms.length;
     shader.uniforms.uHelmetStripeCenterX = decalUniforms.centerX;
@@ -368,6 +369,7 @@ varying float vHelmetStripePath;
 varying vec2 vHelmetWrapUv;
 uniform float uHelmetStripesEnabled;
 uniform float uHelmetStripeBaseEnabled;
+uniform sampler2D uHelmetStripeBaseMap;
 uniform float uHelmetStripeWidthScale;
 uniform float uHelmetStripeLength;
 uniform float uHelmetStripeCenterX;
@@ -396,37 +398,10 @@ if (uHelmetWrapEnabled > 0.5) {
 if (uHelmetStripesEnabled > 0.5) {
   float stripeW = 0.020 * uHelmetStripeWidthScale;
   float stripeX = vHelmetModelPosition.x - uHelmetStripeCenterX;
-  float absStripeX = abs(stripeX);
+  float spanMultiplier = (uHelmetStripePreset < 0.5) ? 0.5 : 1.5;
+  float totalHalfWidth = stripeW * spanMultiplier;
   float edgeAA = max(fwidth(stripeX) * 1.5, 0.00030);
-
-  float totalHalfWidth = stripeW * 1.5;
-  vec3 stripeColor = uHelmetStripeCenterColor;
-  float widthMask = 0.0;
-
-  if (uHelmetStripePreset < 0.5) {
-    totalHalfWidth = stripeW * 0.5;
-    widthMask = 1.0 - smoothstep(totalHalfWidth - edgeAA, totalHalfWidth + edgeAA, absStripeX);
-    stripeColor = uHelmetStripeCenterColor;
-  } else if (uHelmetStripePreset < 1.5) {
-    totalHalfWidth = stripeW * 1.5;
-    widthMask = 1.0 - smoothstep(totalHalfWidth - edgeAA, totalHalfWidth + edgeAA, absStripeX);
-    stripeColor = (absStripeX > stripeW * 0.5) ? uHelmetStripeLeftColor : uHelmetStripeCenterColor;
-  } else if (uHelmetStripePreset < 2.5) {
-    float outerW = stripeW * 0.75;
-    float centerHalf = stripeW * 0.75;
-    totalHalfWidth = centerHalf + outerW;
-    widthMask = 1.0 - smoothstep(totalHalfWidth - edgeAA, totalHalfWidth + edgeAA, absStripeX);
-    stripeColor = (absStripeX <= centerHalf) ? uHelmetStripeCenterColor : uHelmetStripeLeftColor;
-  } else {
-    float outerW = stripeW * 1.0;
-    float centerHalf = stripeW * 0.5;
-    float pipingW = stripeW * 0.16;
-    totalHalfWidth = centerHalf + pipingW + outerW;
-    widthMask = 1.0 - smoothstep(totalHalfWidth - edgeAA, totalHalfWidth + edgeAA, absStripeX);
-    if (absStripeX <= centerHalf) stripeColor = uHelmetStripeCenterColor;
-    else if (absStripeX <= centerHalf + pipingW) stripeColor = uHelmetStripePipingColor;
-    else stripeColor = uHelmetStripeLeftColor;
-  }
+  float widthMask = 1.0 - smoothstep(totalHalfWidth - edgeAA, totalHalfWidth + edgeAA, abs(stripeX));
 
   float pathAA = max(fwidth(vHelmetStripePath) * 1.5, 0.0020);
   float lengthMask = 1.0 - smoothstep(
@@ -436,21 +411,26 @@ if (uHelmetStripesEnabled > 0.5) {
   );
   float stripeMask = widthMask * lengthMask;
 
-  if (uHelmetStripeBaseEnabled > 0.5) {
-    helmetDecal.rgb = mix(helmetDecal.rgb, stripeColor, stripeMask);
-    helmetDecal.a = max(helmetDecal.a, stripeMask);
-  }
+  float localU = (stripeX + totalHalfWidth) / max(totalHalfWidth * 2.0, 0.0001);
+  float localV = 1.0 - (vHelmetStripePath / max(uHelmetStripeLength, 0.0001));
 
-  if (uHelmetStripeDesignEnabled > 0.5) {
-    float localU = (stripeX + totalHalfWidth) / max(totalHalfWidth * 2.0, 0.0001);
-    float localV = 1.0 - (vHelmetStripePath / max(uHelmetStripeLength, 0.0001));
-    if (localU >= 0.0 && localU <= 1.0 && localV >= 0.0 && localV <= 1.0) {
+  if (localU >= 0.0 && localU <= 1.0 && localV >= 0.0 && localV <= 1.0) {
+    if (uHelmetStripeBaseEnabled > 0.5) {
+      vec4 baseSample = texture2D(uHelmetStripeBaseMap, vec2(localU, localV));
+      float baseMask = stripeMask * baseSample.a;
+      helmetDecal.rgb = mix(helmetDecal.rgb, baseSample.rgb, baseMask);
+      helmetDecal.a = max(helmetDecal.a, baseMask);
+    }
+
+    if (uHelmetStripeDesignEnabled > 0.5) {
       vec4 designSample = texture2D(uHelmetStripeDesignMap, vec2(localU, localV));
       float designMask = stripeMask * designSample.a;
       helmetDecal.rgb = mix(helmetDecal.rgb, designSample.rgb, designMask);
       helmetDecal.a = max(helmetDecal.a, designMask);
     }
   }
+}
+
 }
 
 // There is no decal at this fragment, so do not render the overlay at all. This is
@@ -1031,6 +1011,26 @@ const STRIPE_PRESET_OPTIONS = [
   { id: 'fivePiped', label: '5 Stripe — Center + Piping' },
 ];
 
+const STRIPE_PRESET_SVG_SOURCE = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="3600" viewBox="0 0 1200 3600">
+  <g id="stripe-single">
+    <rect width="1200" height="3600" fill="#efff00"/>
+  </g>
+  <g id="stripe-three-equal">
+    <path id="outer-stripes" d="M1200,3600h-400V0h400v3600ZM400,0H0v3600h400V0Z" fill="#efff00"/>
+    <rect id="inner-stripe" x="400" width="400" height="3600" fill="#fcfcfc"/>
+  </g>
+  <g id="stripe-three-thick-center">
+    <path id="outer-stripes-2" data-name="outer-stripes" d="M1200,3600h-400V0h400v3600ZM400,0H0v3600h400V0Z" fill="#efff00"/>
+    <rect id="inner-stripe-2" data-name="inner-stripe" x="311.273" width="577.455" height="3600" fill="#fcfcfc"/>
+  </g>
+  <g id="stripe-five-piped">
+    <path id="outer-stripes-3" data-name="outer-stripes" d="M1200,3600h-400V0h400v3600ZM400,0H0v3600h400V0Z" fill="#efff00"/>
+    <rect id="piping" x="311.273" width="577.455" height="3600" fill="#151515"/>
+    <rect id="inner-stripe-3" data-name="inner-stripe" x="400" width="400" height="3600" fill="#fcfcfc"/>
+  </g>
+</svg>`;
+
 function applyDecalFinishToMaterials(materials, scene, finishId) {
   const def = DECAL_FINISHES.find(f => f.id === finishId) || DECAL_FINISHES[0];
   materials.forEach(mat => {
@@ -1438,6 +1438,7 @@ export default function HelmetBuilder() {
   const stripeUniformsRef = useRef({
     enabled:         { value: 0 },
     baseEnabled:     { value: 0 },
+    baseMap:         { value: null },
     widthScale:      { value: 1 },
     length:          { value: 1 },
     centerX:         { value: 0 },
@@ -2458,6 +2459,82 @@ export default function HelmetBuilder() {
   }, [loaded, colors.shell, wrapEnabled, wrapRevision, wrapScale, wrapRotation, wrapOffsetX, wrapOffsetY, wrapOpacity]);
 
 
+  // ── PRESET STRIPE SVG TEXTURE ────────────────────────────────────────────────
+  useEffect(() => {
+    const uniforms = stripeUniformsRef.current;
+
+    if (!helmetStripesEnabled) {
+      uniforms.baseEnabled.value = 0;
+      uniforms.baseMap.value = stripePresetTextureRef.current || null;
+      return;
+    }
+
+    let cancelled = false;
+
+    const build = async () => {
+      const dataUrl = createStripePresetSvgDataUrl({
+        preset: helmetStripePreset,
+        singleColor: helmetStripeSingleColor,
+        outerColor: helmetStripeOuterColor,
+        centerColor: helmetStripeCenterColor,
+        pipingColor: helmetStripePipingColor,
+      });
+      if (!dataUrl) return;
+
+      const img = await dataURLToImage(dataUrl);
+      if (cancelled) return;
+
+      let canvas = stripePresetCanvasRef.current;
+      const maxTextureSize = rendererRef.current?.capabilities?.maxTextureSize || 4096;
+      const targetHeight = Math.min(8192, maxTextureSize);
+      const targetWidth = Math.min(Math.floor(targetHeight / 3), maxTextureSize);
+
+      if (!canvas) {
+        canvas = document.createElement('canvas');
+        stripePresetCanvasRef.current = canvas;
+      }
+      if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
+      }
+
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+      let texture = stripePresetTextureRef.current;
+      if (!texture) {
+        texture = new THREE.CanvasTexture(canvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.wrapS = THREE.ClampToEdgeWrapping;
+        texture.wrapT = THREE.ClampToEdgeWrapping;
+        texture.magFilter = THREE.LinearFilter;
+        texture.minFilter = THREE.LinearMipmapLinearFilter;
+        texture.generateMipmaps = true;
+        texture.anisotropy = Math.min(
+          16,
+          rendererRef.current?.capabilities?.getMaxAnisotropy?.() || 8
+        );
+        stripePresetTextureRef.current = texture;
+      }
+      texture.needsUpdate = true;
+
+      uniforms.baseMap.value = texture;
+      uniforms.baseEnabled.value = 1;
+      uniforms.preset.value = (
+        helmetStripePreset === 'single' ? 0 :
+        helmetStripePreset === 'threeEqual' ? 1 :
+        helmetStripePreset === 'threeThickCenter' ? 2 : 3
+      );
+    };
+
+    build().catch(err => console.error('Failed to build preset stripe texture', err));
+    return () => { cancelled = true; };
+  }, [loaded, helmetStripesEnabled, helmetStripePreset, helmetStripeSingleColor, helmetStripeOuterColor, helmetStripeCenterColor, helmetStripePipingColor]);
+
   // ── STRIPE DESIGN TEXTURE ───────────────────────────────────────────────────
   useEffect(() => {
     const uniforms = stripeUniformsRef.current;
@@ -2532,12 +2609,11 @@ export default function HelmetBuilder() {
     uniforms.designEnabled.value = 1;
   }, [loaded, helmetStripeDesignEnabled, helmetStripeDesignRevision, helmetStripeDesignScale, helmetStripeDesignRotation, helmetStripeDesignOffsetX, helmetStripeDesignOffsetY, helmetStripeDesignOpacity]);
 
-  // ── PRESET STRIPE DECAL ─────────────────────────────────────────────────────
+  // ── STRIPE DECAL UNIFORM STATE ──────────────────────────────────────────────
   useEffect(() => {
     const uniforms = stripeUniformsRef.current;
     const hasDesign = !!stripeDesignImageRef.current;
     uniforms.enabled.value = (helmetStripesEnabled || (helmetStripeDesignEnabled && hasDesign)) ? 1 : 0;
-    uniforms.baseEnabled.value = helmetStripesEnabled ? 1 : 0;
     uniforms.widthScale.value = helmetStripeWidth;
     uniforms.length.value = helmetStripeLength;
     uniforms.preset.value = (
@@ -2545,12 +2621,8 @@ export default function HelmetBuilder() {
       helmetStripePreset === 'threeEqual' ? 1 :
       helmetStripePreset === 'threeThickCenter' ? 2 : 3
     );
-    uniforms.leftColor.value.set(helmetStripeOuterColor);
-    uniforms.centerColor.value.set(helmetStripePreset === 'single' ? helmetStripeSingleColor : helmetStripeCenterColor);
-    uniforms.rightColor.value.set(helmetStripeOuterColor);
-    uniforms.pipingColor.value.set(helmetStripePipingColor);
     uniforms.designEnabled.value = helmetStripeDesignEnabled && hasDesign ? 1 : 0;
-  }, [loaded, helmetStripesEnabled, helmetStripePreset, helmetStripeWidth, helmetStripeLength, helmetStripeSingleColor, helmetStripeOuterColor, helmetStripeCenterColor, helmetStripePipingColor, helmetStripeDesignEnabled, helmetStripeDesignRevision]);
+  }, [loaded, helmetStripesEnabled, helmetStripePreset, helmetStripeWidth, helmetStripeLength, helmetStripeDesignEnabled, helmetStripeDesignRevision]);
 
   // Hide crown screws while any stripe layer is active. The filled Decal Surface
   // supplies the visible curved stripe across that area, so the screw hardware cannot
@@ -4074,7 +4146,7 @@ export default function HelmetBuilder() {
                   </div>
 
                   <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.5 }}>
-                    Choose a preset stripe layout and adjust its width, length, and colors. Stripes use a dedicated decal surface above any full wrap and beneath the bumpers, so Shell glitter and Car Paint effects cannot show through. Crown screw hardware is hidden while stripes are active. Preset patterns are generated procedurally in the shader, while uploaded stripe artwork is rendered to a high-resolution GPU-aware texture for cleaner close-up edges.
+                    Choose a preset stripe layout and adjust its width, length, and colors. Built-in stripe presets now use the supplied SVG artwork as the source for cleaner, more consistent edges. Stripes use a dedicated decal surface above any full wrap and beneath the bumpers, so Shell glitter and Car Paint effects cannot show through. Crown screw hardware is hidden while stripes are active. Preset patterns are generated procedurally in the shader, while uploaded stripe artwork is rendered to a high-resolution GPU-aware texture for cleaner close-up edges.
                   </div>
 
                   <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:10 }}>
