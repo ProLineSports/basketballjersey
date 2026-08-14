@@ -14,19 +14,19 @@ import { DecalGeometry } from 'three/addons/geometries/DecalGeometry.js';
 // Shell, Side Screws, and Top Screws intentionally share one color control.
 const ZONES = [
   { id: 'shell',             label: 'Shell',                    parts: ['Shell', 'Side Screws', 'Top Screws'], defaultColor: '#2B2B2B' },
-  { id: 'bumpers',           label: 'Bumpers',                  parts: ['Bumpers'],                           defaultColor: '#212121' },
+  { id: 'bumpers',           label: 'Bumpers',                  parts: ['Bumpers'],                           defaultColor: '#FCFCFC' },
   { id: 'facemask',          label: 'Facemask',                 parts: ['Facemask'],                          defaultColor: '#EFFF00' },
   { id: 'facemaskclips',     label: 'Facemask Clips',           parts: ['Facemask Clips'],                    defaultColor: '#212121' },
   { id: 'facemaskhardware',  label: 'Facemask Clips Hardware',  parts: ['Facemask Clips Hardware'],           defaultColor: '#151515' },
-  { id: 'innerpads',         label: 'Inner Pads',                parts: ['Inner Pads'],                        defaultColor: '#212121' },
+  { id: 'innerpads',         label: 'Inner Pads',                parts: ['Inner Pads'],                        defaultColor: '#EAEAEA' },
   { id: 'visor',             label: 'Visor',                     parts: ['Visor'],                             defaultColor: '#000000' },
   { id: 'visorclips',        label: 'Visor Clips',               parts: ['Visor Clips'],                       defaultColor: '#EFFF00' },
-  { id: 'chinguardinner',    label: 'Chin Guard - Inner',        parts: ['Chin Guard - Inner'],                defaultColor: '#353535' },
-  { id: 'chinguardouter',    label: 'Chin Guard - Outer',        parts: ['Chin Guard - Outer'],                defaultColor: '#EFFF00' },
+  { id: 'chinguardinner',    label: 'Chin Guard - Inner',        parts: ['Chin Guard - Inner'],                defaultColor: '#FCFCFC' },
+  { id: 'chinguardouter',    label: 'Chin Guard - Outer',        parts: ['Chin Guard - Outer'],                defaultColor: '#FCFCFC' },
   { id: 'metalparts',        label: 'Metal Parts',               parts: ['Metal Parts'],                       defaultColor: '#212121' },
-  { id: 'strapclipslower',   label: 'Strap Clips - Lower',       parts: ['Strap Clips - Lower'],               defaultColor: '#EFFF00' },
-  { id: 'strapclipsupper',   label: 'Strap Clips - Upper',       parts: ['Strap Clips - Upper'],               defaultColor: '#EFFF00' },
-  { id: 'straps',            label: 'Straps',                    parts: ['Straps'],                            defaultColor: '#EFFF00' },
+  { id: 'strapclipslower',   label: 'Strap Clips - Lower',       parts: ['Strap Clips - Lower'],               defaultColor: '#212121' },
+  { id: 'strapclipsupper',   label: 'Strap Clips - Upper',       parts: ['Strap Clips - Upper'],               defaultColor: '#212121' },
+  { id: 'straps',            label: 'Straps',                    parts: ['Straps'],                            defaultColor: '#FCFCFC' },
 ];
 
 // Three.js sanitizes glTF node names when it loads them (for example, spaces can
