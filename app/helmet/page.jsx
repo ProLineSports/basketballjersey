@@ -1896,6 +1896,16 @@ export default function HelmetBuilder() {
   const [exportError, setExportError]         = useState('');
   const [exportResolution, setExportResolution] = useState(2048);
   const [exportSupersample, setExportSupersample] = useState(2);
+
+  useEffect(() => {
+    // With the production 8192px internal-edge ceiling, 3x can be honored at
+    // 1500px and 2048px, but not at 3000px or 4096px. Keep the UI truthful
+    // instead of letting users select "3x Ultra" only to silently receive 2x.
+    if (exportResolution > 2048 && exportSupersample > 2) {
+      setExportSupersample(2);
+      setExportNotice('');
+    }
+  }, [exportResolution, exportSupersample]);
   const [viewportBgColor, setViewportBgColor] = useState('#1f1c1e');
   const [rimLightColor, setRimLightColor]     = useState('#ffffff');
   const [hdriPreset, setHdriPreset]           = useState('studio01');
@@ -4658,6 +4668,16 @@ export default function HelmetBuilder() {
 
       const renderStartedAt = performance.now();
       liveRenderer.render(scene, camera);
+
+      // WebGL rendering is asynchronous. During hidden debug runs only, wait for
+      // the GPU to finish so the reported render time is meaningful. Normal
+      // customer exports remain fully asynchronous and do not incur this stall.
+      if (debugMode) {
+        try {
+          liveRenderer.getContext()?.finish?.();
+        } catch {}
+      }
+
       const renderFinishedAt = performance.now();
 
       const finalCanvas = document.createElement('canvas');
@@ -4804,7 +4824,8 @@ export default function HelmetBuilder() {
     transparentBg,
     viewportBgColor,
     exportResolution,
-    exportSupersample
+    exportSupersample,
+    debugMode
   ]);
 
   const handleGetCredits = () => {
@@ -5533,7 +5554,7 @@ export default function HelmetBuilder() {
             }}>
               <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, marginBottom:8 }}>
                 <div>
-                  <div style={{ fontSize:9, color:'#efff00', fontWeight:900, letterSpacing:'0.12em' }}>DEBUG MODE · v75 · EXPORT SAFE</div>
+                  <div style={{ fontSize:9, color:'#efff00', fontWeight:900, letterSpacing:'0.12em' }}>DEBUG MODE · v76 · EXPORT QA</div>
                   <div style={{ fontSize:8, color:'#6b7280', marginTop:2 }}>Live renderer + asset timing · Ctrl+Shift+D toggles</div>
                 </div>
                 <button
@@ -5761,12 +5782,14 @@ export default function HelmetBuilder() {
                     >
                       <option value="1">1× Standard</option>
                       <option value="2">2× High</option>
-                      <option value="3">3× Ultra</option>
+                      <option value="3" disabled={exportResolution > 2048}>
+                        3× Ultra{exportResolution > 2048 ? ' (≤2048 px)' : ''}
+                      </option>
                     </select>
                   </div>
                 </div>
                 <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.45 }}>
-                  High-resolution supersampled exports render through the same lighting/material pipeline as the live viewport. Unsafe internal resolutions are automatically reduced while preserving the selected final PNG size.
+                  High-resolution supersampled exports use the same lighting/material pipeline as the live viewport. 3× Ultra is available through 2048 px; 3000 px and 4096 px top out at 2× High to keep temporary GPU buffers within the production-safe 8192 px ceiling.
                 </div>
                 {exportNotice && (
                   <div style={{ marginTop:8, padding:'7px 8px', borderRadius:6, background:'rgba(239,255,0,0.06)', border:'1px solid rgba(239,255,0,0.18)', color:'#cdd900', fontSize:9, lineHeight:1.4 }}>
