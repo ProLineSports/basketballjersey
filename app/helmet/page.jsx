@@ -4,10 +4,14 @@ import { useUser, useClerk, UserButton } from '@clerk/nextjs';
 import { useRouter } from 'next/navigation';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { EXRLoader } from 'three/addons/loaders/EXRLoader.js';
 import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { DecalGeometry } from 'three/addons/geometries/DecalGeometry.js';
+
+const HELMET_MODEL_URL = '/SpeedFlex-draco.glb';
+const DRACO_DECODER_PATH = '/draco/';
 
 // ── PART / COLOR ZONES ───────────────────────────────────────────────────────
 // `parts` uses the exact mesh/node names exported in SpeedFlex.glb.
@@ -2629,14 +2633,22 @@ export default function HelmetBuilder() {
     sparkleLight.position.set(1, 1, 1);
     scene.add(sparkleLight);
 
-    // Load GLB
+    // Load GLB. The compressed production candidate uses
+    // KHR_draco_mesh_compression, so GLTFLoader needs one DRACOLoader instance.
+    // Decoder assets are intentionally self-hosted from /public/draco/ so the
+    // builder has no runtime dependency on Google or another third-party CDN.
+    const dracoLoader = new DRACOLoader();
+    dracoLoader.setDecoderPath(DRACO_DECODER_PATH);
+
     const loader = new GLTFLoader();
+    loader.setDRACOLoader(dracoLoader);
+
     const glbLoadStartedAt = performance.now();
     debugTimingRef.current.glbStart = glbLoadStartedAt;
     debugTimingRef.current.glbDownloadDone = null;
     debugTimingRef.current.glbOnLoad = null;
 
-    loader.load('/SpeedFlex.glb', (gltf) => {
+    loader.load(HELMET_MODEL_URL, (gltf) => {
       const glbOnLoadAt = performance.now();
       debugTimingRef.current.glbOnLoad = glbOnLoadAt;
 
@@ -2648,7 +2660,7 @@ export default function HelmetBuilder() {
       // download-vs-parse boundary. On the production builder the GLB is same-origin,
       // so Resource Timing gives a more accurate responseEnd timestamp.
       try {
-        const glbUrl = new URL('/SpeedFlex.glb', window.location.href).href;
+        const glbUrl = new URL(HELMET_MODEL_URL, window.location.href).href;
         const resourceEntries = performance.getEntriesByName(glbUrl);
         const resourceEntry = resourceEntries[resourceEntries.length - 1];
         if (resourceEntry) {
@@ -2978,6 +2990,7 @@ export default function HelmetBuilder() {
       sideLogoMaterialsRef.current = [];
       sideLogoTexturesRef.current = [];
       modelRef.current = null;
+      dracoLoader.dispose();
       renderer.dispose();
       if (el.contains(renderer.domElement)) el.removeChild(renderer.domElement);
     };
@@ -5307,7 +5320,7 @@ export default function HelmetBuilder() {
             }}>
               <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, marginBottom:8 }}>
                 <div>
-                  <div style={{ fontSize:9, color:'#efff00', fontWeight:900, letterSpacing:'0.12em' }}>DEBUG MODE · v73</div>
+                  <div style={{ fontSize:9, color:'#efff00', fontWeight:900, letterSpacing:'0.12em' }}>DEBUG MODE · v74 · DRACO</div>
                   <div style={{ fontSize:8, color:'#6b7280', marginTop:2 }}>Live renderer + asset timing · Ctrl+Shift+D toggles</div>
                 </div>
                 <button
