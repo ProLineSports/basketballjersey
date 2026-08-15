@@ -4296,7 +4296,13 @@ export default function HelmetBuilder() {
     const model = modelRef.current;
     if (!loaded || !scene || !model) return;
 
-    let shellRoots = partObjectsRef.current[partKey('Shell')] || [];
+    // Rear stickers use the same filled baked Decal Surface as side logos/stripes.
+    // That carrier bridges vents/cutouts so artwork behaves like one continuous vinyl
+    // sticker instead of being clipped by the visible shell topology.
+    let shellRoots = decalSurfaceObjectsRef.current.length
+      ? decalSurfaceObjectsRef.current
+      : (partObjectsRef.current[partKey('Shell')] || []);
+
     if (!shellRoots.length) {
       const shellKey = partKey('Shell');
       model.traverse(obj => {
@@ -4402,23 +4408,33 @@ export default function HelmetBuilder() {
       helper.rotateZ(rotation * Math.PI / 180);
       const orientation = new THREE.Euler().setFromQuaternion(helper.quaternion, 'XYZ');
 
-      const projectorDepth = Math.max(boundsModel.depth * 0.18, baseHeight * 0.9, 0.05);
-      const shadowGeo = new DecalGeometry(
-        hit.object,
-        projectorPosition,
-        orientation,
-        new THREE.Vector3(baseWidth * 1.018, baseHeight * 1.018, projectorDepth),
-      );
-      const mainGeo = new DecalGeometry(
-        hit.object,
-        projectorPosition,
-        orientation,
-        new THREE.Vector3(baseWidth, baseHeight, projectorDepth),
-      );
-
       const lift = Math.max(boundsModel.width * 0.00072, 0.00024);
-      offsetGeometryAlongNormals(shadowGeo, lift * 0.22);
-      offsetGeometryAlongNormals(mainGeo, lift * 0.78);
+      const projectionDepth = Math.max(boundsModel.depth * 0.18, baseHeight * 0.9, 0.05);
+
+      const frameQuat = helper.quaternion.clone();
+      const frameRight = new THREE.Vector3(1, 0, 0).applyQuaternion(frameQuat).normalize();
+      const frameUp = new THREE.Vector3(0, 1, 0).applyQuaternion(frameQuat).normalize();
+
+      const shadowUniforms = {
+        center:{ value:projectorPosition },
+        right:{ value:frameRight },
+        up:{ value:frameUp },
+        normal:{ value:worldNormal },
+        width:{ value:baseWidth * 1.018 },
+        height:{ value:baseHeight * 1.018 },
+        depth:{ value:projectionDepth },
+        lift:{ value:lift * 0.22 },
+      };
+      const mainUniforms = {
+        center:{ value:projectorPosition },
+        right:{ value:frameRight },
+        up:{ value:frameUp },
+        normal:{ value:worldNormal },
+        width:{ value:baseWidth },
+        height:{ value:baseHeight },
+        depth:{ value:projectionDepth },
+        lift:{ value:lift * 0.78 },
+      };
 
       const shadowMat = new THREE.MeshPhysicalMaterial({
         color:0x000000,
@@ -4426,15 +4442,22 @@ export default function HelmetBuilder() {
         transparent:true,
         alphaTest:0.01,
         opacity:0.22,
-        side:THREE.DoubleSide,
+        // FrontSide prevents a rear sticker from ever showing through the opposite
+        // side of the helmet when we intentionally render it above shell hardware.
+        side:THREE.FrontSide,
         depthWrite:false,
-        depthTest:true,
+        depthTest:false,
         roughness:0.95,
         metalness:0,
         polygonOffset:true,
         polygonOffsetFactor:-1,
         polygonOffsetUnits:-1,
       });
+      installSideLogoSurfaceProjection(
+        shadowMat,
+        shadowUniforms,
+        `rear-sticker-${slot}-shadow-surface-v1`
+      );
 
       const mainMat = new THREE.MeshPhysicalMaterial({
         color:new THREE.Color(color),
@@ -4442,9 +4465,12 @@ export default function HelmetBuilder() {
         transparent:true,
         alphaTest:0.01,
         opacity:1,
-        side:THREE.DoubleSide,
+        side:THREE.FrontSide,
+        // Rear stickers are a top vinyl layer. Drawing after the shell hardware lets
+        // them cover screws exactly where the artwork overlaps, while FrontSide culling
+        // prevents the carrier from bleeding through the far side of the helmet.
         depthWrite:false,
-        depthTest:true,
+        depthTest:false,
         polygonOffset:true,
         polygonOffsetFactor:-2,
         polygonOffsetUnits:-2,
@@ -4452,26 +4478,38 @@ export default function HelmetBuilder() {
       mainMat.userData.rearStickerMainMaterial = true;
       mainMat.userData.rearStickerSlot = slot;
       rearStickerMainMaterialsRef.current[slot] = mainMat;
+      installSideLogoSurfaceProjection(
+        mainMat,
+        mainUniforms,
+        `rear-sticker-${slot}-main-surface-v1`
+      );
       applyDecalFinishToMaterials([mainMat], scene, decalFinishRef.current);
 
-      const shadowMesh = new THREE.Mesh(shadowGeo, shadowMat);
-      shadowMesh.name = `RearSticker_${slot}_Shadow`;
-      shadowMesh.renderOrder = 42;
-      shadowMesh.castShadow = false;
-      shadowMesh.receiveShadow = false;
-      scene.add(shadowMesh);
+      const shadowMeshes = createCarrierSurfaceLogoMeshes(
+        scene,
+        shellMeshes,
+        shadowMat,
+        `rear-${slot}`,
+        'Shadow',
+        44
+      );
+      const mainMeshes = createCarrierSurfaceLogoMeshes(
+        scene,
+        shellMeshes,
+        mainMat,
+        `rear-${slot}`,
+        'Artwork',
+        45
+      );
 
-      const mainMesh = new THREE.Mesh(mainGeo, mainMat);
-      mainMesh.name = `RearSticker_${slot}_Artwork`;
-      mainMesh.renderOrder = 43;
-      mainMesh.castShadow = false;
-      mainMesh.receiveShadow = false;
-      scene.add(mainMesh);
+      shadowMeshes.forEach(mesh => {
+        mesh.userData.rearStickerSlot = slot;
+      });
+      mainMeshes.forEach(mesh => {
+        mesh.userData.rearStickerSlot = slot;
+      });
 
       const editableId = `rear-${slot}`;
-      const frameQuat = helper.quaternion.clone();
-      const frameRight = new THREE.Vector3(1, 0, 0).applyQuaternion(frameQuat).normalize();
-      const frameUp = new THREE.Vector3(0, 1, 0).applyQuaternion(frameQuat).normalize();
       const frameCenter = projectorPosition.clone().addScaledVector(worldNormal, lift * 2.0);
       const halfW = baseWidth * 0.50;
       const halfH = baseHeight * 0.50;
@@ -4497,7 +4535,7 @@ export default function HelmetBuilder() {
       hitProxy.renderOrder = 96;
       scene.add(hitProxy);
 
-      rearStickerMeshesRef.current.push(shadowMesh, mainMesh, hitProxy);
+      rearStickerMeshesRef.current.push(...shadowMeshes, ...mainMeshes, hitProxy);
       rearStickerMaterialsRef.current.push(shadowMat, mainMat, hitProxyMat);
 
       if (selectedEditableDecalRef.current === editableId) {
@@ -4879,7 +4917,9 @@ export default function HelmetBuilder() {
     if (!renderer || !camera || !model) return;
     const canvas = renderer.domElement;
 
-    let shellRoots = partObjectsRef.current[partKey('Shell')] || [];
+    let shellRoots = decalSurfaceObjectsRef.current.length
+      ? decalSurfaceObjectsRef.current
+      : (partObjectsRef.current[partKey('Shell')] || []);
     let bumperRoots = partObjectsRef.current[partKey('Bumpers')] || [];
     if (!shellRoots.length || !bumperRoots.length) {
       model.traverse(obj => {
