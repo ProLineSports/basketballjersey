@@ -1761,6 +1761,43 @@ export default function HelmetBuilder() {
   const rearCustomImageRef = useRef(null);
   const rearCustomObjectUrlRef = useRef(null);
 
+  // Direct-manipulation state shared by rear stickers + bumper logos.
+  // Placements live in refs while dragging so React state does not interrupt pointer capture.
+  const editableDecalPlacementRef = useRef({
+    'rear-flag':    { scale:1.35, rotation:0, across:-24, vertical:-8 },
+    'rear-warning': { scale:1.35, rotation:0, across: 24, vertical:-8 },
+    'rear-custom':  { scale:1.35, rotation:0, across:  0, vertical:12 },
+    'bumper-front': { scale:6.6,  rotation:0, across:  0, vertical:0 },
+    'bumper-rear':  { scale:5.35, rotation:0, across:  0, vertical:-30 },
+  });
+  const editableDecalWorldFrameRef = useRef({});
+  const selectedEditableDecalRef = useRef(null);
+  const editableDecalLockRef = useRef({
+    'rear-flag':false,
+    'rear-warning':false,
+    'rear-custom':false,
+    'bumper-front':false,
+    'bumper-rear':false,
+  });
+  const editableDecalUndoStacksRef = useRef({
+    'rear-flag':[],
+    'rear-warning':[],
+    'rear-custom':[],
+    'bumper-front':[],
+    'bumper-rear':[],
+  });
+  const editableDecalInteractionRef = useRef({
+    dragging:false,
+    pointerId:null,
+    id:null,
+    action:null,
+    startPlacement:null,
+    startDistance:1,
+    startAngle:0,
+    centerClient:null,
+    changed:false,
+  });
+
   // Shared shader-uniform objects for Shell stripe decals. The renderer keeps references
   // to these objects across material recompiles (wrap on/off, finish changes, etc.).
   // Stripe-only uniforms. These render on the baked Decal Surface so the stripe
@@ -2000,27 +2037,42 @@ export default function HelmetBuilder() {
   const [sideLogoUndoCount, setSideLogoUndoCount] = useState(0);
 
   const [rearFlagEnabled, setRearFlagEnabled] = useState(false);
-  const [rearFlagScale, setRearFlagScale] = useState(1);
+  const [rearFlagScale, setRearFlagScale] = useState(1.35);
   const [rearFlagRotation, setRearFlagRotation] = useState(0);
-  const [rearFlagAcross, setRearFlagAcross] = useState(24);
-  const [rearFlagVertical, setRearFlagVertical] = useState(2);
+  const [rearFlagAcross, setRearFlagAcross] = useState(-24);
+  const [rearFlagVertical, setRearFlagVertical] = useState(-8);
 
   const [rearWarningEnabled, setRearWarningEnabled] = useState(false);
   const [rearWarningColor, setRearWarningColor] = useState('#FFFFFF');
-  const [rearWarningScale, setRearWarningScale] = useState(1.08);
+  const [rearWarningScale, setRearWarningScale] = useState(1.35);
   const [rearWarningRotation, setRearWarningRotation] = useState(0);
-  const [rearWarningAcross, setRearWarningAcross] = useState(-18);
-  const [rearWarningVertical, setRearWarningVertical] = useState(0);
+  const [rearWarningAcross, setRearWarningAcross] = useState(24);
+  const [rearWarningVertical, setRearWarningVertical] = useState(-8);
 
   const [rearCustomEnabled, setRearCustomEnabled] = useState(false);
   const [rearCustomPreviewUrl, setRearCustomPreviewUrl] = useState(null);
   const [rearCustomFileName, setRearCustomFileName] = useState('');
-  const [rearCustomScale, setRearCustomScale] = useState(1);
+  const [rearCustomScale, setRearCustomScale] = useState(1.35);
   const [rearCustomRotation, setRearCustomRotation] = useState(0);
   const [rearCustomAcross, setRearCustomAcross] = useState(0);
-  const [rearCustomVertical, setRearCustomVertical] = useState(18);
+  const [rearCustomVertical, setRearCustomVertical] = useState(12);
   const [rearStickerError, setRearStickerError] = useState('');
   const [rearStickerRevision, setRearStickerRevision] = useState(0);
+
+  const [selectedEditableDecal, setSelectedEditableDecal] = useState(null);
+  const [rearFlagLocked, setRearFlagLocked] = useState(false);
+  const [rearWarningLocked, setRearWarningLocked] = useState(false);
+  const [rearCustomLocked, setRearCustomLocked] = useState(false);
+  const [bumperLogoFrontLocked, setBumperLogoFrontLocked] = useState(false);
+  const [bumperLogoRearLocked, setBumperLogoRearLocked] = useState(false);
+  const [editableDecalUndoCounts, setEditableDecalUndoCounts] = useState({
+    'rear-flag':0,
+    'rear-warning':0,
+    'rear-custom':0,
+    'bumper-front':0,
+    'bumper-rear':0,
+  });
+  const [editableDecalRevision, setEditableDecalRevision] = useState(0);
 
   const [bumperLogoError, setBumperLogoError] = useState('');
   const [bumperLogoFrontPreviewUrl, setBumperLogoFrontPreviewUrl] = useState(null);
@@ -2047,6 +2099,69 @@ export default function HelmetBuilder() {
   const [bumperLogoFinish, setBumperLogoFinish] = useState('gloss');
   const bumperLogoFinishRef = useRef(bumperLogoFinish);
   useEffect(() => { bumperLogoFinishRef.current = bumperLogoFinish; }, [bumperLogoFinish]);
+
+  useEffect(() => { editableDecalPlacementRef.current['rear-flag'] = { scale:rearFlagScale, rotation:rearFlagRotation, across:rearFlagAcross, vertical:rearFlagVertical }; }, [rearFlagScale, rearFlagRotation, rearFlagAcross, rearFlagVertical]);
+  useEffect(() => { editableDecalPlacementRef.current['rear-warning'] = { scale:rearWarningScale, rotation:rearWarningRotation, across:rearWarningAcross, vertical:rearWarningVertical }; }, [rearWarningScale, rearWarningRotation, rearWarningAcross, rearWarningVertical]);
+  useEffect(() => { editableDecalPlacementRef.current['rear-custom'] = { scale:rearCustomScale, rotation:rearCustomRotation, across:rearCustomAcross, vertical:rearCustomVertical }; }, [rearCustomScale, rearCustomRotation, rearCustomAcross, rearCustomVertical]);
+  useEffect(() => { editableDecalPlacementRef.current['bumper-front'] = { scale:bumperLogoFrontScale, rotation:bumperLogoFrontRotation, across:bumperLogoFrontAcross, vertical:bumperLogoFrontVertical }; }, [bumperLogoFrontScale, bumperLogoFrontRotation, bumperLogoFrontAcross, bumperLogoFrontVertical]);
+  useEffect(() => { editableDecalPlacementRef.current['bumper-rear'] = { scale:bumperLogoRearScale, rotation:bumperLogoRearRotation, across:bumperLogoRearAcross, vertical:bumperLogoRearVertical }; }, [bumperLogoRearScale, bumperLogoRearRotation, bumperLogoRearAcross, bumperLogoRearVertical]);
+
+  useEffect(() => {
+    editableDecalLockRef.current = {
+      'rear-flag':rearFlagLocked,
+      'rear-warning':rearWarningLocked,
+      'rear-custom':rearCustomLocked,
+      'bumper-front':bumperLogoFrontLocked,
+      'bumper-rear':bumperLogoRearLocked,
+    };
+  }, [rearFlagLocked, rearWarningLocked, rearCustomLocked, bumperLogoFrontLocked, bumperLogoRearLocked]);
+
+  const commitEditableDecalPlacement = useCallback((id, placement) => {
+    if (!placement) return;
+    const p = { ...placement };
+    if (id === 'rear-flag') {
+      setRearFlagScale(p.scale); setRearFlagRotation(p.rotation); setRearFlagAcross(p.across); setRearFlagVertical(p.vertical);
+      setRearStickerRevision(v => v + 1);
+    } else if (id === 'rear-warning') {
+      setRearWarningScale(p.scale); setRearWarningRotation(p.rotation); setRearWarningAcross(p.across); setRearWarningVertical(p.vertical);
+      setRearStickerRevision(v => v + 1);
+    } else if (id === 'rear-custom') {
+      setRearCustomScale(p.scale); setRearCustomRotation(p.rotation); setRearCustomAcross(p.across); setRearCustomVertical(p.vertical);
+      setRearStickerRevision(v => v + 1);
+    } else if (id === 'bumper-front') {
+      setBumperLogoFrontScale(p.scale); setBumperLogoFrontRotation(p.rotation); setBumperLogoFrontAcross(p.across); setBumperLogoFrontVertical(p.vertical);
+      setBumperLogoRevision(v => v + 1);
+    } else if (id === 'bumper-rear') {
+      setBumperLogoRearScale(p.scale); setBumperLogoRearRotation(p.rotation); setBumperLogoRearAcross(p.across); setBumperLogoRearVertical(p.vertical);
+      setBumperLogoRevision(v => v + 1);
+    }
+    editableDecalPlacementRef.current[id] = p;
+    setEditableDecalRevision(v => v + 1);
+  }, []);
+
+  const pushEditableDecalUndo = useCallback((id, placement) => {
+    if (!id || !placement) return;
+    const stack = editableDecalUndoStacksRef.current[id];
+    if (!stack) return;
+    stack.push({ ...placement });
+    if (stack.length > 20) stack.shift();
+    setEditableDecalUndoCounts(prev => ({ ...prev, [id]:stack.length }));
+  }, []);
+
+  const undoEditableDecalMove = useCallback((id) => {
+    const stack = editableDecalUndoStacksRef.current[id];
+    const previous = stack?.pop?.();
+    if (!previous) return;
+    editableDecalPlacementRef.current[id] = { ...previous };
+    commitEditableDecalPlacement(id, previous);
+    setEditableDecalUndoCounts(prev => ({ ...prev, [id]:stack.length }));
+  }, [commitEditableDecalPlacement]);
+
+  const clearEditableDecalUndo = useCallback((id) => {
+    const stack = editableDecalUndoStacksRef.current[id];
+    if (stack) stack.length = 0;
+    setEditableDecalUndoCounts(prev => ({ ...prev, [id]:0 }));
+  }, []);
 
   // ── AUTH + CREDITS (Clerk + Supabase) — mirrors /jersey ──
   const [credits, setCredits]             = useState(0);
@@ -2423,6 +2538,7 @@ export default function HelmetBuilder() {
       setRearCustomPreviewUrl(objectUrl);
       setRearCustomFileName(file.name);
       setRearCustomEnabled(true);
+      clearEditableDecalUndo('rear-custom');
       setRearStickerError('');
       setRearStickerRevision(v => v + 1);
     };
@@ -2433,7 +2549,7 @@ export default function HelmetBuilder() {
     };
 
     img.src = objectUrl;
-  }, []);
+  }, [clearEditableDecalUndo]);
 
   const removeRearCustomSticker = useCallback(() => {
     if (rearCustomObjectUrlRef.current) {
@@ -2444,9 +2560,11 @@ export default function HelmetBuilder() {
     setRearCustomPreviewUrl(null);
     setRearCustomFileName('');
     setRearCustomEnabled(false);
+    clearEditableDecalUndo('rear-custom');
+    if (selectedEditableDecalRef.current === 'rear-custom') { selectedEditableDecalRef.current=null; setSelectedEditableDecal(null); }
     setRearStickerError('');
     setRearStickerRevision(v => v + 1);
-  }, []);
+  }, [clearEditableDecalUndo]);
 
   useEffect(() => () => {
     if (rearCustomObjectUrlRef.current) {
@@ -2553,6 +2671,7 @@ export default function HelmetBuilder() {
       target.ref.current = img;
       target.setPreview(objectUrl);
       target.setName(file.name);
+      clearEditableDecalUndo(`bumper-${slot}`);
       setBumperLogoError('');
       setBumperLogoRevision(v => v + 1);
     };
@@ -2561,7 +2680,7 @@ export default function HelmetBuilder() {
       setBumperLogoError('That bumper logo could not be read. Please try another PNG or JPEG.');
     };
     img.src = objectUrl;
-  }, []);
+  }, [clearEditableDecalUndo]);
 
   const handleFrontBumperLogoUpload = useCallback((event) => {
     const file = event.target.files?.[0];
@@ -2586,8 +2705,10 @@ export default function HelmetBuilder() {
     target.ref.current = null;
     target.setPreview(null);
     target.setName('');
+    clearEditableDecalUndo(`bumper-${slot}`);
+    if (selectedEditableDecalRef.current === `bumper-${slot}`) { selectedEditableDecalRef.current=null; setSelectedEditableDecal(null); }
     setBumperLogoRevision(v => v + 1);
-  }, []);
+  }, [clearEditableDecalUndo]);
 
   useEffect(() => () => {
     [bumperLogoFrontObjectUrlRef, bumperLogoRearObjectUrlRef].forEach(ref => {
@@ -4023,10 +4144,12 @@ export default function HelmetBuilder() {
         return;
       }
 
+      if (selectedSideLogoRef.current !== clickedSide) selectLogo(clickedSide);
+      // Locked logos stay selectable but behave like part of the helmet for orbiting.
+      if (sideLogoLocked) return;
       event.preventDefault();
       event.stopPropagation();
-      if (selectedSideLogoRef.current !== clickedSide) selectLogo(clickedSide);
-      if (!sideLogoLocked) startInteraction(event, clickedSide, 'move');
+      startInteraction(event, clickedSide, 'move');
     };
 
     const onPointerMove = (event) => {
@@ -4186,11 +4309,9 @@ export default function HelmetBuilder() {
     if (!shellMeshes.length || !boundsWorld || !boundsModel) return;
 
     const cleanup = () => {
-      rearStickerMeshesRef.current.forEach(mesh => {
-        mesh.parent?.remove(mesh);
-        mesh.geometry?.dispose?.();
-      });
-      rearStickerMaterialsRef.current.forEach(mat => mat.dispose?.());
+      rearStickerMeshesRef.current.forEach(mesh => { mesh.parent?.remove(mesh); mesh.geometry?.dispose?.(); });
+      rearStickerMaterialsRef.current.forEach(mat => { mat.userData?.ownedTexture?.dispose?.(); mat.dispose?.(); });
+      ['rear-flag','rear-warning','rear-custom'].forEach(id => { delete editableDecalWorldFrameRef.current[id]; });
       rearStickerMeshesRef.current = [];
       rearStickerMaterialsRef.current = [];
     };
@@ -4198,7 +4319,9 @@ export default function HelmetBuilder() {
 
     const getRearHit = (across, vertical) => {
       const localTarget = new THREE.Vector3(
-        boundsModel.centerX + (across / 100) * boundsModel.width * 0.34,
+        // Rear view is mirrored relative to model-local X, so invert this mapping
+        // to make the Across slider follow the user's screen direction.
+        boundsModel.centerX - (across / 100) * boundsModel.width * 0.34,
         boundsModel.minY + boundsModel.height * (0.34 + (vertical / 100) * 0.24),
         boundsModel.minZ,
       );
@@ -4340,40 +4463,63 @@ export default function HelmetBuilder() {
       mainMesh.receiveShadow = false;
       scene.add(mainMesh);
 
-      rearStickerMeshesRef.current.push(shadowMesh, mainMesh);
-      rearStickerMaterialsRef.current.push(shadowMat, mainMat);
+      const editableId = `rear-${slot}`;
+      const frameQuat = helper.quaternion.clone();
+      const frameRight = new THREE.Vector3(1, 0, 0).applyQuaternion(frameQuat).normalize();
+      const frameUp = new THREE.Vector3(0, 1, 0).applyQuaternion(frameQuat).normalize();
+      const frameCenter = projectorPosition.clone().addScaledVector(worldNormal, lift * 2.0);
+      const halfW = baseWidth * 0.50;
+      const halfH = baseHeight * 0.50;
+
+      editableDecalWorldFrameRef.current[editableId] = {
+        id:editableId, surface:'rear-shell', center:frameCenter,
+        corners:[
+          frameCenter.clone().addScaledVector(frameRight, -halfW).addScaledVector(frameUp,  halfH),
+          frameCenter.clone().addScaledVector(frameRight,  halfW).addScaledVector(frameUp,  halfH),
+          frameCenter.clone().addScaledVector(frameRight, -halfW).addScaledVector(frameUp, -halfH),
+          frameCenter.clone().addScaledVector(frameRight,  halfW).addScaledVector(frameUp, -halfH),
+        ],
+      };
+
+      const hitProxyGeo = new THREE.PlaneGeometry(baseWidth, baseHeight, 1, 1);
+      const hitProxyMat = new THREE.MeshBasicMaterial({ transparent:true, opacity:0, colorWrite:false, depthWrite:false, depthTest:false, side:THREE.DoubleSide });
+      const hitProxy = new THREE.Mesh(hitProxyGeo, hitProxyMat);
+      hitProxy.name = `RearSticker_${slot}_HitProxy`;
+      hitProxy.userData.editableDecalId = editableId;
+      hitProxy.userData.editableDecalMain = true;
+      hitProxy.position.copy(frameCenter);
+      hitProxy.quaternion.copy(frameQuat);
+      hitProxy.renderOrder = 96;
+      scene.add(hitProxy);
+
+      rearStickerMeshesRef.current.push(shadowMesh, mainMesh, hitProxy);
+      rearStickerMaterialsRef.current.push(shadowMat, mainMat, hitProxyMat);
+
+      if (selectedEditableDecalRef.current === editableId) {
+        const selectionTex = createSelectionBoxTexture();
+        const selectionGeo = new THREE.PlaneGeometry(baseWidth * 1.10, baseHeight * 1.10, 1, 1);
+        const selectionMat = new THREE.MeshBasicMaterial({ map:selectionTex, transparent:true, alphaTest:0.02, depthTest:false, depthWrite:false, toneMapped:false, side:THREE.DoubleSide });
+        selectionMat.userData.ownedTexture = selectionTex;
+        const selectionMesh = new THREE.Mesh(selectionGeo, selectionMat);
+        selectionMesh.name = `RearSticker_${slot}_Selection`;
+        selectionMesh.userData.editableDecalId = editableId;
+        selectionMesh.userData.editableDecalSelection = true;
+        selectionMesh.position.copy(frameCenter);
+        selectionMesh.quaternion.copy(frameQuat);
+        selectionMesh.renderOrder = 110;
+        scene.add(selectionMesh);
+        rearStickerMeshesRef.current.push(selectionMesh);
+        rearStickerMaterialsRef.current.push(selectionMat);
+      }
     };
 
-    makeSticker({
-      slot:'flag',
-      enabled:rearFlagEnabled,
-      image:rearFlagImageRef.current,
-      scale:rearFlagScale,
-      rotation:rearFlagRotation,
-      across:rearFlagAcross,
-      vertical:rearFlagVertical,
-    });
+    const flagPlacement = editableDecalPlacementRef.current['rear-flag'];
+    const warningPlacement = editableDecalPlacementRef.current['rear-warning'];
+    const customPlacement = editableDecalPlacementRef.current['rear-custom'];
 
-    makeSticker({
-      slot:'warning',
-      enabled:rearWarningEnabled,
-      image:rearWarningImageRef.current,
-      scale:rearWarningScale,
-      rotation:rearWarningRotation,
-      across:rearWarningAcross,
-      vertical:rearWarningVertical,
-      color:rearWarningColor,
-    });
-
-    makeSticker({
-      slot:'custom',
-      enabled:rearCustomEnabled,
-      image:rearCustomImageRef.current,
-      scale:rearCustomScale,
-      rotation:rearCustomRotation,
-      across:rearCustomAcross,
-      vertical:rearCustomVertical,
-    });
+    makeSticker({ slot:'flag', enabled:rearFlagEnabled, image:rearFlagImageRef.current, ...flagPlacement });
+    makeSticker({ slot:'warning', enabled:rearWarningEnabled, image:rearWarningImageRef.current, ...warningPlacement, color:rearWarningColor });
+    makeSticker({ slot:'custom', enabled:rearCustomEnabled, image:rearCustomImageRef.current, ...customPlacement });
 
     return cleanup;
   }, [
@@ -4395,6 +4541,8 @@ export default function HelmetBuilder() {
     rearCustomRotation,
     rearCustomAcross,
     rearCustomVertical,
+    selectedEditableDecal,
+    editableDecalRevision,
   ]);
 
   useEffect(() => () => {
@@ -4431,7 +4579,9 @@ export default function HelmetBuilder() {
 
     const cleanup = () => {
       bumperLogoMeshesRef.current.forEach(mesh => { mesh.parent?.remove(mesh); mesh.geometry?.dispose?.(); });
-      bumperLogoMaterialsRef.current.forEach(mat => mat.dispose?.());
+      bumperLogoMaterialsRef.current.forEach(mat => { mat.userData?.ownedTexture?.dispose?.(); mat.dispose?.(); });
+      delete editableDecalWorldFrameRef.current['bumper-front'];
+      delete editableDecalWorldFrameRef.current['bumper-rear'];
       bumperLogoMeshesRef.current = [];
       bumperLogoMaterialsRef.current = [];
     };
@@ -4469,10 +4619,17 @@ export default function HelmetBuilder() {
       const isFront = slot === 'front';
       const image = isFront ? bumperLogoFrontImageRef.current : bumperLogoRearImageRef.current;
       if (!image) return;
-      const scaleValue = isFront ? bumperLogoFrontScale : bumperLogoRearScale;
-      const rotationValue = isFront ? bumperLogoFrontRotation : bumperLogoRearRotation;
-      const acrossValue = isFront ? bumperLogoFrontAcross : bumperLogoRearAcross;
-      const verticalValue = isFront ? bumperLogoFrontVertical : bumperLogoRearVertical;
+      const editableId = `bumper-${slot}`;
+      const placement = editableDecalPlacementRef.current[editableId] || {
+        scale:isFront ? bumperLogoFrontScale : bumperLogoRearScale,
+        rotation:isFront ? bumperLogoFrontRotation : bumperLogoRearRotation,
+        across:isFront ? bumperLogoFrontAcross : bumperLogoRearAcross,
+        vertical:isFront ? bumperLogoFrontVertical : bumperLogoRearVertical,
+      };
+      const scaleValue = placement.scale;
+      const rotationValue = placement.rotation;
+      const acrossValue = placement.across;
+      const verticalValue = placement.vertical;
       const hit = getBumperHit(slot, acrossValue, verticalValue);
       if (!hit) return;
 
@@ -4556,8 +4713,37 @@ export default function HelmetBuilder() {
 
         const shadowMeshes = createCarrierSurfaceLogoMeshes(scene, bumperMeshes, shadowMat, 'bumper-front', 'Shadow', 34);
         const mainMeshes = createCarrierSurfaceLogoMeshes(scene, bumperMeshes, mainMat, 'bumper-front', 'Artwork', 35);
-        bumperLogoMeshesRef.current.push(...shadowMeshes, ...mainMeshes);
-        bumperLogoMaterialsRef.current.push(shadowMat, mainMat);
+        const frameQuat = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, frontNormal));
+        const frameCenter = center.clone().addScaledVector(frontNormal, lift * 1.6);
+        const halfW = projectedWidth * 0.50, halfH = projectedHeight * 0.50;
+        editableDecalWorldFrameRef.current[editableId] = {
+          id:editableId, surface:'bumper-front', center:frameCenter,
+          corners:[
+            frameCenter.clone().addScaledVector(right, -halfW).addScaledVector(up,  halfH),
+            frameCenter.clone().addScaledVector(right,  halfW).addScaledVector(up,  halfH),
+            frameCenter.clone().addScaledVector(right, -halfW).addScaledVector(up, -halfH),
+            frameCenter.clone().addScaledVector(right,  halfW).addScaledVector(up, -halfH),
+          ],
+        };
+        const hitProxyGeo = new THREE.PlaneGeometry(projectedWidth, projectedHeight, 1, 1);
+        const hitProxyMat = new THREE.MeshBasicMaterial({ transparent:true, opacity:0, colorWrite:false, depthWrite:false, depthTest:false, side:THREE.DoubleSide });
+        const hitProxy = new THREE.Mesh(hitProxyGeo, hitProxyMat);
+        hitProxy.name = 'BumperLogo_front_HitProxy';
+        hitProxy.userData.editableDecalId = editableId;
+        hitProxy.userData.editableDecalMain = true;
+        hitProxy.position.copy(frameCenter); hitProxy.quaternion.copy(frameQuat); hitProxy.renderOrder = 96; scene.add(hitProxy);
+        bumperLogoMeshesRef.current.push(...shadowMeshes, ...mainMeshes, hitProxy);
+        bumperLogoMaterialsRef.current.push(shadowMat, mainMat, hitProxyMat);
+        if (selectedEditableDecalRef.current === editableId) {
+          const selectionTex = createSelectionBoxTexture();
+          const selectionGeo = new THREE.PlaneGeometry(projectedWidth * 1.10, projectedHeight * 1.10, 1, 1);
+          const selectionMat = new THREE.MeshBasicMaterial({ map:selectionTex, transparent:true, alphaTest:0.02, depthTest:false, depthWrite:false, toneMapped:false, side:THREE.DoubleSide });
+          selectionMat.userData.ownedTexture = selectionTex;
+          const selectionMesh = new THREE.Mesh(selectionGeo, selectionMat);
+          selectionMesh.name = 'BumperLogo_front_Selection'; selectionMesh.userData.editableDecalId = editableId; selectionMesh.userData.editableDecalSelection = true;
+          selectionMesh.position.copy(frameCenter); selectionMesh.quaternion.copy(frameQuat); selectionMesh.renderOrder = 110; scene.add(selectionMesh);
+          bumperLogoMeshesRef.current.push(selectionMesh); bumperLogoMaterialsRef.current.push(selectionMat);
+        }
         return;
       }
 
@@ -4616,8 +4802,37 @@ export default function HelmetBuilder() {
       mainMesh.receiveShadow = false;
       scene.add(mainMesh);
 
-      bumperLogoMeshesRef.current.push(shadowMesh, mainMesh);
-      bumperLogoMaterialsRef.current.push(shadowMat, mainMat);
+      const frameQuat = helper.quaternion.clone();
+      const frameRight = new THREE.Vector3(1, 0, 0).applyQuaternion(frameQuat).normalize();
+      const frameUp = new THREE.Vector3(0, 1, 0).applyQuaternion(frameQuat).normalize();
+      const frameCenter = projectorPosition.clone().addScaledVector(worldNormal, lift * 1.8);
+      const halfW = baseWidth * 0.50, halfH = baseHeight * 0.50;
+      editableDecalWorldFrameRef.current[editableId] = {
+        id:editableId, surface:'bumper-rear', center:frameCenter,
+        corners:[
+          frameCenter.clone().addScaledVector(frameRight, -halfW).addScaledVector(frameUp,  halfH),
+          frameCenter.clone().addScaledVector(frameRight,  halfW).addScaledVector(frameUp,  halfH),
+          frameCenter.clone().addScaledVector(frameRight, -halfW).addScaledVector(frameUp, -halfH),
+          frameCenter.clone().addScaledVector(frameRight,  halfW).addScaledVector(frameUp, -halfH),
+        ],
+      };
+      const hitProxyGeo = new THREE.PlaneGeometry(baseWidth, baseHeight, 1, 1);
+      const hitProxyMat = new THREE.MeshBasicMaterial({ transparent:true, opacity:0, colorWrite:false, depthWrite:false, depthTest:false, side:THREE.DoubleSide });
+      const hitProxy = new THREE.Mesh(hitProxyGeo, hitProxyMat);
+      hitProxy.name = 'BumperLogo_rear_HitProxy'; hitProxy.userData.editableDecalId = editableId; hitProxy.userData.editableDecalMain = true;
+      hitProxy.position.copy(frameCenter); hitProxy.quaternion.copy(frameQuat); hitProxy.renderOrder = 96; scene.add(hitProxy);
+      bumperLogoMeshesRef.current.push(shadowMesh, mainMesh, hitProxy);
+      bumperLogoMaterialsRef.current.push(shadowMat, mainMat, hitProxyMat);
+      if (selectedEditableDecalRef.current === editableId) {
+        const selectionTex = createSelectionBoxTexture();
+        const selectionGeo = new THREE.PlaneGeometry(baseWidth * 1.10, baseHeight * 1.10, 1, 1);
+        const selectionMat = new THREE.MeshBasicMaterial({ map:selectionTex, transparent:true, alphaTest:0.02, depthTest:false, depthWrite:false, toneMapped:false, side:THREE.DoubleSide });
+        selectionMat.userData.ownedTexture = selectionTex;
+        const selectionMesh = new THREE.Mesh(selectionGeo, selectionMat);
+        selectionMesh.name = 'BumperLogo_rear_Selection'; selectionMesh.userData.editableDecalId = editableId; selectionMesh.userData.editableDecalSelection = true;
+        selectionMesh.position.copy(frameCenter); selectionMesh.quaternion.copy(frameQuat); selectionMesh.renderOrder = 110; scene.add(selectionMesh);
+        bumperLogoMeshesRef.current.push(selectionMesh); bumperLogoMaterialsRef.current.push(selectionMat);
+      }
     };
 
     makeBumperLogo('front');
@@ -4635,6 +4850,8 @@ export default function HelmetBuilder() {
     bumperLogoFrontVertical,
     bumperLogoRearVertical,
     bumperLogoRearCurve,
+    selectedEditableDecal,
+    editableDecalRevision,
   ]);
 
   useEffect(() => () => {
@@ -4644,6 +4861,153 @@ export default function HelmetBuilder() {
     });
     bumperLogoPackCacheRef.current = { front:null, rear:null };
   }, []);
+
+  useEffect(() => {
+    if (!loaded) return;
+    const renderer = rendererRef.current, camera = cameraRef.current, model = modelRef.current;
+    if (!renderer || !camera || !model) return;
+    const canvas = renderer.domElement;
+
+    let shellRoots = partObjectsRef.current[partKey('Shell')] || [];
+    let bumperRoots = partObjectsRef.current[partKey('Bumpers')] || [];
+    if (!shellRoots.length || !bumperRoots.length) {
+      model.traverse(obj => {
+        const key = partKey(obj.name);
+        if (key === partKey('Shell') && !shellRoots.includes(obj)) shellRoots.push(obj);
+        if (key === partKey('Bumpers') && !bumperRoots.includes(obj)) bumperRoots.push(obj);
+      });
+    }
+    const shellMeshes = collectMeshDescendants(shellRoots);
+    const bumperMeshes = collectMeshDescendants(bumperRoots);
+    const shellBounds = computeRootsBoundsInModelSpace(model, shellRoots);
+    const bumperBounds = computeRootsBoundsInModelSpace(model, bumperRoots);
+    if (!shellBounds || !bumperBounds) return;
+
+    const pointer = new THREE.Vector2();
+    const raycaster = new THREE.Raycaster();
+    const ROTATE_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cpath d='M21.8 8.3A9.2 9.2 0 1 0 23 17' fill='none' stroke='%23efff00' stroke-width='2.2' stroke-linecap='round'/%3E%3Cpath d='M18.5 4.2 22.4 8l-5.2 1.4' fill='none' stroke='%23efff00' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") 14 14, grab`;
+    const updatePointer = event => {
+      const rect = canvas.getBoundingClientRect();
+      pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(pointer, camera);
+    };
+    const worldToClient = worldPoint => {
+      const rect = canvas.getBoundingClientRect(), ndc = worldPoint.clone().project(camera);
+      return { x:rect.left + (ndc.x + 1) * 0.5 * rect.width, y:rect.top + (1 - ndc.y) * 0.5 * rect.height };
+    };
+    const getSelectedFrameClient = () => {
+      const id = selectedEditableDecalRef.current, frame = id ? editableDecalWorldFrameRef.current[id] : null;
+      if (!id || !frame) return null;
+      return { id, center:worldToClient(frame.center), corners:frame.corners.map(worldToClient) };
+    };
+    const getCornerInteraction = event => {
+      const frame = getSelectedFrameClient();
+      if (!frame || editableDecalLockRef.current[frame.id]) return null;
+      let nearest = null;
+      frame.corners.forEach((corner,index) => {
+        const distance = Math.hypot(event.clientX-corner.x, event.clientY-corner.y);
+        if (!nearest || distance < nearest.distance) nearest = { index, distance };
+      });
+      if (!nearest) return null;
+      if (nearest.distance <= 11) return { action:'scale', frame, cornerIndex:nearest.index };
+      if (nearest.distance <= 30) return { action:'rotate', frame, cornerIndex:nearest.index };
+      return null;
+    };
+    const findClickedEditable = event => {
+      updatePointer(event);
+      const selectable = [...rearStickerMeshesRef.current, ...bumperLogoMeshesRef.current].filter(mesh => mesh.userData?.editableDecalMain);
+      return raycaster.intersectObjects(selectable,false)[0]?.object?.userData?.editableDecalId || null;
+    };
+    const projectPointerToSurface = (event,id) => {
+      updatePointer(event);
+      const isRearSticker = id.startsWith('rear-');
+      const sourceMeshes = isRearSticker ? shellMeshes : bumperMeshes;
+      const bounds = isRearSticker ? shellBounds : bumperBounds;
+      const hits = raycaster.intersectObjects(sourceMeshes,false);
+      if (!hits.length) return null;
+      const inv = new THREE.Matrix4().copy(model.matrixWorld).invert();
+      return hits.find(hit => {
+        const local = hit.point.clone().applyMatrix4(inv);
+        if (isRearSticker || id === 'bumper-rear') return local.z <= bounds.centerZ;
+        if (id === 'bumper-front') return local.z >= bounds.centerZ;
+        return true;
+      }) || null;
+    };
+    const triggerRebuild = id => {
+      if (id.startsWith('rear-')) setRearStickerRevision(v=>v+1); else setBumperLogoRevision(v=>v+1);
+      setEditableDecalRevision(v=>v+1);
+    };
+    const selectEditable = id => { selectedEditableDecalRef.current=id; setSelectedEditableDecal(id); triggerRebuild(id); };
+    const deselectEditable = () => {
+      const previous=selectedEditableDecalRef.current; selectedEditableDecalRef.current=null; setSelectedEditableDecal(null);
+      if (previous) triggerRebuild(previous); canvas.style.cursor='';
+    };
+    const startInteraction = (event,id,action,frame=null) => {
+      const placement=editableDecalPlacementRef.current[id]; if (!placement) return;
+      const centerClient=frame?.center || getSelectedFrameClient()?.center || {x:event.clientX,y:event.clientY};
+      const dx=event.clientX-centerClient.x, dy=event.clientY-centerClient.y;
+      editableDecalInteractionRef.current={ dragging:true, pointerId:event.pointerId, id, action, startPlacement:{...placement}, startDistance:Math.max(8,Math.hypot(dx,dy)), startAngle:Math.atan2(dy,dx), centerClient, changed:false };
+      try { canvas.setPointerCapture?.(event.pointerId); } catch {}
+      if (controlsRef.current) controlsRef.current.enabled=false;
+    };
+    const onPointerDown = event => {
+      if (event.button!==0) return;
+      const corner=getCornerInteraction(event);
+      if (corner) { event.preventDefault(); event.stopPropagation(); startInteraction(event,corner.frame.id,corner.action,corner.frame); return; }
+      const clickedId=findClickedEditable(event);
+      if (!clickedId) { if (selectedEditableDecalRef.current) deselectEditable(); return; }
+      if (selectedEditableDecalRef.current!==clickedId) selectEditable(clickedId);
+      if (editableDecalLockRef.current[clickedId]) return;
+      event.preventDefault(); event.stopPropagation(); startInteraction(event,clickedId,'move');
+    };
+    const onPointerMove = event => {
+      const interaction=editableDecalInteractionRef.current;
+      if (!interaction.dragging) {
+        const corner=getCornerInteraction(event);
+        if (corner?.action==='scale') { canvas.style.cursor=(corner.cornerIndex===0||corner.cornerIndex===3)?'nwse-resize':'nesw-resize'; return; }
+        if (corner?.action==='rotate') { canvas.style.cursor=ROTATE_CURSOR; return; }
+        const hoverId=findClickedEditable(event);
+        if (!hoverId) canvas.style.cursor=''; else if (editableDecalLockRef.current[hoverId]) canvas.style.cursor='grab'; else if (hoverId===selectedEditableDecalRef.current) canvas.style.cursor='move'; else canvas.style.cursor='pointer';
+        return;
+      }
+      const id=interaction.id, placement=editableDecalPlacementRef.current[id]; if (!id||!placement) return;
+      event.preventDefault(); event.stopPropagation();
+      if (interaction.action==='move') {
+        const hit=projectPointerToSurface(event,id); if (!hit) return;
+        const local=hit.point.clone(); model.worldToLocal(local);
+        if (id.startsWith('rear-')) {
+          placement.across=THREE.MathUtils.clamp(-((local.x-shellBounds.centerX)/(shellBounds.width*0.34))*100,-80,80);
+          placement.vertical=THREE.MathUtils.clamp(((((local.y-shellBounds.minY)/shellBounds.height)-0.34)/0.24)*100,-80,80);
+        } else {
+          placement.across=THREE.MathUtils.clamp(((local.x-bumperBounds.centerX)/(bumperBounds.width*0.30))*100,-80,80);
+          const baseY=id==='bumper-front'?bumperBounds.maxY-bumperBounds.height*0.10:bumperBounds.minY+bumperBounds.height*0.10;
+          placement.vertical=THREE.MathUtils.clamp(((local.y-baseY)/(bumperBounds.height*0.12))*100,-80,80);
+        }
+        canvas.style.cursor='move';
+      } else if (interaction.action==='scale') {
+        const dx=event.clientX-interaction.centerClient.x, dy=event.clientY-interaction.centerClient.y;
+        const d=Math.max(8,Math.hypot(dx,dy)), min=id.startsWith('bumper-')?1:0.4, max=id.startsWith('bumper-')?24:2.6;
+        placement.scale=THREE.MathUtils.clamp(interaction.startPlacement.scale*(d/interaction.startDistance),min,max);
+      } else if (interaction.action==='rotate') {
+        const dx=event.clientX-interaction.centerClient.x, dy=event.clientY-interaction.centerClient.y;
+        const current=Math.atan2(dy,dx); let delta=current-interaction.startAngle;
+        while (delta>Math.PI) delta-=Math.PI*2; while (delta<-Math.PI) delta+=Math.PI*2;
+        placement.rotation=THREE.MathUtils.clamp(interaction.startPlacement.rotation-THREE.MathUtils.radToDeg(delta),-180,180);
+        canvas.style.cursor=ROTATE_CURSOR;
+      }
+      interaction.changed=true; triggerRebuild(id);
+    };
+    const endInteraction = event => {
+      const interaction=editableDecalInteractionRef.current; if (!interaction.dragging) return;
+      if (interaction.changed&&interaction.id&&interaction.startPlacement) { pushEditableDecalUndo(interaction.id,interaction.startPlacement); commitEditableDecalPlacement(interaction.id,editableDecalPlacementRef.current[interaction.id]); }
+      interaction.dragging=false; interaction.pointerId=null; interaction.id=null; interaction.action=null; interaction.startPlacement=null; interaction.changed=false;
+      try { canvas.releasePointerCapture?.(event.pointerId); } catch {}
+      if (controlsRef.current) controlsRef.current.enabled=true;
+    };
+    canvas.addEventListener('pointerdown',onPointerDown,true); canvas.addEventListener('pointermove',onPointerMove); canvas.addEventListener('pointerup',endInteraction); canvas.addEventListener('pointercancel',endInteraction);
+    return()=>{ canvas.removeEventListener('pointerdown',onPointerDown,true); canvas.removeEventListener('pointermove',onPointerMove); canvas.removeEventListener('pointerup',endInteraction); canvas.removeEventListener('pointercancel',endInteraction); if (controlsRef.current) controlsRef.current.enabled=true; };
+  }, [loaded, commitEditableDecalPlacement, pushEditableDecalUndo]);
 
   // ── MAIN DECAL FINISH — wraps + stripes + side logos ─────────────────────────
   useEffect(() => {
@@ -5861,7 +6225,7 @@ export default function HelmetBuilder() {
 
                 <CollapsibleSection title="REAR STICKERS">
                   <div style={{ fontSize:10, color:'#6b7280', lineHeight:1.5, marginBottom:10 }}>
-                    Add common rear-shell stickers or upload your own. Stickers project directly onto the helmet shell, stay off the bumper, and use the main decal finish.
+                    Add common rear-shell stickers or upload your own. Click a sticker on the helmet to select it, drag to move, use the corner handles to scale/rotate, then lock it when placed. Sliders remain available for precise adjustments.
                   </div>
 
                   {rearStickerError && (
@@ -5872,6 +6236,10 @@ export default function HelmetBuilder() {
                     <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, marginBottom:8 }}>
                       <div style={{ fontSize:9, fontWeight:800, color:'#9ca3af', letterSpacing:'0.07em' }}>US FLAG</div>
                       <button onClick={() => setRearFlagEnabled(v => !v)} style={{ background:rearFlagEnabled?'rgba(239,255,0,0.10)':'rgba(255,255,255,0.04)', border:rearFlagEnabled?'1px solid rgba(239,255,0,0.35)':'1px solid rgba(255,255,255,0.10)', borderRadius:5, padding:'4px 7px', cursor:'pointer', color:rearFlagEnabled?'#efff00':'#9ca3af', fontSize:8, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif" }}>{rearFlagEnabled?'ON':'OFF'}</button>
+                    </div>
+                    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:6, marginBottom:8 }}>
+                      <button onClick={() => undoEditableDecalMove('rear-flag')} disabled={!editableDecalUndoCounts['rear-flag']} style={{ background:editableDecalUndoCounts['rear-flag']?'rgba(239,255,0,0.08)':'rgba(255,255,255,0.025)', border:editableDecalUndoCounts['rear-flag']?'1px solid rgba(239,255,0,0.24)':'1px solid rgba(255,255,255,0.06)', borderRadius:5, padding:'5px 6px', cursor:editableDecalUndoCounts['rear-flag']?'pointer':'default', color:editableDecalUndoCounts['rear-flag']?'#efff00':'#4b5563', fontSize:8, fontWeight:800 }}>↶ UNDO MOVE</button>
+                      <button onClick={() => setRearFlagLocked(v => !v)} style={{ background:rearFlagLocked?'rgba(239,255,0,0.10)':'rgba(255,255,255,0.04)', border:rearFlagLocked?'1px solid rgba(239,255,0,0.35)':'1px solid rgba(255,255,255,0.10)', borderRadius:5, padding:'5px 6px', cursor:'pointer', color:rearFlagLocked?'#efff00':'#9ca3af', fontSize:8, fontWeight:800 }}>{rearFlagLocked?'LOCKED':'UNLOCKED'}</button>
                     </div>
                     <div style={{ width:'100%', aspectRatio:'3 / 1', display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden', borderRadius:6, border:'1px solid rgba(255,255,255,0.08)', background:'#c8cdd4', marginBottom:8 }}>
                       <img src={REAR_FLAG_URL} alt="US flag rear sticker" style={{ width:'100%', height:'100%', objectFit:'contain', opacity:rearFlagEnabled?1:0.4 }} />
@@ -5893,6 +6261,10 @@ export default function HelmetBuilder() {
                     <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, marginBottom:8 }}>
                       <div style={{ fontSize:9, fontWeight:800, color:'#9ca3af', letterSpacing:'0.07em' }}>WARNING LABEL</div>
                       <button onClick={() => setRearWarningEnabled(v => !v)} style={{ background:rearWarningEnabled?'rgba(239,255,0,0.10)':'rgba(255,255,255,0.04)', border:rearWarningEnabled?'1px solid rgba(239,255,0,0.35)':'1px solid rgba(255,255,255,0.10)', borderRadius:5, padding:'4px 7px', cursor:'pointer', color:rearWarningEnabled?'#efff00':'#9ca3af', fontSize:8, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif" }}>{rearWarningEnabled?'ON':'OFF'}</button>
+                    </div>
+                    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:6, marginBottom:8 }}>
+                      <button onClick={() => undoEditableDecalMove('rear-warning')} disabled={!editableDecalUndoCounts['rear-warning']} style={{ background:editableDecalUndoCounts['rear-warning']?'rgba(239,255,0,0.08)':'rgba(255,255,255,0.025)', border:editableDecalUndoCounts['rear-warning']?'1px solid rgba(239,255,0,0.24)':'1px solid rgba(255,255,255,0.06)', borderRadius:5, padding:'5px 6px', cursor:editableDecalUndoCounts['rear-warning']?'pointer':'default', color:editableDecalUndoCounts['rear-warning']?'#efff00':'#4b5563', fontSize:8, fontWeight:800 }}>↶ UNDO MOVE</button>
+                      <button onClick={() => setRearWarningLocked(v => !v)} style={{ background:rearWarningLocked?'rgba(239,255,0,0.10)':'rgba(255,255,255,0.04)', border:rearWarningLocked?'1px solid rgba(239,255,0,0.35)':'1px solid rgba(255,255,255,0.10)', borderRadius:5, padding:'5px 6px', cursor:'pointer', color:rearWarningLocked?'#efff00':'#9ca3af', fontSize:8, fontWeight:800 }}>{rearWarningLocked?'LOCKED':'UNLOCKED'}</button>
                     </div>
                     <div style={{ width:'100%', aspectRatio:'3 / 1', position:'relative', overflow:'hidden', borderRadius:6, border:'1px solid rgba(255,255,255,0.08)', background:'#c8cdd4', marginBottom:8 }}>
                       <div style={{
@@ -5940,6 +6312,10 @@ export default function HelmetBuilder() {
                             <button onClick={removeRearCustomSticker} style={{ background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:5, padding:'3px 6px', cursor:'pointer', color:'#ef4444', fontSize:8, fontWeight:700 }}>REMOVE</button>
                           </div>
                         </div>
+                        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:6, marginBottom:8 }}>
+                          <button onClick={() => undoEditableDecalMove('rear-custom')} disabled={!editableDecalUndoCounts['rear-custom']} style={{ background:editableDecalUndoCounts['rear-custom']?'rgba(239,255,0,0.08)':'rgba(255,255,255,0.025)', border:editableDecalUndoCounts['rear-custom']?'1px solid rgba(239,255,0,0.24)':'1px solid rgba(255,255,255,0.06)', borderRadius:5, padding:'5px 6px', cursor:editableDecalUndoCounts['rear-custom']?'pointer':'default', color:editableDecalUndoCounts['rear-custom']?'#efff00':'#4b5563', fontSize:8, fontWeight:800 }}>↶ UNDO MOVE</button>
+                          <button onClick={() => setRearCustomLocked(v => !v)} style={{ background:rearCustomLocked?'rgba(239,255,0,0.10)':'rgba(255,255,255,0.04)', border:rearCustomLocked?'1px solid rgba(239,255,0,0.35)':'1px solid rgba(255,255,255,0.10)', borderRadius:5, padding:'5px 6px', cursor:'pointer', color:rearCustomLocked?'#efff00':'#9ca3af', fontSize:8, fontWeight:800 }}>{rearCustomLocked?'LOCKED':'UNLOCKED'}</button>
+                        </div>
                         <div style={{ width:'100%', aspectRatio:'3 / 1', display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden', borderRadius:6, border:'1px solid rgba(255,255,255,0.08)', backgroundColor:'#c8cdd4', backgroundImage:'linear-gradient(45deg, rgba(255,255,255,0.95) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.95) 75%, rgba(255,255,255,0.95)), linear-gradient(45deg, rgba(255,255,255,0.95) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.95) 75%, rgba(255,255,255,0.95))', backgroundSize:'14px 14px', backgroundPosition:'0 0, 7px 7px', marginBottom:8 }}>
                           <img src={rearCustomPreviewUrl} alt="Custom rear sticker preview" style={{ width:'100%', height:'100%', objectFit:'contain', opacity:rearCustomEnabled?1:0.4 }} />
                         </div>
@@ -5961,7 +6337,7 @@ export default function HelmetBuilder() {
 
                 <CollapsibleSection title="BUMPER LOGOS">
                   <div style={{ fontSize:10, color:'#6b7280', lineHeight:1.5, marginBottom:10 }}>
-                    Add independent logos to the front and rear bumpers. Artwork can scale continuously across the bumper width and remains clipped by the physical bumper geometry. Rear wordmarks include an adjustable Curve correction to counter the visual smile created by the curved bumper and now default slightly smaller/lower. Bumper logos use their own independent finish control and the same subtle raised-vinyl effect.
+                    Add independent logos to the front and rear bumpers. Click a logo on the helmet to select it, drag to move, and use the corner handles to scale/rotate. Lock it when placed; Undo Move restores the previous direct-manipulation position. Sliders remain available for precision. Rear wordmarks retain the Curve correction for curved bumper geometry.
                   </div>
                   {bumperLogoError && <div style={{ marginBottom:10, fontSize:10, color:'#ef4444', lineHeight:1.4 }}>{bumperLogoError}</div>}
                   <SectionLabel>Bumper Logo Finish</SectionLabel>
@@ -5993,11 +6369,13 @@ export default function HelmetBuilder() {
                       slot:'front', title:'FRONT BUMPER', inputId:'front-bumper-logo-upload', preview:bumperLogoFrontPreviewUrl, fileName:bumperLogoFrontFileName,
                       scale:bumperLogoFrontScale, setScale:setBumperLogoFrontScale, rotation:bumperLogoFrontRotation, setRotation:setBumperLogoFrontRotation,
                       across:bumperLogoFrontAcross, setAcross:setBumperLogoFrontAcross, vertical:bumperLogoFrontVertical, setVertical:setBumperLogoFrontVertical,
+                      locked:bumperLogoFrontLocked, setLocked:setBumperLogoFrontLocked, undoCount:editableDecalUndoCounts['bumper-front'],
                     },
                     {
                       slot:'rear', title:'REAR BUMPER', inputId:'rear-bumper-logo-upload', preview:bumperLogoRearPreviewUrl, fileName:bumperLogoRearFileName,
                       scale:bumperLogoRearScale, setScale:setBumperLogoRearScale, rotation:bumperLogoRearRotation, setRotation:setBumperLogoRearRotation,
                       across:bumperLogoRearAcross, setAcross:setBumperLogoRearAcross, vertical:bumperLogoRearVertical, setVertical:setBumperLogoRearVertical,
+                      locked:bumperLogoRearLocked, setLocked:setBumperLogoRearLocked, undoCount:editableDecalUndoCounts['bumper-rear'],
                     },
                   ].map(item => (
                     <div key={item.slot} style={{ background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.05)', borderRadius:8, padding:9, marginBottom:9 }}>
@@ -6010,6 +6388,10 @@ export default function HelmetBuilder() {
                           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:7, marginTop:7, marginBottom:8 }}>
                             <div style={{ fontSize:8, color:'#9ca3af', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={item.fileName}>{item.fileName}</div>
                             <button onClick={() => removeBumperLogo(item.slot)} style={{ background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:5, padding:'3px 6px', cursor:'pointer', color:'#ef4444', fontSize:8, fontWeight:700 }}>REMOVE</button>
+                          </div>
+                          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:6, marginBottom:8 }}>
+                            <button onClick={() => undoEditableDecalMove(`bumper-${item.slot}`)} disabled={!item.undoCount} style={{ background:item.undoCount?'rgba(239,255,0,0.08)':'rgba(255,255,255,0.025)', border:item.undoCount?'1px solid rgba(239,255,0,0.24)':'1px solid rgba(255,255,255,0.06)', borderRadius:5, padding:'5px 6px', cursor:item.undoCount?'pointer':'default', color:item.undoCount?'#efff00':'#4b5563', fontSize:8, fontWeight:800 }}>↶ UNDO MOVE</button>
+                            <button onClick={() => item.setLocked(v => !v)} style={{ background:item.locked?'rgba(239,255,0,0.10)':'rgba(255,255,255,0.04)', border:item.locked?'1px solid rgba(239,255,0,0.35)':'1px solid rgba(255,255,255,0.10)', borderRadius:5, padding:'5px 6px', cursor:'pointer', color:item.locked?'#efff00':'#9ca3af', fontSize:8, fontWeight:800 }}>{item.locked?'LOCKED':'UNLOCKED'}</button>
                           </div>
                           <div style={{ position:'relative', width:'100%', aspectRatio:'3 / 1', overflow:'hidden', borderRadius:6, border:'1px solid rgba(255,255,255,0.08)', backgroundColor:'#c8cdd4', backgroundImage:'linear-gradient(45deg, rgba(255,255,255,0.95) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.95) 75%, rgba(255,255,255,0.95)), linear-gradient(45deg, rgba(255,255,255,0.95) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.95) 75%, rgba(255,255,255,0.95))', backgroundSize:'14px 14px', backgroundPosition:'0 0, 7px 7px', marginBottom:8 }}>
                             <img src={item.preview} alt={`${item.title} logo preview`} style={{ width:'100%', height:'100%', objectFit:'contain' }} />
@@ -6081,7 +6463,7 @@ export default function HelmetBuilder() {
             }}>
               <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, marginBottom:8 }}>
                 <div>
-                  <div style={{ fontSize:9, color:'#efff00', fontWeight:900, letterSpacing:'0.12em' }}>DEBUG MODE · v77 · REAR STICKERS</div>
+                  <div style={{ fontSize:9, color:'#efff00', fontWeight:900, letterSpacing:'0.12em' }}>DEBUG MODE · v78 · DIRECT DECAL EDIT</div>
                   <div style={{ fontSize:8, color:'#6b7280', marginTop:2 }}>Live renderer + asset timing · Ctrl+Shift+D toggles</div>
                 </div>
                 <button
