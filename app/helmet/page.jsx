@@ -12,6 +12,8 @@ import { DecalGeometry } from 'three/addons/geometries/DecalGeometry.js';
 
 const HELMET_MODEL_URL = '/SpeedFlex-draco.glb';
 const DRACO_DECODER_PATH = '/draco/';
+const REAR_FLAG_URL = '/Flag-United-States-of-America.webp';
+const REAR_WARNING_URL = '/Warning-Label-White.png';
 
 // ── PART / COLOR ZONES ───────────────────────────────────────────────────────
 // `parts` uses the exact mesh/node names exported in SpeedFlex.glb.
@@ -1736,6 +1738,7 @@ export default function HelmetBuilder() {
   });
   const selectedSideLogoRef = useRef(null);
   const sideLogoWorldFrameRef = useRef({ left:null, right:null });
+  const sideLogoUndoStackRef = useRef([]);
   const sideLogoInteractionRef = useRef({
     dragging:false,
     pointerId:null,
@@ -1746,7 +1749,17 @@ export default function HelmetBuilder() {
     startDistance:1,
     startAngle:0,
     centerClient:null,
+    startPlacements:null,
+    changed:false,
   });
+
+  const rearStickerMeshesRef = useRef([]);
+  const rearStickerMaterialsRef = useRef([]);
+  const rearStickerPackCacheRef = useRef({ flag:null, warning:null, custom:null });
+  const rearFlagImageRef = useRef(null);
+  const rearWarningImageRef = useRef(null);
+  const rearCustomImageRef = useRef(null);
+  const rearCustomObjectUrlRef = useRef(null);
 
   // Shared shader-uniform objects for Shell stripe decals. The renderer keeps references
   // to these objects across material recompiles (wrap on/off, finish changes, etc.).
@@ -1984,6 +1997,30 @@ export default function HelmetBuilder() {
   const [sideLogoRevision, setSideLogoRevision] = useState(0);
   const [selectedSideLogo, setSelectedSideLogo] = useState(null); // left | right | null
   const [sideLogoLocked, setSideLogoLocked] = useState(false);
+  const [sideLogoUndoCount, setSideLogoUndoCount] = useState(0);
+
+  const [rearFlagEnabled, setRearFlagEnabled] = useState(false);
+  const [rearFlagScale, setRearFlagScale] = useState(1);
+  const [rearFlagRotation, setRearFlagRotation] = useState(0);
+  const [rearFlagAcross, setRearFlagAcross] = useState(24);
+  const [rearFlagVertical, setRearFlagVertical] = useState(2);
+
+  const [rearWarningEnabled, setRearWarningEnabled] = useState(false);
+  const [rearWarningColor, setRearWarningColor] = useState('#FFFFFF');
+  const [rearWarningScale, setRearWarningScale] = useState(1.08);
+  const [rearWarningRotation, setRearWarningRotation] = useState(0);
+  const [rearWarningAcross, setRearWarningAcross] = useState(-18);
+  const [rearWarningVertical, setRearWarningVertical] = useState(0);
+
+  const [rearCustomEnabled, setRearCustomEnabled] = useState(false);
+  const [rearCustomPreviewUrl, setRearCustomPreviewUrl] = useState(null);
+  const [rearCustomFileName, setRearCustomFileName] = useState('');
+  const [rearCustomScale, setRearCustomScale] = useState(1);
+  const [rearCustomRotation, setRearCustomRotation] = useState(0);
+  const [rearCustomAcross, setRearCustomAcross] = useState(0);
+  const [rearCustomVertical, setRearCustomVertical] = useState(18);
+  const [rearStickerError, setRearStickerError] = useState('');
+  const [rearStickerRevision, setRearStickerRevision] = useState(0);
 
   const [bumperLogoError, setBumperLogoError] = useState('');
   const [bumperLogoFrontPreviewUrl, setBumperLogoFrontPreviewUrl] = useState(null);
@@ -2323,6 +2360,100 @@ export default function HelmetBuilder() {
     if (stripeDesignTextureRef.current) stripeDesignTextureRef.current.dispose();
   }, []);
 
+  const clearSideLogoUndoHistory = useCallback(() => {
+    sideLogoUndoStackRef.current = [];
+    setSideLogoUndoCount(0);
+  }, []);
+
+  const undoSideLogoMove = useCallback(() => {
+    const previous = sideLogoUndoStackRef.current.pop();
+    if (!previous) return;
+
+    sideLogoPlacementRef.current.left = { ...previous.left };
+    sideLogoPlacementRef.current.right = { ...previous.right };
+    setSideLogoUndoCount(sideLogoUndoStackRef.current.length);
+    setSideLogoRevision(v => v + 1);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadPreset = (url, ref) => {
+      const img = new Image();
+      img.onload = () => {
+        if (cancelled) return;
+        ref.current = img;
+        setRearStickerRevision(v => v + 1);
+      };
+      img.onerror = () => {
+        if (!cancelled) {
+          console.warn(`[HelmetBuilder] Rear sticker preset failed to load: ${url}`);
+        }
+      };
+      img.src = url;
+    };
+
+    loadPreset(REAR_FLAG_URL, rearFlagImageRef);
+    loadPreset(REAR_WARNING_URL, rearWarningImageRef);
+
+    return () => { cancelled = true; };
+  }, []);
+
+  const handleRearCustomStickerUpload = useCallback((event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    const allowed = ['image/png', 'image/jpeg', 'image/webp'];
+    if (!allowed.includes(file.type)) {
+      setRearStickerError('Please upload a PNG, JPEG, or WebP rear sticker.');
+      return;
+    }
+
+    const objectUrl = URL.createObjectURL(file);
+    const img = new Image();
+
+    img.onload = () => {
+      if (rearCustomObjectUrlRef.current) {
+        URL.revokeObjectURL(rearCustomObjectUrlRef.current);
+      }
+
+      rearCustomObjectUrlRef.current = objectUrl;
+      rearCustomImageRef.current = img;
+      setRearCustomPreviewUrl(objectUrl);
+      setRearCustomFileName(file.name);
+      setRearCustomEnabled(true);
+      setRearStickerError('');
+      setRearStickerRevision(v => v + 1);
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      setRearStickerError('That rear sticker could not be read. Please try another PNG, JPEG, or WebP.');
+    };
+
+    img.src = objectUrl;
+  }, []);
+
+  const removeRearCustomSticker = useCallback(() => {
+    if (rearCustomObjectUrlRef.current) {
+      URL.revokeObjectURL(rearCustomObjectUrlRef.current);
+      rearCustomObjectUrlRef.current = null;
+    }
+    rearCustomImageRef.current = null;
+    setRearCustomPreviewUrl(null);
+    setRearCustomFileName('');
+    setRearCustomEnabled(false);
+    setRearStickerError('');
+    setRearStickerRevision(v => v + 1);
+  }, []);
+
+  useEffect(() => () => {
+    if (rearCustomObjectUrlRef.current) {
+      URL.revokeObjectURL(rearCustomObjectUrlRef.current);
+    }
+  }, []);
+
   const assignSideLogoFile = useCallback((slot, file) => {
     if (!file) return;
     if (!['image/png', 'image/jpeg'].includes(file.type)) {
@@ -2351,6 +2482,7 @@ export default function HelmetBuilder() {
       } else if (sideLogoPlacementRef.current[slot]) {
         sideLogoPlacementRef.current[slot] = cloneDefaultSideLogoPlacement();
       }
+      clearSideLogoUndoHistory();
       setSideLogoError('');
       setSideLogoRevision(v => v + 1);
     };
@@ -2359,7 +2491,7 @@ export default function HelmetBuilder() {
       setSideLogoError('That side logo file could not be read. Please try another PNG or JPEG.');
     };
     img.src = objectUrl;
-  }, []);
+  }, [clearSideLogoUndoHistory]);
 
   const handleSharedSideLogoUpload = useCallback((event) => {
     const file = event.target.files?.[0];
@@ -2394,8 +2526,9 @@ export default function HelmetBuilder() {
     target.ref.current = null;
     target.setPreview(null);
     target.setName('');
+    clearSideLogoUndoHistory();
     setSideLogoRevision(v => v + 1);
-  }, []);
+  }, [clearSideLogoUndoHistory]);
 
   useEffect(() => () => {
     [sideLogoSharedObjectUrlRef, sideLogoLeftObjectUrlRef, sideLogoRightObjectUrlRef].forEach(ref => {
@@ -3851,6 +3984,11 @@ export default function HelmetBuilder() {
         startDistance:Math.max(8, Math.hypot(dx, dy)),
         startAngle:Math.atan2(dy, dx),
         centerClient,
+        startPlacements:{
+          left:{ ...sideLogoPlacementRef.current.left },
+          right:{ ...sideLogoPlacementRef.current.right },
+        },
+        changed:false,
       };
       try { canvas.setPointerCapture?.(event.pointerId); } catch (_) {}
       if (controlsRef.current) controlsRef.current.enabled = false;
@@ -3958,6 +4096,8 @@ export default function HelmetBuilder() {
         canvas.style.cursor = ROTATE_CURSOR;
       }
 
+      sideLogoInteractionRef.current.changed = true;
+
       if (!sideLogoIndependent) {
         const otherSide = side === 'left' ? 'right' : 'left';
         sideLogoPlacementRef.current[otherSide] = { ...placement };
@@ -3967,10 +4107,26 @@ export default function HelmetBuilder() {
     };
 
     const endInteraction = (event) => {
-      if (!sideLogoInteractionRef.current.dragging) return;
-      sideLogoInteractionRef.current.dragging = false;
-      sideLogoInteractionRef.current.action = null;
-      sideLogoInteractionRef.current.side = null;
+      const interaction = sideLogoInteractionRef.current;
+      if (!interaction.dragging) return;
+
+      if (interaction.changed && interaction.startPlacements) {
+        sideLogoUndoStackRef.current.push({
+          left:{ ...interaction.startPlacements.left },
+          right:{ ...interaction.startPlacements.right },
+        });
+        if (sideLogoUndoStackRef.current.length > 20) {
+          sideLogoUndoStackRef.current.shift();
+        }
+        setSideLogoUndoCount(sideLogoUndoStackRef.current.length);
+      }
+
+      interaction.dragging = false;
+      interaction.action = null;
+      interaction.side = null;
+      interaction.startPlacements = null;
+      interaction.changed = false;
+
       try { canvas.releasePointerCapture?.(event.pointerId); } catch (_) {}
       if (controlsRef.current) controlsRef.current.enabled = true;
       setSideLogoRevision(v => v + 1);
@@ -4009,6 +4165,245 @@ export default function HelmetBuilder() {
     sideLogoRevision,
     sideLogoLocked,
   ]);
+
+  // ── REAR SHELL STICKERS ────────────────────────────────────────────────────
+  useEffect(() => {
+    const scene = sceneRef.current;
+    const model = modelRef.current;
+    if (!loaded || !scene || !model) return;
+
+    let shellRoots = partObjectsRef.current[partKey('Shell')] || [];
+    if (!shellRoots.length) {
+      const shellKey = partKey('Shell');
+      model.traverse(obj => {
+        if (partKey(obj.name) === shellKey) shellRoots.push(obj);
+      });
+    }
+
+    const shellMeshes = collectMeshDescendants(shellRoots);
+    const boundsWorld = getWorldBoundsForRoots(shellRoots);
+    const boundsModel = computeRootsBoundsInModelSpace(model, shellRoots);
+    if (!shellMeshes.length || !boundsWorld || !boundsModel) return;
+
+    const cleanup = () => {
+      rearStickerMeshesRef.current.forEach(mesh => {
+        mesh.parent?.remove(mesh);
+        mesh.geometry?.dispose?.();
+      });
+      rearStickerMaterialsRef.current.forEach(mat => mat.dispose?.());
+      rearStickerMeshesRef.current = [];
+      rearStickerMaterialsRef.current = [];
+    };
+    cleanup();
+
+    const getRearHit = (across, vertical) => {
+      const localTarget = new THREE.Vector3(
+        boundsModel.centerX + (across / 100) * boundsModel.width * 0.34,
+        boundsModel.minY + boundsModel.height * (0.34 + (vertical / 100) * 0.24),
+        boundsModel.minZ,
+      );
+
+      const targetWorld = model.localToWorld(localTarget.clone());
+      const rearOutward = new THREE.Vector3(0, 0, -1).transformDirection(model.matrixWorld).normalize();
+      const rayOrigin = targetWorld.clone().addScaledVector(rearOutward, boundsWorld.size.length() * 0.65);
+      const raycaster = new THREE.Raycaster(
+        rayOrigin,
+        rearOutward.clone().multiplyScalar(-1),
+        0,
+        boundsWorld.size.length() * 1.6,
+      );
+
+      const hits = raycaster.intersectObjects(shellMeshes, false);
+      if (!hits.length) return null;
+
+      const modelInverse = new THREE.Matrix4().copy(model.matrixWorld).invert();
+      return hits.find(hit => {
+        const local = hit.point.clone().applyMatrix4(modelInverse);
+        return local.z <= boundsModel.centerZ;
+      }) || null;
+    };
+
+    const getPack = (slot, image) => {
+      if (!image) return null;
+      const key = image.src || `${image.width}x${image.height}`;
+      let cache = rearStickerPackCacheRef.current[slot];
+
+      if (!cache || cache.key !== key) {
+        cache?.pack?.mainTexture?.dispose?.();
+        cache?.pack?.rimTexture?.dispose?.();
+
+        const pack = createSideLogoTexturePack(image, {
+          strokeEnabled:false,
+          textureWidth:Math.min(3072, rendererRef.current?.capabilities?.maxTextureSize || 3072),
+          textureHeight:Math.min(1536, rendererRef.current?.capabilities?.maxTextureSize || 1536),
+        });
+        cache = { key, pack };
+        rearStickerPackCacheRef.current[slot] = cache;
+      }
+
+      return cache?.pack || null;
+    };
+
+    const makeSticker = ({
+      slot,
+      enabled,
+      image,
+      scale,
+      rotation,
+      across,
+      vertical,
+      color='#ffffff',
+    }) => {
+      if (!enabled || !image) return;
+
+      const hit = getRearHit(across, vertical);
+      if (!hit) return;
+
+      const pack = getPack(slot, image);
+      if (!pack) return;
+
+      const baseHeight = boundsModel.width * 0.072 * scale;
+      const baseWidth = baseHeight * THREE.MathUtils.clamp(pack.aspect, 0.45, 3.5);
+
+      const normalMatrix = new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld);
+      const fallback = new THREE.Vector3(0, 0, -1).transformDirection(model.matrixWorld).normalize();
+      const worldNormal = hit.face?.normal?.clone().applyMatrix3(normalMatrix).normalize() || fallback;
+      const projectorPosition = hit.point.clone().addScaledVector(worldNormal, 0.00045);
+
+      const helper = new THREE.Object3D();
+      helper.position.copy(projectorPosition);
+      helper.lookAt(projectorPosition.clone().add(worldNormal));
+      helper.rotateZ(rotation * Math.PI / 180);
+      const orientation = new THREE.Euler().setFromQuaternion(helper.quaternion, 'XYZ');
+
+      const projectorDepth = Math.max(boundsModel.depth * 0.18, baseHeight * 0.9, 0.05);
+      const shadowGeo = new DecalGeometry(
+        hit.object,
+        projectorPosition,
+        orientation,
+        new THREE.Vector3(baseWidth * 1.018, baseHeight * 1.018, projectorDepth),
+      );
+      const mainGeo = new DecalGeometry(
+        hit.object,
+        projectorPosition,
+        orientation,
+        new THREE.Vector3(baseWidth, baseHeight, projectorDepth),
+      );
+
+      const lift = Math.max(boundsModel.width * 0.00072, 0.00024);
+      offsetGeometryAlongNormals(shadowGeo, lift * 0.22);
+      offsetGeometryAlongNormals(mainGeo, lift * 0.78);
+
+      const shadowMat = new THREE.MeshPhysicalMaterial({
+        color:0x000000,
+        map:pack.rimTexture,
+        transparent:true,
+        alphaTest:0.01,
+        opacity:0.22,
+        side:THREE.DoubleSide,
+        depthWrite:false,
+        depthTest:true,
+        roughness:0.95,
+        metalness:0,
+        polygonOffset:true,
+        polygonOffsetFactor:-1,
+        polygonOffsetUnits:-1,
+      });
+
+      const mainMat = new THREE.MeshPhysicalMaterial({
+        color:new THREE.Color(color),
+        map:pack.mainTexture,
+        transparent:true,
+        alphaTest:0.01,
+        opacity:1,
+        side:THREE.DoubleSide,
+        depthWrite:false,
+        depthTest:true,
+        polygonOffset:true,
+        polygonOffsetFactor:-2,
+        polygonOffsetUnits:-2,
+      });
+      mainMat.userData.rearStickerMainMaterial = true;
+      applyDecalFinishToMaterials([mainMat], scene, decalFinishRef.current);
+
+      const shadowMesh = new THREE.Mesh(shadowGeo, shadowMat);
+      shadowMesh.name = `RearSticker_${slot}_Shadow`;
+      shadowMesh.renderOrder = 42;
+      shadowMesh.castShadow = false;
+      shadowMesh.receiveShadow = false;
+      scene.add(shadowMesh);
+
+      const mainMesh = new THREE.Mesh(mainGeo, mainMat);
+      mainMesh.name = `RearSticker_${slot}_Artwork`;
+      mainMesh.renderOrder = 43;
+      mainMesh.castShadow = false;
+      mainMesh.receiveShadow = false;
+      scene.add(mainMesh);
+
+      rearStickerMeshesRef.current.push(shadowMesh, mainMesh);
+      rearStickerMaterialsRef.current.push(shadowMat, mainMat);
+    };
+
+    makeSticker({
+      slot:'flag',
+      enabled:rearFlagEnabled,
+      image:rearFlagImageRef.current,
+      scale:rearFlagScale,
+      rotation:rearFlagRotation,
+      across:rearFlagAcross,
+      vertical:rearFlagVertical,
+    });
+
+    makeSticker({
+      slot:'warning',
+      enabled:rearWarningEnabled,
+      image:rearWarningImageRef.current,
+      scale:rearWarningScale,
+      rotation:rearWarningRotation,
+      across:rearWarningAcross,
+      vertical:rearWarningVertical,
+      color:rearWarningColor,
+    });
+
+    makeSticker({
+      slot:'custom',
+      enabled:rearCustomEnabled,
+      image:rearCustomImageRef.current,
+      scale:rearCustomScale,
+      rotation:rearCustomRotation,
+      across:rearCustomAcross,
+      vertical:rearCustomVertical,
+    });
+
+    return cleanup;
+  }, [
+    loaded,
+    rearStickerRevision,
+    rearFlagEnabled,
+    rearFlagScale,
+    rearFlagRotation,
+    rearFlagAcross,
+    rearFlagVertical,
+    rearWarningEnabled,
+    rearWarningColor,
+    rearWarningScale,
+    rearWarningRotation,
+    rearWarningAcross,
+    rearWarningVertical,
+    rearCustomEnabled,
+    rearCustomScale,
+    rearCustomRotation,
+    rearCustomAcross,
+    rearCustomVertical,
+  ]);
+
+  useEffect(() => () => {
+    Object.values(rearStickerPackCacheRef.current).forEach(cache => {
+      cache?.pack?.mainTexture?.dispose?.();
+      cache?.pack?.rimTexture?.dispose?.();
+    });
+    rearStickerPackCacheRef.current = { flag:null, warning:null, custom:null };
+  }, []);
 
   // ── FRONT / REAR BUMPER LOGOS ─────────────────────────────────────────────
   useEffect(() => {
@@ -4256,6 +4651,7 @@ export default function HelmetBuilder() {
       ...decalOverlayMaterialsRef.current,
       ...stripeCarrierOverlayMaterialsRef.current,
       ...sideLogoMaterialsRef.current.filter(mat => mat.userData?.sideLogoMainMaterial),
+      ...rearStickerMaterialsRef.current.filter(mat => mat.userData?.rearStickerMainMaterial),
     ], sceneRef.current, decalFinish);
 
     applyStripeBumperStencilMask(
@@ -5325,7 +5721,7 @@ export default function HelmetBuilder() {
                   </div>
                   <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, marginBottom:10 }}>
                     <div style={{ fontSize:10, color:'#9ca3af' }}>Independent left / right logos</div>
-                    <button onClick={() => setSideLogoIndependent(v => !v)} style={{ background:sideLogoIndependent?'rgba(239,255,0,0.10)':'rgba(255,255,255,0.04)', border:sideLogoIndependent?'1px solid rgba(239,255,0,0.35)':'1px solid rgba(255,255,255,0.10)', borderRadius:6, padding:'5px 9px', cursor:'pointer', color:sideLogoIndependent?'#efff00':'#9ca3af', fontSize:9, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.06em' }}>{sideLogoIndependent?'ON':'OFF'}</button>
+                    <button onClick={() => { clearSideLogoUndoHistory(); setSideLogoIndependent(v => !v); }} style={{ background:sideLogoIndependent?'rgba(239,255,0,0.10)':'rgba(255,255,255,0.04)', border:sideLogoIndependent?'1px solid rgba(239,255,0,0.35)':'1px solid rgba(255,255,255,0.10)', borderRadius:6, padding:'5px 9px', cursor:'pointer', color:sideLogoIndependent?'#efff00':'#9ca3af', fontSize:9, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.06em' }}>{sideLogoIndependent?'ON':'OFF'}</button>
                   </div>
 
                   <input id="side-logo-shared-upload" type="file" accept="image/png,image/jpeg" onChange={handleSharedSideLogoUpload} style={{ display:'none' }} />
@@ -5390,10 +5786,41 @@ export default function HelmetBuilder() {
                     ))}
                   </div>
 
-                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:10 }}>
-                    <button onClick={() => { sideLogoPlacementRef.current.left = cloneDefaultSideLogoPlacement(); sideLogoPlacementRef.current.right = cloneDefaultSideLogoPlacement(); setSelectedSideLogo(null); selectedSideLogoRef.current = null; setSideLogoRevision(v => v + 1); }} style={{ width:'100%', background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.10)', borderRadius:6, padding:'7px 8px', cursor:'pointer', color:'#9ca3af', fontSize:9, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.05em' }}>RESET POSITIONS</button>
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:8 }}>
+                    <button
+                      onClick={undoSideLogoMove}
+                      disabled={sideLogoUndoCount === 0}
+                      style={{
+                        width:'100%',
+                        background:sideLogoUndoCount > 0 ? 'rgba(239,255,0,0.08)' : 'rgba(255,255,255,0.025)',
+                        border:sideLogoUndoCount > 0 ? '1px solid rgba(239,255,0,0.24)' : '1px solid rgba(255,255,255,0.06)',
+                        borderRadius:6,
+                        padding:'7px 8px',
+                        cursor:sideLogoUndoCount > 0 ? 'pointer' : 'default',
+                        color:sideLogoUndoCount > 0 ? '#efff00' : '#4b5563',
+                        fontSize:9,
+                        fontWeight:800,
+                        fontFamily:"'Barlow Condensed',sans-serif",
+                        letterSpacing:'0.05em'
+                      }}
+                    >
+                      ↶ UNDO MOVE
+                    </button>
                     <button onClick={() => setSideLogoLocked(v => !v)} style={{ width:'100%', background:sideLogoLocked?'rgba(239,255,0,0.10)':'rgba(255,255,255,0.04)', border:sideLogoLocked?'1px solid rgba(239,255,0,0.35)':'1px solid rgba(255,255,255,0.10)', borderRadius:6, padding:'7px 8px', cursor:'pointer', color:sideLogoLocked?'#efff00':'#9ca3af', fontSize:9, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.05em' }}>{sideLogoLocked ? 'LOCKED' : 'UNLOCKED'}</button>
                   </div>
+                  <button
+                    onClick={() => {
+                      clearSideLogoUndoHistory();
+                      sideLogoPlacementRef.current.left = cloneDefaultSideLogoPlacement();
+                      sideLogoPlacementRef.current.right = cloneDefaultSideLogoPlacement();
+                      setSelectedSideLogo(null);
+                      selectedSideLogoRef.current = null;
+                      setSideLogoRevision(v => v + 1);
+                    }}
+                    style={{ width:'100%', marginBottom:10, background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.10)', borderRadius:6, padding:'7px 8px', cursor:'pointer', color:'#9ca3af', fontSize:9, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.05em' }}
+                  >
+                    RESET POSITIONS
+                  </button>
 
                   <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
                     <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Size</span>
@@ -5430,6 +5857,106 @@ export default function HelmetBuilder() {
                     </>
                   )}
                 </div>
+                </CollapsibleSection>
+
+                <CollapsibleSection title="REAR STICKERS">
+                  <div style={{ fontSize:10, color:'#6b7280', lineHeight:1.5, marginBottom:10 }}>
+                    Add common rear-shell stickers or upload your own. Stickers project directly onto the helmet shell, stay off the bumper, and use the main decal finish.
+                  </div>
+
+                  {rearStickerError && (
+                    <div style={{ marginBottom:10, fontSize:10, color:'#ef4444', lineHeight:1.4 }}>{rearStickerError}</div>
+                  )}
+
+                  <div style={{ background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.05)', borderRadius:8, padding:9, marginBottom:9 }}>
+                    <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, marginBottom:8 }}>
+                      <div style={{ fontSize:9, fontWeight:800, color:'#9ca3af', letterSpacing:'0.07em' }}>US FLAG</div>
+                      <button onClick={() => setRearFlagEnabled(v => !v)} style={{ background:rearFlagEnabled?'rgba(239,255,0,0.10)':'rgba(255,255,255,0.04)', border:rearFlagEnabled?'1px solid rgba(239,255,0,0.35)':'1px solid rgba(255,255,255,0.10)', borderRadius:5, padding:'4px 7px', cursor:'pointer', color:rearFlagEnabled?'#efff00':'#9ca3af', fontSize:8, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif" }}>{rearFlagEnabled?'ON':'OFF'}</button>
+                    </div>
+                    <div style={{ width:'100%', aspectRatio:'3 / 1', display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden', borderRadius:6, border:'1px solid rgba(255,255,255,0.08)', background:'#c8cdd4', marginBottom:8 }}>
+                      <img src={REAR_FLAG_URL} alt="US flag rear sticker" style={{ width:'100%', height:'100%', objectFit:'contain', opacity:rearFlagEnabled?1:0.4 }} />
+                    </div>
+                    {[
+                      ['Size', rearFlagScale, setRearFlagScale, 40, 220, v => v / 100, v => Math.round(v * 100)],
+                      ['Rotate', rearFlagRotation, setRearFlagRotation, -180, 180, v => v, v => v],
+                      ['Across', rearFlagAcross, setRearFlagAcross, -80, 80, v => v, v => v],
+                      ['Up / Down', rearFlagVertical, setRearFlagVertical, -80, 80, v => v, v => v],
+                    ].map(([label,value,setter,min,max,fromSlider,toSlider]) => (
+                      <div key={`flag-${label}`} style={{ display:'flex', alignItems:'center', gap:8, marginBottom:7 }}>
+                        <span style={{ width:54, flexShrink:0, fontSize:9, color:'#9ca3af' }}>{label}</span>
+                        <input type="range" min={min} max={max} value={toSlider(value)} onChange={e => setter(fromSlider(parseInt(e.target.value)))} style={{ flex:1, minWidth:0 }} />
+                      </div>
+                    ))}
+                  </div>
+
+                  <div style={{ background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.05)', borderRadius:8, padding:9, marginBottom:9 }}>
+                    <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, marginBottom:8 }}>
+                      <div style={{ fontSize:9, fontWeight:800, color:'#9ca3af', letterSpacing:'0.07em' }}>WARNING LABEL</div>
+                      <button onClick={() => setRearWarningEnabled(v => !v)} style={{ background:rearWarningEnabled?'rgba(239,255,0,0.10)':'rgba(255,255,255,0.04)', border:rearWarningEnabled?'1px solid rgba(239,255,0,0.35)':'1px solid rgba(255,255,255,0.10)', borderRadius:5, padding:'4px 7px', cursor:'pointer', color:rearWarningEnabled?'#efff00':'#9ca3af', fontSize:8, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif" }}>{rearWarningEnabled?'ON':'OFF'}</button>
+                    </div>
+                    <div style={{ width:'100%', aspectRatio:'3 / 1', position:'relative', overflow:'hidden', borderRadius:6, border:'1px solid rgba(255,255,255,0.08)', background:'#c8cdd4', marginBottom:8 }}>
+                      <div style={{
+                        position:'absolute',
+                        inset:'12%',
+                        background:rearWarningColor,
+                        WebkitMaskImage:`url(${REAR_WARNING_URL})`,
+                        WebkitMaskRepeat:'no-repeat',
+                        WebkitMaskPosition:'center',
+                        WebkitMaskSize:'contain',
+                        maskImage:`url(${REAR_WARNING_URL})`,
+                        maskRepeat:'no-repeat',
+                        maskPosition:'center',
+                        maskSize:'contain',
+                        opacity:rearWarningEnabled?1:0.4
+                      }} />
+                    </div>
+                    <ColorSwatch color={rearWarningColor} onChange={setRearWarningColor} label="Label Color" />
+                    {[
+                      ['Size', rearWarningScale, setRearWarningScale, 40, 220, v => v / 100, v => Math.round(v * 100)],
+                      ['Rotate', rearWarningRotation, setRearWarningRotation, -180, 180, v => v, v => v],
+                      ['Across', rearWarningAcross, setRearWarningAcross, -80, 80, v => v, v => v],
+                      ['Up / Down', rearWarningVertical, setRearWarningVertical, -80, 80, v => v, v => v],
+                    ].map(([label,value,setter,min,max,fromSlider,toSlider]) => (
+                      <div key={`warning-${label}`} style={{ display:'flex', alignItems:'center', gap:8, marginBottom:7 }}>
+                        <span style={{ width:54, flexShrink:0, fontSize:9, color:'#9ca3af' }}>{label}</span>
+                        <input type="range" min={min} max={max} value={toSlider(value)} onChange={e => setter(fromSlider(parseInt(e.target.value)))} style={{ flex:1, minWidth:0 }} />
+                      </div>
+                    ))}
+                  </div>
+
+                  <div style={{ background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.05)', borderRadius:8, padding:9 }}>
+                    <div style={{ fontSize:9, fontWeight:800, color:'#9ca3af', letterSpacing:'0.07em', marginBottom:8 }}>CUSTOM REAR STICKER</div>
+                    <input id="rear-custom-sticker-upload" type="file" accept="image/png,image/jpeg,image/webp" onChange={handleRearCustomStickerUpload} style={{ display:'none' }} />
+                    <label htmlFor="rear-custom-sticker-upload" style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:6, width:'100%', boxSizing:'border-box', background:'rgba(239,255,0,0.07)', border:'1px dashed rgba(239,255,0,0.30)', borderRadius:6, padding:'8px 9px', cursor:'pointer', color:'#efff00', fontSize:9, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.05em' }}>
+                      <span>＋</span>{rearCustomPreviewUrl ? 'REPLACE STICKER' : 'UPLOAD STICKER'}
+                    </label>
+
+                    {rearCustomPreviewUrl && (
+                      <>
+                        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:7, marginTop:7, marginBottom:8 }}>
+                          <div style={{ fontSize:8, color:'#9ca3af', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={rearCustomFileName}>{rearCustomFileName}</div>
+                          <div style={{ display:'flex', alignItems:'center', gap:5 }}>
+                            <button onClick={() => setRearCustomEnabled(v => !v)} style={{ background:rearCustomEnabled?'rgba(239,255,0,0.10)':'rgba(255,255,255,0.04)', border:rearCustomEnabled?'1px solid rgba(239,255,0,0.35)':'1px solid rgba(255,255,255,0.10)', borderRadius:5, padding:'3px 6px', cursor:'pointer', color:rearCustomEnabled?'#efff00':'#9ca3af', fontSize:8, fontWeight:800 }}>{rearCustomEnabled?'ON':'OFF'}</button>
+                            <button onClick={removeRearCustomSticker} style={{ background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:5, padding:'3px 6px', cursor:'pointer', color:'#ef4444', fontSize:8, fontWeight:700 }}>REMOVE</button>
+                          </div>
+                        </div>
+                        <div style={{ width:'100%', aspectRatio:'3 / 1', display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden', borderRadius:6, border:'1px solid rgba(255,255,255,0.08)', backgroundColor:'#c8cdd4', backgroundImage:'linear-gradient(45deg, rgba(255,255,255,0.95) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.95) 75%, rgba(255,255,255,0.95)), linear-gradient(45deg, rgba(255,255,255,0.95) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.95) 75%, rgba(255,255,255,0.95))', backgroundSize:'14px 14px', backgroundPosition:'0 0, 7px 7px', marginBottom:8 }}>
+                          <img src={rearCustomPreviewUrl} alt="Custom rear sticker preview" style={{ width:'100%', height:'100%', objectFit:'contain', opacity:rearCustomEnabled?1:0.4 }} />
+                        </div>
+                        {[
+                          ['Size', rearCustomScale, setRearCustomScale, 40, 260, v => v / 100, v => Math.round(v * 100)],
+                          ['Rotate', rearCustomRotation, setRearCustomRotation, -180, 180, v => v, v => v],
+                          ['Across', rearCustomAcross, setRearCustomAcross, -80, 80, v => v, v => v],
+                          ['Up / Down', rearCustomVertical, setRearCustomVertical, -80, 80, v => v, v => v],
+                        ].map(([label,value,setter,min,max,fromSlider,toSlider]) => (
+                          <div key={`custom-${label}`} style={{ display:'flex', alignItems:'center', gap:8, marginBottom:7 }}>
+                            <span style={{ width:54, flexShrink:0, fontSize:9, color:'#9ca3af' }}>{label}</span>
+                            <input type="range" min={min} max={max} value={toSlider(value)} onChange={e => setter(fromSlider(parseInt(e.target.value)))} style={{ flex:1, minWidth:0 }} />
+                          </div>
+                        ))}
+                      </>
+                    )}
+                  </div>
                 </CollapsibleSection>
 
                 <CollapsibleSection title="BUMPER LOGOS">
@@ -5554,7 +6081,7 @@ export default function HelmetBuilder() {
             }}>
               <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, marginBottom:8 }}>
                 <div>
-                  <div style={{ fontSize:9, color:'#efff00', fontWeight:900, letterSpacing:'0.12em' }}>DEBUG MODE · v76 · EXPORT QA</div>
+                  <div style={{ fontSize:9, color:'#efff00', fontWeight:900, letterSpacing:'0.12em' }}>DEBUG MODE · v77 · REAR STICKERS</div>
                   <div style={{ fontSize:8, color:'#6b7280', marginTop:2 }}>Live renderer + asset timing · Ctrl+Shift+D toggles</div>
                 </div>
                 <button
