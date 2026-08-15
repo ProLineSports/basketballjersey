@@ -1767,7 +1767,7 @@ export default function HelmetBuilder() {
   const editableDecalPlacementRef = useRef({
     'rear-flag':    { scale:2.70, rotation:0, across:-62, vertical:-38 },
     'rear-warning': { scale:2.70, rotation:0, across: 58, vertical:-38 },
-    'rear-custom':  { scale:2.70, rotation:0, across:  0, vertical:20 },
+    'rear-custom':  { scale:5.40, rotation:0, across:  0, vertical:20 },
     'bumper-front': { scale:6.6,  rotation:0, across:  0, vertical:0 },
     'bumper-rear':  { scale:5.35, rotation:0, across:  0, vertical:-30 },
   });
@@ -2053,7 +2053,7 @@ export default function HelmetBuilder() {
   const [rearCustomEnabled, setRearCustomEnabled] = useState(false);
   const [rearCustomPreviewUrl, setRearCustomPreviewUrl] = useState(null);
   const [rearCustomFileName, setRearCustomFileName] = useState('');
-  const [rearCustomScale, setRearCustomScale] = useState(2.70);
+  const [rearCustomScale, setRearCustomScale] = useState(5.40);
   const [rearCustomRotation, setRearCustomRotation] = useState(0);
   const [rearCustomAcross, setRearCustomAcross] = useState(0);
   const [rearCustomVertical, setRearCustomVertical] = useState(20);
@@ -4998,7 +4998,7 @@ export default function HelmetBuilder() {
         canvas.style.cursor='move';
       } else if (interaction.action==='scale') {
         const dx=event.clientX-interaction.centerClient.x, dy=event.clientY-interaction.centerClient.y;
-        const d=Math.max(8,Math.hypot(dx,dy)), min=id.startsWith('bumper-')?1:0.4, max=id.startsWith('bumper-')?24:5.0;
+        const d=Math.max(8,Math.hypot(dx,dy)), min=id.startsWith('bumper-')?1:0.4, max=id.startsWith('bumper-')?24:8.0;
         placement.scale=THREE.MathUtils.clamp(interaction.startPlacement.scale*(d/interaction.startDistance),min,max);
       } else if (interaction.action==='rotate') {
         const dx=event.clientX-interaction.centerClient.x, dy=event.clientY-interaction.centerClient.y;
@@ -6331,7 +6331,7 @@ export default function HelmetBuilder() {
                           <img src={rearCustomPreviewUrl} alt="Custom rear sticker preview" style={{ width:'100%', height:'100%', objectFit:'contain', opacity:rearCustomEnabled?1:0.4 }} />
                         </div>
                         {[
-                          ['Size', rearCustomScale, setRearCustomScale, 40, 500, v => v / 100, v => Math.round(v * 100)],
+                          ['Size', rearCustomScale, setRearCustomScale, 40, 800, v => v / 100, v => Math.round(v * 100)],
                           ['Rotate', rearCustomRotation, setRearCustomRotation, -180, 180, v => v, v => v],
                           ['Across', rearCustomAcross, setRearCustomAcross, -80, 80, v => v, v => v],
                           ['Up / Down', rearCustomVertical, setRearCustomVertical, -80, 80, v => v, v => v],
