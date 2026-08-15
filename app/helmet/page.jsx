@@ -1756,6 +1756,7 @@ export default function HelmetBuilder() {
   const rearStickerMeshesRef = useRef([]);
   const rearStickerMaterialsRef = useRef([]);
   const rearStickerPackCacheRef = useRef({ flag:null, warning:null, custom:null });
+  const rearStickerMainMaterialsRef = useRef({ flag:null, warning:null, custom:null });
   const rearFlagImageRef = useRef(null);
   const rearWarningImageRef = useRef(null);
   const rearCustomImageRef = useRef(null);
@@ -4314,6 +4315,7 @@ export default function HelmetBuilder() {
       ['rear-flag','rear-warning','rear-custom'].forEach(id => { delete editableDecalWorldFrameRef.current[id]; });
       rearStickerMeshesRef.current = [];
       rearStickerMaterialsRef.current = [];
+      rearStickerMainMaterialsRef.current = { flag:null, warning:null, custom:null };
     };
     cleanup();
 
@@ -4386,7 +4388,8 @@ export default function HelmetBuilder() {
       if (!pack) return;
 
       const baseHeight = boundsModel.width * 0.072 * scale;
-      const baseWidth = baseHeight * THREE.MathUtils.clamp(pack.aspect, 0.45, 3.5);
+      const widthCompensation = slot === 'custom' ? 1.18 : 1.0;
+      const baseWidth = baseHeight * THREE.MathUtils.clamp(pack.aspect, 0.45, 3.5) * widthCompensation;
 
       const normalMatrix = new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld);
       const fallback = new THREE.Vector3(0, 0, -1).transformDirection(model.matrixWorld).normalize();
@@ -4447,6 +4450,8 @@ export default function HelmetBuilder() {
         polygonOffsetUnits:-2,
       });
       mainMat.userData.rearStickerMainMaterial = true;
+      mainMat.userData.rearStickerSlot = slot;
+      rearStickerMainMaterialsRef.current[slot] = mainMat;
       applyDecalFinishToMaterials([mainMat], scene, decalFinishRef.current);
 
       const shadowMesh = new THREE.Mesh(shadowGeo, shadowMat);
@@ -4531,7 +4536,6 @@ export default function HelmetBuilder() {
     rearFlagAcross,
     rearFlagVertical,
     rearWarningEnabled,
-    rearWarningColor,
     rearWarningScale,
     rearWarningRotation,
     rearWarningAcross,
@@ -4544,6 +4548,13 @@ export default function HelmetBuilder() {
     selectedEditableDecal,
     editableDecalRevision,
   ]);
+
+  useEffect(() => {
+    const warningMat = rearStickerMainMaterialsRef.current.warning;
+    if (!warningMat) return;
+    warningMat.color.set(rearWarningColor);
+    warningMat.needsUpdate = true;
+  }, [rearWarningColor, rearStickerRevision, loaded]);
 
   useEffect(() => () => {
     Object.values(rearStickerPackCacheRef.current).forEach(cache => {
