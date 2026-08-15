@@ -1765,9 +1765,9 @@ export default function HelmetBuilder() {
   // Direct-manipulation state shared by rear stickers + bumper logos.
   // Placements live in refs while dragging so React state does not interrupt pointer capture.
   const editableDecalPlacementRef = useRef({
-    'rear-flag':    { scale:1.35, rotation:0, across:-24, vertical:-8 },
-    'rear-warning': { scale:1.35, rotation:0, across: 24, vertical:-8 },
-    'rear-custom':  { scale:1.35, rotation:0, across:  0, vertical:12 },
+    'rear-flag':    { scale:2.70, rotation:0, across:-62, vertical:-38 },
+    'rear-warning': { scale:2.70, rotation:0, across: 58, vertical:-38 },
+    'rear-custom':  { scale:2.70, rotation:0, across:  0, vertical:20 },
     'bumper-front': { scale:6.6,  rotation:0, across:  0, vertical:0 },
     'bumper-rear':  { scale:5.35, rotation:0, across:  0, vertical:-30 },
   });
@@ -2038,25 +2038,25 @@ export default function HelmetBuilder() {
   const [sideLogoUndoCount, setSideLogoUndoCount] = useState(0);
 
   const [rearFlagEnabled, setRearFlagEnabled] = useState(false);
-  const [rearFlagScale, setRearFlagScale] = useState(1.35);
+  const [rearFlagScale, setRearFlagScale] = useState(2.70);
   const [rearFlagRotation, setRearFlagRotation] = useState(0);
-  const [rearFlagAcross, setRearFlagAcross] = useState(-24);
-  const [rearFlagVertical, setRearFlagVertical] = useState(-8);
+  const [rearFlagAcross, setRearFlagAcross] = useState(-62);
+  const [rearFlagVertical, setRearFlagVertical] = useState(-38);
 
   const [rearWarningEnabled, setRearWarningEnabled] = useState(false);
   const [rearWarningColor, setRearWarningColor] = useState('#FFFFFF');
-  const [rearWarningScale, setRearWarningScale] = useState(1.35);
+  const [rearWarningScale, setRearWarningScale] = useState(2.70);
   const [rearWarningRotation, setRearWarningRotation] = useState(0);
-  const [rearWarningAcross, setRearWarningAcross] = useState(24);
-  const [rearWarningVertical, setRearWarningVertical] = useState(-8);
+  const [rearWarningAcross, setRearWarningAcross] = useState(58);
+  const [rearWarningVertical, setRearWarningVertical] = useState(-38);
 
   const [rearCustomEnabled, setRearCustomEnabled] = useState(false);
   const [rearCustomPreviewUrl, setRearCustomPreviewUrl] = useState(null);
   const [rearCustomFileName, setRearCustomFileName] = useState('');
-  const [rearCustomScale, setRearCustomScale] = useState(1.35);
+  const [rearCustomScale, setRearCustomScale] = useState(2.70);
   const [rearCustomRotation, setRearCustomRotation] = useState(0);
   const [rearCustomAcross, setRearCustomAcross] = useState(0);
-  const [rearCustomVertical, setRearCustomVertical] = useState(12);
+  const [rearCustomVertical, setRearCustomVertical] = useState(20);
   const [rearStickerError, setRearStickerError] = useState('');
   const [rearStickerRevision, setRearStickerRevision] = useState(0);
 
@@ -4388,7 +4388,7 @@ export default function HelmetBuilder() {
       if (!pack) return;
 
       const baseHeight = boundsModel.width * 0.072 * scale;
-      const widthCompensation = slot === 'custom' ? 1.18 : 1.0;
+      const widthCompensation = slot === 'custom' ? 1.50 : 1.0;
       const baseWidth = baseHeight * THREE.MathUtils.clamp(pack.aspect, 0.45, 3.5) * widthCompensation;
 
       const normalMatrix = new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld);
@@ -4998,7 +4998,7 @@ export default function HelmetBuilder() {
         canvas.style.cursor='move';
       } else if (interaction.action==='scale') {
         const dx=event.clientX-interaction.centerClient.x, dy=event.clientY-interaction.centerClient.y;
-        const d=Math.max(8,Math.hypot(dx,dy)), min=id.startsWith('bumper-')?1:0.4, max=id.startsWith('bumper-')?24:2.6;
+        const d=Math.max(8,Math.hypot(dx,dy)), min=id.startsWith('bumper-')?1:0.4, max=id.startsWith('bumper-')?24:5.0;
         placement.scale=THREE.MathUtils.clamp(interaction.startPlacement.scale*(d/interaction.startDistance),min,max);
       } else if (interaction.action==='rotate') {
         const dx=event.clientX-interaction.centerClient.x, dy=event.clientY-interaction.centerClient.y;
@@ -6256,7 +6256,7 @@ export default function HelmetBuilder() {
                       <img src={REAR_FLAG_URL} alt="US flag rear sticker" style={{ width:'100%', height:'100%', objectFit:'contain', opacity:rearFlagEnabled?1:0.4 }} />
                     </div>
                     {[
-                      ['Size', rearFlagScale, setRearFlagScale, 40, 220, v => v / 100, v => Math.round(v * 100)],
+                      ['Size', rearFlagScale, setRearFlagScale, 40, 500, v => v / 100, v => Math.round(v * 100)],
                       ['Rotate', rearFlagRotation, setRearFlagRotation, -180, 180, v => v, v => v],
                       ['Across', rearFlagAcross, setRearFlagAcross, -80, 80, v => v, v => v],
                       ['Up / Down', rearFlagVertical, setRearFlagVertical, -80, 80, v => v, v => v],
@@ -6295,7 +6295,7 @@ export default function HelmetBuilder() {
                     </div>
                     <ColorSwatch color={rearWarningColor} onChange={setRearWarningColor} label="Label Color" />
                     {[
-                      ['Size', rearWarningScale, setRearWarningScale, 40, 220, v => v / 100, v => Math.round(v * 100)],
+                      ['Size', rearWarningScale, setRearWarningScale, 40, 500, v => v / 100, v => Math.round(v * 100)],
                       ['Rotate', rearWarningRotation, setRearWarningRotation, -180, 180, v => v, v => v],
                       ['Across', rearWarningAcross, setRearWarningAcross, -80, 80, v => v, v => v],
                       ['Up / Down', rearWarningVertical, setRearWarningVertical, -80, 80, v => v, v => v],
@@ -6331,7 +6331,7 @@ export default function HelmetBuilder() {
                           <img src={rearCustomPreviewUrl} alt="Custom rear sticker preview" style={{ width:'100%', height:'100%', objectFit:'contain', opacity:rearCustomEnabled?1:0.4 }} />
                         </div>
                         {[
-                          ['Size', rearCustomScale, setRearCustomScale, 40, 260, v => v / 100, v => Math.round(v * 100)],
+                          ['Size', rearCustomScale, setRearCustomScale, 40, 500, v => v / 100, v => Math.round(v * 100)],
                           ['Rotate', rearCustomRotation, setRearCustomRotation, -180, 180, v => v, v => v],
                           ['Across', rearCustomAcross, setRearCustomAcross, -80, 80, v => v, v => v],
                           ['Up / Down', rearCustomVertical, setRearCustomVertical, -80, 80, v => v, v => v],
@@ -6474,7 +6474,7 @@ export default function HelmetBuilder() {
             }}>
               <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, marginBottom:8 }}>
                 <div>
-                  <div style={{ fontSize:9, color:'#efff00', fontWeight:900, letterSpacing:'0.12em' }}>DEBUG MODE · v78 · DIRECT DECAL EDIT</div>
+                  <div style={{ fontSize:9, color:'#efff00', fontWeight:900, letterSpacing:'0.12em' }}>DEBUG MODE · v80 · REAR DECAL SCALE</div>
                   <div style={{ fontSize:8, color:'#6b7280', marginTop:2 }}>Live renderer + asset timing · Ctrl+Shift+D toggles</div>
                 </div>
                 <button
