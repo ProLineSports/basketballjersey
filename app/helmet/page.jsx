@@ -50,6 +50,46 @@ const formatDebugBytes = (value) => {
 const formatDebugCount = (value) =>
   Number.isFinite(value) ? Math.round(value).toLocaleString() : '—';
 
+
+function getSafeExportPlan(renderer, finalWidth, finalHeight, requestedSupersample) {
+  const gl = renderer?.getContext?.();
+  const maxTextureSize = gl ? gl.getParameter(gl.MAX_TEXTURE_SIZE) : 4096;
+  const maxRenderbufferSize = gl ? gl.getParameter(gl.MAX_RENDERBUFFER_SIZE) : 4096;
+
+  // Browsers/GPUs may report limits above what is sensible for a single temporary
+  // export buffer. Capping the internal edge at 8192 avoids 12K+ buffers while still
+  // allowing true 2x supersampling for a 4096px export on capable hardware.
+  const safeDimension = Math.max(
+    1,
+    Math.min(
+      Number(maxTextureSize) || 4096,
+      Number(maxRenderbufferSize) || 4096,
+      8192
+    )
+  );
+
+  const finalMaxDimension = Math.max(finalWidth, finalHeight);
+  const supported = finalMaxDimension <= safeDimension;
+  const maxSupersample = supported
+    ? Math.max(1, Math.floor(safeDimension / Math.max(1, finalMaxDimension)))
+    : 0;
+
+  const actualSupersample = supported
+    ? Math.max(1, Math.min(requestedSupersample, maxSupersample))
+    : 0;
+
+  return {
+    supported,
+    maxTextureSize,
+    maxRenderbufferSize,
+    safeDimension,
+    requestedSupersample,
+    actualSupersample,
+    renderWidth: actualSupersample ? Math.max(1, Math.round(finalWidth * actualSupersample)) : 0,
+    renderHeight: actualSupersample ? Math.max(1, Math.round(finalHeight * actualSupersample)) : 0,
+  };
+}
+
 function getBaseModelStats(model) {
   if (!model) return { meshes:0, triangles:0, vertices:0 };
 
@@ -1781,6 +1821,19 @@ export default function HelmetBuilder() {
     hdriBytesTotal:0,
     hdriCacheHit:false,
     hdriName:'—',
+    exportRequestedResolution:0,
+    exportRequestedSupersample:0,
+    exportActualSupersample:0,
+    exportFinalSize:'—',
+    exportRenderSize:'—',
+    exportMaxTextureSize:0,
+    exportMaxRenderbufferSize:0,
+    exportSafeDimension:0,
+    exportRenderMs:null,
+    exportDownsampleMs:null,
+    exportEncodeMs:null,
+    exportTotalMs:null,
+    exportWasReduced:false,
   });
   const debugTimingRef = useRef({
     componentStart: typeof performance !== 'undefined' ? performance.now() : 0,
@@ -1815,6 +1868,19 @@ export default function HelmetBuilder() {
     hdriBytesTotal:0,
     hdriCacheHit:false,
     hdriName:'—',
+    exportRequestedResolution:0,
+    exportRequestedSupersample:0,
+    exportActualSupersample:0,
+    exportFinalSize:'—',
+    exportRenderSize:'—',
+    exportMaxTextureSize:0,
+    exportMaxRenderbufferSize:0,
+    exportSafeDimension:0,
+    exportRenderMs:null,
+    exportDownsampleMs:null,
+    exportEncodeMs:null,
+    exportTotalMs:null,
+    exportWasReduced:false,
   });
   const [showProductMenu, setShowProductMenu] = useState(false);
   const [showTipsModal, setShowTipsModal]     = useState(false);
@@ -1826,6 +1892,8 @@ export default function HelmetBuilder() {
   useEffect(() => { sparkleRotatingRef.current = sparkleRotating; }, [sparkleRotating]);
   const [exporting, setExporting]             = useState(false);
   const [exported, setExported]               = useState(false);
+  const [exportNotice, setExportNotice]       = useState('');
+  const [exportError, setExportError]         = useState('');
   const [exportResolution, setExportResolution] = useState(2048);
   const [exportSupersample, setExportSupersample] = useState(2);
   const [viewportBgColor, setViewportBgColor] = useState('#1f1c1e');
@@ -2099,6 +2167,19 @@ export default function HelmetBuilder() {
       `HDRI decode: ${formatDebugMs(s.hdriDecodeMs)}`,
       `HDRI PMREM: ${formatDebugMs(s.hdriPmremMs)}`,
       `HDRI ready: ${formatDebugMs(s.hdriReadyMs)}`,
+      '',
+      'Last Export',
+      `Requested: ${s.exportRequestedResolution || '—'} px @ ${s.exportRequestedSupersample || '—'}×`,
+      `Actual supersample: ${s.exportActualSupersample || '—'}×${s.exportWasReduced ? ' (auto-reduced)' : ''}`,
+      `Final PNG: ${s.exportFinalSize}`,
+      `Internal render: ${s.exportRenderSize}`,
+      `GPU MAX_TEXTURE_SIZE: ${formatDebugCount(s.exportMaxTextureSize)}`,
+      `GPU MAX_RENDERBUFFER_SIZE: ${formatDebugCount(s.exportMaxRenderbufferSize)}`,
+      `Safe internal edge: ${formatDebugCount(s.exportSafeDimension)}`,
+      `Render: ${formatDebugMs(s.exportRenderMs)}`,
+      `Downsample: ${formatDebugMs(s.exportDownsampleMs)}`,
+      `PNG encode: ${formatDebugMs(s.exportEncodeMs)}`,
+      `Capture total: ${formatDebugMs(s.exportTotalMs)}`,
     ].join('\n');
 
     try {
@@ -4421,16 +4502,107 @@ export default function HelmetBuilder() {
 
   const handleExport = useCallback(async () => {
     if (!rendererRef.current) return;
-    if (!isSignedIn) { openSignIn({ afterSignInUrl: '/helmet?upgrade=true', afterSignUpUrl: '/helmet?upgrade=true' }); return; }
-    if (!isUnlimited && credits <= 0) { setShowUpgrade(true); return; }
+    if (!isSignedIn) {
+      openSignIn({ afterSignInUrl: '/helmet?upgrade=true', afterSignUpUrl: '/helmet?upgrade=true' });
+      return;
+    }
+    if (!isUnlimited && credits <= 0) {
+      setShowUpgrade(true);
+      return;
+    }
+
     setExporting(true);
+    setExportNotice('');
+    setExportError('');
+
+    let liveRenderer = null;
+    let scene = null;
+    let camera = null;
+    let previousBackground = null;
+    let previousClearColor = null;
+    let previousClearAlpha = 1;
+    let previousPixelRatio = 1;
+    let previousRendererSize = null;
+    let previousCameraAspect = null;
+    let keyLight = null;
+    let prevShadowW = null;
+    let prevShadowH = null;
+    let rendererStateChanged = false;
 
     try {
-      // Validate + deduct credit server-side — same endpoint /jersey uses (shared credit pool)
+      liveRenderer = rendererRef.current;
+      scene = sceneRef.current;
+      camera = cameraRef.current;
+      if (!liveRenderer || !scene || !camera) throw new Error('Renderer not ready');
+
+      const liveCanvas = liveRenderer.domElement;
+      const liveWidth = liveCanvas.clientWidth || liveCanvas.width || 1;
+      const liveHeight = liveCanvas.clientHeight || liveCanvas.height || 1;
+      const aspect = liveWidth / Math.max(liveHeight, 1);
+
+      // Final PNG size follows the current viewport aspect ratio.
+      let finalWidth = exportResolution;
+      let finalHeight = exportResolution;
+      if (aspect >= 1) {
+        finalWidth = exportResolution;
+        finalHeight = Math.max(1, Math.round(exportResolution / aspect));
+      } else {
+        finalHeight = exportResolution;
+        finalWidth = Math.max(1, Math.round(exportResolution * aspect));
+      }
+
+      // Preflight the GPU BEFORE spending an export credit. This prevents a user from
+      // requesting a 12K+ supersampled buffer that their hardware/browser cannot safely
+      // allocate. We choose the highest safe supersample automatically.
+      const exportPlan = getSafeExportPlan(
+        liveRenderer,
+        finalWidth,
+        finalHeight,
+        exportSupersample
+      );
+
+      if (!exportPlan.supported) {
+        throw new Error(
+          `This device cannot render a ${finalWidth}×${finalHeight} export. Try a smaller final size.`
+        );
+      }
+
+      const {
+        actualSupersample,
+        renderWidth,
+        renderHeight,
+        maxTextureSize,
+        maxRenderbufferSize,
+        safeDimension,
+      } = exportPlan;
+
+      const wasReduced = actualSupersample < exportSupersample;
+      if (wasReduced) {
+        setExportNotice(
+          `${exportSupersample}× supersampling was automatically reduced to ${actualSupersample}× for a safe ${renderWidth}×${renderHeight} render on this device. Final PNG remains ${finalWidth}×${finalHeight}.`
+        );
+      }
+
+      Object.assign(debugStaticRef.current, {
+        exportRequestedResolution: exportResolution,
+        exportRequestedSupersample: exportSupersample,
+        exportActualSupersample: actualSupersample,
+        exportFinalSize: `${finalWidth}×${finalHeight}`,
+        exportRenderSize: `${renderWidth}×${renderHeight}`,
+        exportMaxTextureSize: maxTextureSize,
+        exportMaxRenderbufferSize: maxRenderbufferSize,
+        exportSafeDimension: safeDimension,
+        exportRenderMs: null,
+        exportDownsampleMs: null,
+        exportEncodeMs: null,
+        exportTotalMs: null,
+        exportWasReduced: wasReduced,
+      });
+
+      // Validate + deduct credit server-side — same endpoint /jersey uses.
       const exportRes = await fetch('/api/user/export', { method: 'POST' });
       const exportData = await exportRes.json();
       if (!exportData.allowed) {
-        setExporting(false);
         setShowUpgrade(true);
         return;
       }
@@ -4442,37 +4614,14 @@ export default function HelmetBuilder() {
 
       await new Promise(r => setTimeout(r, 80));
 
-      const liveRenderer = rendererRef.current;
-      const scene = sceneRef.current;
-      const camera = cameraRef.current;
-      if (!liveRenderer || !scene || !camera) throw new Error('Renderer not ready');
+      const captureStartedAt = performance.now();
 
-      const liveCanvas = liveRenderer.domElement;
-      const liveWidth = liveCanvas.clientWidth || liveCanvas.width || 1;
-      const liveHeight = liveCanvas.clientHeight || liveCanvas.height || 1;
-      const aspect = liveWidth / Math.max(liveHeight, 1);
-
-      // Export resolution controls the final delivered PNG. Supersampling renders larger
-      // offscreen, then downsamples to produce cleaner edges and a more polished output.
-      let finalWidth = exportResolution;
-      let finalHeight = exportResolution;
-      if (aspect >= 1) {
-        finalWidth = exportResolution;
-        finalHeight = Math.max(1, Math.round(exportResolution / aspect));
-      } else {
-        finalHeight = exportResolution;
-        finalWidth = Math.max(1, Math.round(exportResolution * aspect));
-      }
-
-      const renderWidth = Math.max(1, Math.round(finalWidth * exportSupersample));
-      const renderHeight = Math.max(1, Math.round(finalHeight * exportSupersample));
-
-      const previousBackground = scene.background;
-      const previousClearColor = liveRenderer.getClearColor(new THREE.Color()).clone();
-      const previousClearAlpha = liveRenderer.getClearAlpha();
-      const previousPixelRatio = liveRenderer.getPixelRatio();
-      const previousRendererSize = liveRenderer.getSize(new THREE.Vector2());
-      const previousCameraAspect = camera.aspect;
+      previousBackground = scene.background;
+      previousClearColor = liveRenderer.getClearColor(new THREE.Color()).clone();
+      previousClearAlpha = liveRenderer.getClearAlpha();
+      previousPixelRatio = liveRenderer.getPixelRatio();
+      previousRendererSize = liveRenderer.getSize(new THREE.Vector2());
+      previousCameraAspect = camera.aspect;
 
       if (transparentBg) {
         scene.background = null;
@@ -4482,24 +4631,18 @@ export default function HelmetBuilder() {
         liveRenderer.setClearColor(new THREE.Color(viewportBgColor), 1);
       }
 
-      // IMPORTANT: render the export through the same WebGLRenderer used by the live
-      // viewport. PMREM environment maps and other render-target textures are created
-      // inside this renderer's WebGL context. A second renderer/context can lose those
-      // resources, which is why earlier high-res exports looked noticeably dimmer.
-      //
-      // `updateStyle=false` keeps the canvas's CSS dimensions unchanged, so the page
-      // does not visually jump while its drawing buffer temporarily becomes 2x/3x/4K.
+      // Render through the SAME WebGLRenderer as the live viewport so PMREM/environment
+      // resources remain identical. updateStyle=false prevents a visible layout jump.
       liveRenderer.setPixelRatio(1);
       liveRenderer.setSize(renderWidth, renderHeight, false);
+      rendererStateChanged = true;
 
       camera.aspect = renderWidth / Math.max(renderHeight, 1);
       camera.updateProjectionMatrix();
       camera.updateMatrixWorld(true);
 
       // Sharpen export shadows without permanently changing the live scene.
-      const keyLight = scene.userData.keyLight;
-      let prevShadowW = null;
-      let prevShadowH = null;
+      keyLight = scene.userData.keyLight;
       if (keyLight?.shadow?.mapSize) {
         prevShadowW = keyLight.shadow.mapSize.width;
         prevShadowH = keyLight.shadow.mapSize.height;
@@ -4513,21 +4656,37 @@ export default function HelmetBuilder() {
         keyLight.shadow.needsUpdate = true;
       }
 
+      const renderStartedAt = performance.now();
       liveRenderer.render(scene, camera);
+      const renderFinishedAt = performance.now();
 
-      // Downsample from the supersampled live-renderer buffer to the final delivery size.
       const finalCanvas = document.createElement('canvas');
       finalCanvas.width = finalWidth;
       finalCanvas.height = finalHeight;
       const finalCtx = finalCanvas.getContext('2d', { alpha: true });
+      if (!finalCtx) throw new Error('Could not create export canvas');
+
       finalCtx.imageSmoothingEnabled = true;
       finalCtx.imageSmoothingQuality = 'high';
       finalCtx.clearRect(0, 0, finalWidth, finalHeight);
+
+      const downsampleStartedAt = performance.now();
       finalCtx.drawImage(liveRenderer.domElement, 0, 0, finalWidth, finalHeight);
+      const downsampleFinishedAt = performance.now();
 
-      let rawDataURL = finalCanvas.toDataURL('image/png');
+      const encodeStartedAt = performance.now();
+      const rawDataURL = finalCanvas.toDataURL('image/png');
+      const encodeFinishedAt = performance.now();
 
-      // Restore the exact live renderer / camera state immediately after capture.
+      Object.assign(debugStaticRef.current, {
+        exportRenderMs: renderFinishedAt - renderStartedAt,
+        exportDownsampleMs: downsampleFinishedAt - downsampleStartedAt,
+        exportEncodeMs: encodeFinishedAt - encodeStartedAt,
+        exportTotalMs: encodeFinishedAt - captureStartedAt,
+      });
+
+      // Restore immediately after the capture. A finally block below repeats this
+      // defensively if anything throws before we reach this point.
       scene.background = previousBackground;
       liveRenderer.setClearColor(previousClearColor, previousClearAlpha);
 
@@ -4547,17 +4706,20 @@ export default function HelmetBuilder() {
       camera.updateProjectionMatrix();
       camera.updateMatrixWorld(true);
       liveRenderer.render(scene, camera);
+      rendererStateChanged = false;
 
-      // Tile the watermark onto the captured frame for free (unpaid) exports
+      // Tile the watermark onto free exports.
       let finalDataURL = rawDataURL;
       if (useWatermark) {
         finalDataURL = await new Promise((resolve) => {
           const img = new Image();
           img.onload = () => {
             const off = document.createElement('canvas');
-            off.width = img.width; off.height = img.height;
+            off.width = img.width;
+            off.height = img.height;
             const ctx = off.getContext('2d');
             ctx.drawImage(img, 0, 0);
+
             const wm = new Image();
             wm.onload = () => {
               ctx.save();
@@ -4565,12 +4727,14 @@ export default function HelmetBuilder() {
               const wmSize = Math.round(off.width * 0.16);
               const cols = Math.ceil(off.width / wmSize) + 1;
               const rows = Math.ceil(off.height / wmSize) + 1;
+
               for (let row = 0; row < rows; row++) {
-                const xOffset = (row % 2 === 0) ? 0 : wmSize / 2;
+                const xOffset = row % 2 === 0 ? 0 : wmSize / 2;
                 for (let col = 0; col < cols; col++) {
                   ctx.drawImage(wm, col * wmSize - xOffset, row * wmSize, wmSize, wmSize);
                 }
               }
+
               ctx.restore();
               resolve(off.toDataURL('image/png'));
             };
@@ -4586,14 +4750,63 @@ export default function HelmetBuilder() {
       a.href = finalDataURL;
       a.download = `proline-helmet-${finalWidth}x${finalHeight}.png`;
       a.click();
-      setExporting(false);
+
       setExported(true);
       setTimeout(() => setExported(false), 2500);
     } catch (err) {
       console.error('Helmet export failed', err);
+      setExportError(
+        err?.message || 'Export failed. Try a smaller final size or lower supersampling.'
+      );
+    } finally {
+      // Never leave the live renderer stuck at a giant export resolution after an
+      // exception, canvas failure, or browser/GPU allocation error.
+      if (
+        rendererStateChanged &&
+        liveRenderer &&
+        scene &&
+        camera &&
+        previousRendererSize &&
+        previousClearColor
+      ) {
+        try {
+          scene.background = previousBackground;
+          liveRenderer.setClearColor(previousClearColor, previousClearAlpha);
+
+          if (keyLight?.shadow?.mapSize && prevShadowW && prevShadowH) {
+            keyLight.shadow.mapSize.width = prevShadowW;
+            keyLight.shadow.mapSize.height = prevShadowH;
+            if (keyLight.shadow.map) {
+              keyLight.shadow.map.dispose?.();
+              keyLight.shadow.map = null;
+            }
+            keyLight.shadow.needsUpdate = true;
+          }
+
+          liveRenderer.setPixelRatio(previousPixelRatio);
+          liveRenderer.setSize(previousRendererSize.x, previousRendererSize.y, false);
+          camera.aspect = previousCameraAspect;
+          camera.updateProjectionMatrix();
+          camera.updateMatrixWorld(true);
+          liveRenderer.render(scene, camera);
+        } catch (restoreErr) {
+          console.error('Helmet renderer restore failed', restoreErr);
+        }
+      }
+
       setExporting(false);
     }
-  }, [isSignedIn, isUnlimited, credits, openSignIn, transparentBg, viewportBgColor, exportResolution, exportSupersample]);
+  }, [
+    isSignedIn,
+    isUnlimited,
+    credits,
+    openSignIn,
+    transparentBg,
+    viewportBgColor,
+    exportResolution,
+    exportSupersample
+  ]);
+
   const handleGetCredits = () => {
     if (!isSignedIn) { openSignIn({ afterSignInUrl: '/helmet?upgrade=true', afterSignUpUrl: '/helmet?upgrade=true' }); return; }
     setSelectedPlan(null);
@@ -5320,7 +5533,7 @@ export default function HelmetBuilder() {
             }}>
               <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, marginBottom:8 }}>
                 <div>
-                  <div style={{ fontSize:9, color:'#efff00', fontWeight:900, letterSpacing:'0.12em' }}>DEBUG MODE · v74 · DRACO</div>
+                  <div style={{ fontSize:9, color:'#efff00', fontWeight:900, letterSpacing:'0.12em' }}>DEBUG MODE · v75 · EXPORT SAFE</div>
                   <div style={{ fontSize:8, color:'#6b7280', marginTop:2 }}>Live renderer + asset timing · Ctrl+Shift+D toggles</div>
                 </div>
                 <button
@@ -5363,6 +5576,22 @@ export default function HelmetBuilder() {
                 <span style={{ color:'#6b7280' }}>EXR Decode</span><span style={{ color:'#d1d5db', textAlign:'right' }}>{formatDebugMs(debugStats.hdriDecodeMs)}</span>
                 <span style={{ color:'#6b7280' }}>PMREM</span><span style={{ color:'#d1d5db', textAlign:'right' }}>{formatDebugMs(debugStats.hdriPmremMs)}</span>
                 <span style={{ color:'#6b7280' }}>HDRI Ready</span><span style={{ color:'#d1d5db', textAlign:'right' }}>{formatDebugMs(debugStats.hdriReadyMs)}</span>
+              </div>
+
+              <div style={{ height:1, background:'rgba(255,255,255,0.07)', margin:'8px 0' }} />
+
+              <div style={{ fontSize:8, color:'#efff00', fontWeight:900, letterSpacing:'0.1em', marginBottom:5 }}>LAST EXPORT</div>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'4px 12px', fontSize:9, lineHeight:1.35 }}>
+                <span style={{ color:'#6b7280' }}>Requested</span><span style={{ color:'#d1d5db', textAlign:'right' }}>{debugStats.exportRequestedResolution ? `${debugStats.exportRequestedResolution}px @ ${debugStats.exportRequestedSupersample}×` : '—'}</span>
+                <span style={{ color:'#6b7280' }}>Actual</span><span style={{ color:debugStats.exportWasReduced ? '#efff00' : '#d1d5db', textAlign:'right' }}>{debugStats.exportActualSupersample ? `${debugStats.exportActualSupersample}×${debugStats.exportWasReduced ? ' AUTO' : ''}` : '—'}</span>
+                <span style={{ color:'#6b7280' }}>Final PNG</span><span style={{ color:'#d1d5db', textAlign:'right' }}>{debugStats.exportFinalSize}</span>
+                <span style={{ color:'#6b7280' }}>Render Buffer</span><span style={{ color:'#d1d5db', textAlign:'right' }}>{debugStats.exportRenderSize}</span>
+                <span style={{ color:'#6b7280' }}>GPU Max Texture</span><span style={{ color:'#d1d5db', textAlign:'right' }}>{formatDebugCount(debugStats.exportMaxTextureSize)}</span>
+                <span style={{ color:'#6b7280' }}>GPU Max RBO</span><span style={{ color:'#d1d5db', textAlign:'right' }}>{formatDebugCount(debugStats.exportMaxRenderbufferSize)}</span>
+                <span style={{ color:'#6b7280' }}>Render</span><span style={{ color:'#d1d5db', textAlign:'right' }}>{formatDebugMs(debugStats.exportRenderMs)}</span>
+                <span style={{ color:'#6b7280' }}>Downsample</span><span style={{ color:'#d1d5db', textAlign:'right' }}>{formatDebugMs(debugStats.exportDownsampleMs)}</span>
+                <span style={{ color:'#6b7280' }}>PNG Encode</span><span style={{ color:'#d1d5db', textAlign:'right' }}>{formatDebugMs(debugStats.exportEncodeMs)}</span>
+                <span style={{ color:'#6b7280' }}>Capture Total</span><span style={{ color:'#d1d5db', textAlign:'right' }}>{formatDebugMs(debugStats.exportTotalMs)}</span>
               </div>
             </div>
           )}
@@ -5537,8 +5766,18 @@ export default function HelmetBuilder() {
                   </div>
                 </div>
                 <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.45 }}>
-                  High-resolution supersampled exports render through the same lighting/material pipeline as the live viewport.
+                  High-resolution supersampled exports render through the same lighting/material pipeline as the live viewport. Unsafe internal resolutions are automatically reduced while preserving the selected final PNG size.
                 </div>
+                {exportNotice && (
+                  <div style={{ marginTop:8, padding:'7px 8px', borderRadius:6, background:'rgba(239,255,0,0.06)', border:'1px solid rgba(239,255,0,0.18)', color:'#cdd900', fontSize:9, lineHeight:1.4 }}>
+                    {exportNotice}
+                  </div>
+                )}
+                {exportError && (
+                  <div style={{ marginTop:8, padding:'7px 8px', borderRadius:6, background:'rgba(239,68,68,0.07)', border:'1px solid rgba(239,68,68,0.22)', color:'#f87171', fontSize:9, lineHeight:1.4 }}>
+                    {exportError}
+                  </div>
+                )}
               </div>
             </CollapsibleSection>
           </div>
