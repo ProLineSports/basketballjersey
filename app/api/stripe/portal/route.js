@@ -54,8 +54,37 @@ export async function POST(req) {
     return Response.json({ url: session.url });
   } catch (err) {
     console.error('Stripe billing portal error:', err);
+
+    const message = String(err?.message || '');
+
+    if (
+      /portal/i.test(message) &&
+      /config|configure|configuration/i.test(message)
+    ) {
+      return Response.json(
+        {
+          error: 'Stripe Customer Portal is not configured for this environment yet. Configure the Customer Portal in Stripe, then try again.',
+          code: 'PORTAL_NOT_CONFIGURED',
+        },
+        { status: 503 }
+      );
+    }
+
+    if (/no such customer/i.test(message)) {
+      return Response.json(
+        {
+          error: 'This Builder account is linked to a Stripe customer that is not available in the current Stripe mode. Please contact support.',
+          code: 'STRIPE_CUSTOMER_NOT_FOUND',
+        },
+        { status: 409 }
+      );
+    }
+
     return Response.json(
-      { error: 'Unable to open billing management. Please try again.' },
+      {
+        error: 'Unable to open billing management. Please try again.',
+        code: 'PORTAL_SESSION_FAILED',
+      },
       { status: 500 }
     );
   }

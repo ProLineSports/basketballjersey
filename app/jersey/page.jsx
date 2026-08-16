@@ -1143,7 +1143,45 @@ export default function JerseyCustomizer() {
           <button onClick={() => setHideControls(h => !h)} style={{ background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.12)", borderRadius:6, padding:"6px 14px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800, fontSize:12, letterSpacing:"0.05em", color:"#9ca3af", cursor:"pointer" }}>{hideControls ? "SHOW CONTROLS" : "HIDE CONTROLS"}</button>
           <button onClick={handleGetCredits} style={{ background:"linear-gradient(135deg,#efff00,#c8d900)", border:"none", borderRadius:6, padding:"6px 14px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800, fontSize:12, letterSpacing:"0.05em", color:"#000", cursor:"pointer" }}>{isSignedIn ? (isUnlimited ? "UNLIMITED ACTIVE" : "GET CREDITS") : "GET STARTED"}</button>
           {isSignedIn
-            ? <UserButton afterSignOutUrl="/" appearance={{ elements: { avatarBox: { width:28, height:28 } } }}>
+            ? <UserButton
+                afterSignOutUrl="/"
+                appearance={{ elements: { avatarBox: { width:28, height:28 } } }}
+                userProfileProps={{
+                  appearance: {
+                    variables: {
+                      colorBackground: '#1f1c1e',
+                      colorForeground: '#f3f4f6',
+                      colorMutedForeground: '#a7adb7',
+                      colorPrimary: '#efff00',
+                      colorPrimaryForeground: '#000000',
+                      colorNeutral: '#a3a3a3',
+                      colorBorder: 'rgba(255,255,255,0.13)',
+                      colorInput: '#161314',
+                      colorInputForeground: '#f3f4f6',
+                      colorRing: '#efff00',
+                      fontFamily: "'Barlow Condensed', Arial, sans-serif",
+                    },
+                    elements: {
+                      cardBox: {
+                        background: '#1f1c1e',
+                        color: '#f3f4f6',
+                      },
+                      card: {
+                        background: '#1f1c1e',
+                        color: '#f3f4f6',
+                      },
+                      footer: {
+                        background: '#1f1c1e',
+                        color: '#a7adb7',
+                      },
+                      footerItem: {
+                        color: '#a7adb7',
+                        opacity: 1,
+                      },
+                    },
+                  },
+                }}
+              >
                 <UserButton.UserProfilePage label="Manage Plan" url="plan" labelIcon={<PlanIcon />}>
                   <ManagePlanPage
                     isUnlimited={isUnlimited}
