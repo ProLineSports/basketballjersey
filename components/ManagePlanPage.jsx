@@ -111,7 +111,7 @@ export default function ManagePlanPage({
 
   const statLabel = {
     fontSize: 11,
-    opacity: 0.62,
+    color: '#9ca3af',
     marginBottom: 3,
   };
 
@@ -127,10 +127,10 @@ export default function ManagePlanPage({
   };
 
   return (
-    <div style={{ width: '100%', maxWidth: 520, padding: '4px 2px 8px', color: 'inherit' }}>
+    <div style={{ width: '100%', maxWidth: 520, padding: '4px 2px 8px', color: '#f3f4f6' }}>
       <div style={{ marginBottom: 16 }}>
         <div style={{ fontSize: 21, fontWeight: 850, marginBottom: 5 }}>Manage Plan</div>
-        <div style={{ fontSize: 12, lineHeight: 1.55, opacity: 0.66 }}>
+        <div style={{ fontSize: 12, lineHeight: 1.55, color: '#9ca3af' }}>
           View your Builder entitlement, available export credits, and subscription options.
         </div>
       </div>
@@ -139,7 +139,7 @@ export default function ManagePlanPage({
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 14 }}>
           <div>
             <div style={statLabel}>CURRENT PLAN</div>
-            <div style={{ fontSize: 19, fontWeight: 900 }}>{currentPlan}</div>
+            <div style={{ fontSize: 19, fontWeight: 900, color: '#f9fafb' }}>{currentPlan}</div>
           </div>
           <div
             style={{
@@ -149,7 +149,7 @@ export default function ManagePlanPage({
               fontWeight: 850,
               background: isUnlimited ? 'rgba(16,185,129,0.12)' : 'rgba(127,127,127,0.09)',
               border: isUnlimited ? '1px solid rgba(16,185,129,0.30)' : '1px solid rgba(127,127,127,0.18)',
-              color: isUnlimited ? '#10b981' : 'inherit',
+              color: isUnlimited ? '#34d399' : '#d1d5db',
             }}
           >
             {isUnlimited ? 'ACTIVE' : 'STANDARD'}
@@ -160,29 +160,29 @@ export default function ManagePlanPage({
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
             <div>
               <div style={statLabel}>EXPORTS</div>
-              <div style={{ fontSize: 16, fontWeight: 850 }}>Unlimited</div>
+              <div style={{ fontSize: 16, fontWeight: 850, color: '#f9fafb' }}>Unlimited</div>
             </div>
             <div>
               <div style={statLabel}>WATERMARK</div>
-              <div style={{ fontSize: 16, fontWeight: 850 }}>None</div>
+              <div style={{ fontSize: 16, fontWeight: 850, color: '#f9fafb' }}>None</div>
             </div>
-            <div style={{ gridColumn: '1 / -1', marginTop: 3, fontSize: 11, opacity: 0.64, lineHeight: 1.5 }}>
-              Purchased credits on file: <strong>{Number(paidCredits || 0)}</strong>. They are preserved while Unlimited is active.
+            <div style={{ gridColumn: '1 / -1', marginTop: 3, fontSize: 11, color: '#9ca3af', lineHeight: 1.5 }}>
+              Purchased credits on file: <strong style={{ color:'#e5e7eb' }}>{Number(paidCredits || 0)}</strong>. They are preserved while Unlimited is active.
             </div>
           </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
             <div>
               <div style={statLabel}>TOTAL CREDITS</div>
-              <div style={{ fontSize: 18, fontWeight: 900 }}>{Number(credits || 0)}</div>
+              <div style={{ fontSize: 18, fontWeight: 900, color:'#f9fafb' }}>{Number(credits || 0)}</div>
             </div>
             <div>
               <div style={statLabel}>PURCHASED</div>
-              <div style={{ fontSize: 18, fontWeight: 900 }}>{Number(paidCredits || 0)}</div>
+              <div style={{ fontSize: 18, fontWeight: 900, color:'#f9fafb' }}>{Number(paidCredits || 0)}</div>
             </div>
             <div>
               <div style={statLabel}>FREE</div>
-              <div style={{ fontSize: 18, fontWeight: 900 }}>{freeCredits}</div>
+              <div style={{ fontSize: 18, fontWeight: 900, color:'#f9fafb' }}>{freeCredits}</div>
             </div>
           </div>
         )}
@@ -190,8 +190,8 @@ export default function ManagePlanPage({
 
       {isUnlimited ? (
         <div style={card}>
-          <div style={{ fontSize: 14, fontWeight: 850, marginBottom: 5 }}>Subscription billing</div>
-          <div style={{ fontSize: 11, opacity: 0.66, lineHeight: 1.55, marginBottom: 12 }}>
+          <div style={{ fontSize: 14, fontWeight: 850, marginBottom: 5, color:'#f9fafb' }}>Subscription billing</div>
+          <div style={{ fontSize: 11, color:'#9ca3af', lineHeight: 1.55, marginBottom: 12 }}>
             Open Stripe's secure billing portal to update your payment method, view invoices, or cancel your Unlimited subscription.
           </div>
           <button
@@ -200,9 +200,9 @@ export default function ManagePlanPage({
             disabled={!!busy}
             style={{
               ...buttonBase,
-              background: 'rgba(239,68,68,0.08)',
+              background: 'rgba(239,68,68,0.12)',
               border: '1px solid rgba(239,68,68,0.28)',
-              color: '#ef4444',
+              color: '#f87171',
             }}
           >
             {busy === 'portal' ? 'OPENING BILLING…' : 'MANAGE / CANCEL SUBSCRIPTION'}
@@ -210,8 +210,8 @@ export default function ManagePlanPage({
         </div>
       ) : (
         <div style={card}>
-          <div style={{ fontSize: 14, fontWeight: 850, marginBottom: 5 }}>Upgrade to Unlimited</div>
-          <div style={{ fontSize: 11, opacity: 0.66, lineHeight: 1.55, marginBottom: 12 }}>
+          <div style={{ fontSize: 14, fontWeight: 850, marginBottom: 5, color:'#f9fafb' }}>Upgrade to Unlimited</div>
+          <div style={{ fontSize: 11, color:'#9ca3af', lineHeight: 1.55, marginBottom: 12 }}>
             Get unlimited watermark-free Builder exports for $4.99 per month. Cancel anytime.
           </div>
           <button
