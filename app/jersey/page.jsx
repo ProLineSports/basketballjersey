@@ -621,33 +621,82 @@ export default function JerseyCustomizer() {
   const centerRef                           = useRef(null);
   const fileRef = useRef(null);
 
-  // ── Load credits from Supabase on sign-in ──
+  // ── Auth + credits ──
+  const applyCreditState = useCallback((data) => {
+    if (!data) return;
+    setCredits(data.totalCredits || 0);
+    setPaidCredits(data.paidCredits || 0);
+    setIsUnlimited(data.isUnlimited || false);
+    setHasWatermark(data.hasWatermark !== false);
+  }, []);
+
+  const refreshCredits = useCallback(async () => {
+    const response = await fetch('/api/user/credits', { cache:'no-store' });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data?.error || 'Could not load credits');
+    applyCreditState(data);
+    return data;
+  }, [applyCreditState]);
+
   useEffect(() => {
     if (!isLoaded) return;
-    if (!isSignedIn) { setCredits(0); setCreditsLoaded(true); return; }
-    fetch('/api/user/credits')
-      .then(r => r.json())
-      .then(data => {
-        console.log('Credits loaded:', data);
-        setCredits(data.totalCredits || 0);
-        setPaidCredits(data.paidCredits || 0);
-        setIsUnlimited(data.isUnlimited || false);
-        setHasWatermark(data.hasWatermark !== false);
-        setCreditsLoaded(true);
-      })
-      .catch(err => { console.error('Credits fetch error:', err); setCreditsLoaded(true); });
-  }, [isLoaded, isSignedIn]);
-
-  // Auto-open upgrade modal if redirected after sign-in via GET CREDITS
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get('upgrade') === 'true' && isSignedIn) {
-        setShowUpgrade(true);
-        window.history.replaceState({}, '', '/');
-      }
+    if (!isSignedIn) {
+      setCredits(0); setPaidCredits(0); setIsUnlimited(false); setHasWatermark(true); setCreditsLoaded(true);
+      return;
     }
-  }, [isSignedIn]);
+    let cancelled = false;
+    refreshCredits()
+      .catch(err => console.error('Credits fetch error:', err))
+      .finally(() => { if (!cancelled) setCreditsLoaded(true); });
+    return () => { cancelled = true; };
+  }, [isLoaded, isSignedIn, refreshCredits]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !isSignedIn) return;
+    const url = new URL(window.location.href);
+    const checkoutState = url.searchParams.get('checkout');
+    const legacySuccess = url.searchParams.get('success') === 'true';
+    const legacyCanceled = url.searchParams.get('canceled') === 'true';
+
+    if (url.searchParams.get('upgrade') === 'true') {
+      setShowUpgrade(true);
+      url.searchParams.delete('upgrade');
+    }
+
+    if (checkoutState === 'canceled' || legacyCanceled) {
+      url.searchParams.delete('checkout');
+      url.searchParams.delete('canceled');
+      url.searchParams.delete('session_id');
+      window.history.replaceState({}, '', `${url.pathname}${url.search}`);
+      return;
+    }
+
+    if (checkoutState !== 'success' && !legacySuccess) {
+      if (url.href !== window.location.href) window.history.replaceState({}, '', `${url.pathname}${url.search}`);
+      return;
+    }
+
+    let cancelled = false;
+    let attempts = 0;
+    let timer = null;
+    const poll = async () => {
+      if (cancelled) return;
+      attempts += 1;
+      try { await refreshCredits(); } catch (err) { console.error('Post-checkout credit refresh:', err); }
+      if (!cancelled && attempts < 10) timer = window.setTimeout(poll, 600);
+    };
+    poll();
+
+    url.searchParams.delete('checkout');
+    url.searchParams.delete('success');
+    url.searchParams.delete('session_id');
+    window.history.replaceState({}, '', `${url.pathname}${url.search}`);
+
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [isSignedIn, refreshCredits]);
 
   // Load jersey PNG and SVG maps when collar changes
   useEffect(() => {
@@ -813,25 +862,13 @@ export default function JerseyCustomizer() {
   }, []);
 
   const handleExport = async () => {
-    if (!isSignedIn) { openSignIn({ afterSignInUrl:"/?upgrade=true", afterSignUpUrl:"/?upgrade=true" }); return; }
+    if (!isSignedIn) { openSignIn({ afterSignInUrl:"/jersey?upgrade=true", afterSignUpUrl:"/jersey?upgrade=true" }); return; }
     if (!isUnlimited && credits <= 0) { setShowUpgrade(true); return; }
     setExporting(true);
 
-    // Validate + deduct credit server-side
-    const exportRes = await fetch('/api/user/export', { method: 'POST' });
-    const exportData = await exportRes.json();
-    if (!exportData.allowed) {
-      setExporting(false);
-      setShowUpgrade(true);
-      return;
-    }
-    // Update local state from server response
-    const useWatermark = exportData.hasWatermark;
-    setCredits(isUnlimited ? 999 : (exportData.freeCredits || 0) + (exportData.paidCredits || 0));
-    setPaidCredits(exportData.paidCredits || 0);
-    setHasWatermark(exportData.hasWatermark);
-
-    await new Promise(r => setTimeout(r, 800));
+    try {
+      // Render and encode a clean export first. Credits are consumed only after
+      // the browser has proven it can successfully produce the PNG.
 
     // Render clean export canvas — no selection ring
     const SZ = 1000;
@@ -931,6 +968,25 @@ export default function JerseyCustomizer() {
       ctx.restore();
     }
 
+    // Preflight PNG encoding before spending a credit.
+    const cleanDataURL = off.toDataURL("image/png");
+
+    const exportRes = await fetch('/api/user/export', { method:'POST' });
+    const exportData = await exportRes.json();
+    if (!exportRes.ok && exportRes.status !== 402 && exportRes.status !== 404) {
+      throw new Error(exportData?.error || 'Could not authorize export');
+    }
+    if (!exportData.allowed) {
+      setShowUpgrade(true);
+      return;
+    }
+
+    const useWatermark = exportData.hasWatermark;
+    setCredits(exportData.isUnlimited ? 999 : (exportData.freeCredits || 0) + (exportData.paidCredits || 0));
+    setPaidCredits(exportData.paidCredits || 0);
+    setIsUnlimited(exportData.isUnlimited || false);
+    setHasWatermark(exportData.hasWatermark);
+
     // 4. Watermark — only for free credit exports
     if (useWatermark) {
       try {
@@ -972,15 +1028,20 @@ export default function JerseyCustomizer() {
     }
 
     const a = document.createElement("a");
-    a.href = off.toDataURL("image/png");
+    a.href = useWatermark ? off.toDataURL("image/png") : cleanDataURL;
     a.download = `proline-${collar.id}.png`;
     a.click();
-    setExporting(false); setExported(true);
+    setExported(true);
     setTimeout(() => setExported(false), 2500);
+    } catch (err) {
+      console.error('Jersey export failed:', err);
+    } finally {
+      setExporting(false);
+    }
   };
 
   const handleGetCredits = () => {
-    if (!isSignedIn) { openSignIn({ afterSignInUrl:"/?upgrade=true", afterSignUpUrl:"/?upgrade=true" }); return; }
+    if (!isSignedIn) { openSignIn({ afterSignInUrl:"/jersey?upgrade=true", afterSignUpUrl:"/jersey?upgrade=true" }); return; }
     setSelectedPlan(null);
     setShowUpgrade(true);
   };
@@ -1059,7 +1120,7 @@ export default function JerseyCustomizer() {
           <button onClick={handleGetCredits} style={{ background:"linear-gradient(135deg,#efff00,#c8d900)", border:"none", borderRadius:6, padding:"6px 14px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800, fontSize:12, letterSpacing:"0.05em", color:"#000", cursor:"pointer" }}>{isSignedIn ? "GET CREDITS" : "GET STARTED"}</button>
           {isSignedIn
             ? <UserButton afterSignOutUrl="/" appearance={{ elements: { avatarBox: { width:28, height:28 } } }} />
-            : <button onClick={() => openSignIn({ afterSignInUrl:"/?upgrade=true" })} style={{ background:"rgba(255,255,255,0.08)", border:"1px solid rgba(255,255,255,0.12)", borderRadius:"50%", width:28, height:28, cursor:"pointer", fontSize:12, color:"#e2e8f0", display:"flex", alignItems:"center", justifyContent:"center" }}>👤</button>
+            : <button onClick={() => openSignIn({ afterSignInUrl:"/jersey?upgrade=true" })} style={{ background:"rgba(255,255,255,0.08)", border:"1px solid rgba(255,255,255,0.12)", borderRadius:"50%", width:28, height:28, cursor:"pointer", fontSize:12, color:"#e2e8f0", display:"flex", alignItems:"center", justifyContent:"center" }}>👤</button>
           }
         </div>
       </div>
@@ -1575,7 +1636,7 @@ export default function JerseyCustomizer() {
               if (!priceId) { console.error('No price ID found for', selectedPlan); return; }
               setCheckingOut(true);
               try {
-                const r = await fetch('/api/stripe/checkout', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({priceId})});
+                const r = await fetch('/api/stripe/checkout', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({priceId,returnPath:'/jersey'})});
                 const d = await r.json();
                 console.log('Checkout response:', d);
                 if (d.url) window.location.href = d.url;

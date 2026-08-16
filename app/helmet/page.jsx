@@ -2174,30 +2174,95 @@ export default function HelmetBuilder() {
   const [selectedPlan, setSelectedPlan]   = useState(null);
   const [checkingOut, setCheckingOut]     = useState(false);
 
-  useEffect(() => {
-    if (!isLoaded) return;
-    if (!isSignedIn) { setCredits(0); setCreditsLoaded(true); return; }
-    fetch('/api/user/credits')
-      .then(r => r.json())
-      .then(data => {
-        setCredits(data.totalCredits || 0);
-        setPaidCredits(data.paidCredits || 0);
-        setIsUnlimited(data.isUnlimited || false);
-        setHasWatermark(data.hasWatermark !== false);
-        setCreditsLoaded(true);
-      })
-      .catch(err => { console.error('Credits fetch error:', err); setCreditsLoaded(true); });
-  }, [isLoaded, isSignedIn]);
+  const applyCreditState = useCallback((data) => {
+    if (!data) return;
+    setCredits(data.totalCredits || 0);
+    setPaidCredits(data.paidCredits || 0);
+    setIsUnlimited(data.isUnlimited || false);
+    setHasWatermark(data.hasWatermark !== false);
+  }, []);
+
+  const refreshCredits = useCallback(async () => {
+    const response = await fetch('/api/user/credits', { cache:'no-store' });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data?.error || 'Could not load credits');
+    applyCreditState(data);
+    return data;
+  }, [applyCreditState]);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get('upgrade') === 'true' && isSignedIn) {
-        setShowUpgrade(true);
-        window.history.replaceState({}, '', '/helmet');
-      }
+    if (!isLoaded) return;
+    if (!isSignedIn) {
+      setCredits(0);
+      setPaidCredits(0);
+      setIsUnlimited(false);
+      setHasWatermark(true);
+      setCreditsLoaded(true);
+      return;
     }
-  }, [isSignedIn]);
+
+    let cancelled = false;
+    refreshCredits()
+      .catch(err => console.error('Credits fetch error:', err))
+      .finally(() => { if (!cancelled) setCreditsLoaded(true); });
+
+    return () => { cancelled = true; };
+  }, [isLoaded, isSignedIn, refreshCredits]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !isSignedIn) return;
+
+    const url = new URL(window.location.href);
+    const checkoutState = url.searchParams.get('checkout');
+    const legacySuccess = url.searchParams.get('success') === 'true';
+    const legacyCanceled = url.searchParams.get('canceled') === 'true';
+
+    if (url.searchParams.get('upgrade') === 'true') {
+      setShowUpgrade(true);
+      url.searchParams.delete('upgrade');
+    }
+
+    if (checkoutState === 'canceled' || legacyCanceled) {
+      url.searchParams.delete('checkout');
+      url.searchParams.delete('canceled');
+      url.searchParams.delete('session_id');
+      window.history.replaceState({}, '', `${url.pathname}${url.search}`);
+      return;
+    }
+
+    if (checkoutState !== 'success' && !legacySuccess) {
+      if (url.href !== window.location.href) {
+        window.history.replaceState({}, '', `${url.pathname}${url.search}`);
+      }
+      return;
+    }
+
+    // Stripe redirects back immediately; the verified webhook can finish a moment
+    // later. Refresh several times so paid credits / Unlimited appears without a
+    // manual reload even when the webhook and browser return race each other.
+    let cancelled = false;
+    let attempts = 0;
+    let timer = null;
+
+    const poll = async () => {
+      if (cancelled) return;
+      attempts += 1;
+      try { await refreshCredits(); } catch (err) { console.error('Post-checkout credit refresh:', err); }
+      if (!cancelled && attempts < 10) timer = window.setTimeout(poll, 600);
+    };
+
+    poll();
+
+    url.searchParams.delete('checkout');
+    url.searchParams.delete('success');
+    url.searchParams.delete('session_id');
+    window.history.replaceState({}, '', `${url.pathname}${url.search}`);
+
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [isSignedIn, refreshCredits]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -5420,21 +5485,8 @@ export default function HelmetBuilder() {
         exportWasReduced: wasReduced,
       });
 
-      // Validate + deduct credit server-side — same endpoint /jersey uses.
-      const exportRes = await fetch('/api/user/export', { method: 'POST' });
-      const exportData = await exportRes.json();
-      if (!exportData.allowed) {
-        setShowUpgrade(true);
-        return;
-      }
-
-      const useWatermark = exportData.hasWatermark;
-      setCredits(isUnlimited ? 999 : (exportData.freeCredits || 0) + (exportData.paidCredits || 0));
-      setPaidCredits(exportData.paidCredits || 0);
-      setHasWatermark(exportData.hasWatermark);
-
-      await new Promise(r => setTimeout(r, 80));
-
+      // Build and encode the clean image first. A credit is consumed only AFTER
+      // the browser has proven it can successfully render/encode the export.
       const captureStartedAt = performance.now();
 
       previousBackground = scene.background;
@@ -5539,42 +5591,73 @@ export default function HelmetBuilder() {
       liveRenderer.render(scene, camera);
       rendererStateChanged = false;
 
-      // Tile the watermark onto free exports.
+      // Atomic server authorization happens only after the clean PNG exists.
+      // Concurrent tabs cannot spend the same last credit because Postgres locks
+      // and updates the user's balance in one transaction.
+      const exportRes = await fetch('/api/user/export', { method:'POST' });
+      const exportData = await exportRes.json();
+      if (!exportRes.ok && exportRes.status !== 402 && exportRes.status !== 404) {
+        throw new Error(exportData?.error || 'Could not authorize export');
+      }
+      if (!exportData.allowed) {
+        setShowUpgrade(true);
+        return;
+      }
+
+      const useWatermark = exportData.hasWatermark;
+      setCredits(exportData.isUnlimited ? 999 : (exportData.freeCredits || 0) + (exportData.paidCredits || 0));
+      setPaidCredits(exportData.paidCredits || 0);
+      setIsUnlimited(exportData.isUnlimited || false);
+      setHasWatermark(exportData.hasWatermark);
+
+      // Tile the watermark onto free exports. If the image watermark asset ever
+      // fails to load, fall back to text instead of accidentally releasing a clean
+      // free-credit PNG.
       let finalDataURL = rawDataURL;
       if (useWatermark) {
-        finalDataURL = await new Promise((resolve) => {
-          const img = new Image();
-          img.onload = () => {
-            const off = document.createElement('canvas');
-            off.width = img.width;
-            off.height = img.height;
-            const ctx = off.getContext('2d');
-            ctx.drawImage(img, 0, 0);
+        const drawTextWatermark = () => {
+          finalCtx.save();
+          finalCtx.globalAlpha = 0.025;
+          finalCtx.fillStyle = '#ffffff';
+          finalCtx.font = `bold ${Math.max(24, Math.round(finalWidth * 0.026))}px sans-serif`;
+          finalCtx.textAlign = 'center';
+          finalCtx.translate(finalWidth / 2, finalHeight / 2);
+          finalCtx.rotate(-Math.PI / 6);
+          const stepX = Math.max(220, Math.round(finalWidth * 0.28));
+          const stepY = Math.max(150, Math.round(finalHeight * 0.22));
+          for (let y = -finalHeight * 1.5; y <= finalHeight * 1.5; y += stepY) {
+            for (let x = -finalWidth * 1.5; x <= finalWidth * 1.5; x += stepX) {
+              finalCtx.fillText('PROLINEMOCKUPS.COM', x, y);
+            }
+          }
+          finalCtx.restore();
+        };
 
-            const wm = new Image();
-            wm.onload = () => {
-              ctx.save();
-              ctx.globalAlpha = 0.02;
-              const wmSize = Math.round(off.width * 0.16);
-              const cols = Math.ceil(off.width / wmSize) + 1;
-              const rows = Math.ceil(off.height / wmSize) + 1;
+        try {
+          const wm = await new Promise((resolve, reject) => {
+            const image = new Image();
+            image.onload = () => resolve(image);
+            image.onerror = reject;
+            image.src = '/ProLine-PFP-New.jpg';
+          });
 
-              for (let row = 0; row < rows; row++) {
-                const xOffset = row % 2 === 0 ? 0 : wmSize / 2;
-                for (let col = 0; col < cols; col++) {
-                  ctx.drawImage(wm, col * wmSize - xOffset, row * wmSize, wmSize, wmSize);
-                }
-              }
+          finalCtx.save();
+          finalCtx.globalAlpha = 0.02;
+          const wmSize = Math.round(finalWidth * 0.16);
+          const cols = Math.ceil(finalWidth / wmSize) + 1;
+          const rows = Math.ceil(finalHeight / wmSize) + 1;
+          for (let row = 0; row < rows; row++) {
+            const xOffset = row % 2 === 0 ? 0 : wmSize / 2;
+            for (let col = 0; col < cols; col++) {
+              finalCtx.drawImage(wm, col * wmSize - xOffset, row * wmSize, wmSize, wmSize);
+            }
+          }
+          finalCtx.restore();
+        } catch {
+          drawTextWatermark();
+        }
 
-              ctx.restore();
-              resolve(off.toDataURL('image/png'));
-            };
-            wm.onerror = () => resolve(off.toDataURL('image/png'));
-            wm.src = '/ProLine-PFP-New.jpg';
-          };
-          img.onerror = () => resolve(rawDataURL);
-          img.src = rawDataURL;
-        });
+        finalDataURL = finalCanvas.toDataURL('image/png');
       }
 
       const a = document.createElement('a');
@@ -6514,7 +6597,7 @@ export default function HelmetBuilder() {
             }}>
               <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, marginBottom:8 }}>
                 <div>
-                  <div style={{ fontSize:9, color:'#efff00', fontWeight:900, letterSpacing:'0.12em' }}>DEBUG MODE · v80 · REAR DECAL SCALE</div>
+                  <div style={{ fontSize:9, color:'#efff00', fontWeight:900, letterSpacing:'0.12em' }}>DEBUG MODE · v83 · AUTH HARDENED</div>
                   <div style={{ fontSize:8, color:'#6b7280', marginTop:2 }}>Live renderer + asset timing · Ctrl+Shift+D toggles</div>
                 </div>
                 <button
@@ -6869,7 +6952,7 @@ export default function HelmetBuilder() {
               if (!priceId) { console.error('No price ID found for', selectedPlan); return; }
               setCheckingOut(true);
               try {
-                const r = await fetch('/api/stripe/checkout', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ priceId }) });
+                const r = await fetch('/api/stripe/checkout', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ priceId, returnPath:'/helmet' }) });
                 const d = await r.json();
                 if (d.url) window.location.href = d.url;
                 else console.error('No URL in response:', d);
