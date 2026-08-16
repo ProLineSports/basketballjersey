@@ -1,6 +1,7 @@
 'use client';
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useUser, useClerk, UserButton } from '@clerk/nextjs';
+import ManagePlanPage, { PlanIcon } from '../../components/ManagePlanPage';
 import { useRouter } from 'next/navigation';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -5794,7 +5795,17 @@ export default function HelmetBuilder() {
           )}
           <button onClick={handleGetCredits} style={{ background:'linear-gradient(135deg,#efff00,#c8d900)', border:'none', borderRadius:6, padding:'6px 14px', fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800, fontSize:12, letterSpacing:'0.05em', color:'#000', cursor:'pointer' }}>{isSignedIn ? (isUnlimited ? 'UNLIMITED ACTIVE' : 'GET CREDITS') : 'GET STARTED'}</button>
           {isLoaded && (isSignedIn
-            ? <UserButton afterSignOutUrl="/" appearance={{ elements: { avatarBox: { width: 28, height: 28 } } }} />
+            ? <UserButton afterSignOutUrl="/" appearance={{ elements: { avatarBox: { width: 28, height: 28 } } }}>
+                <UserButton.UserProfilePage label="Manage Plan" url="plan" labelIcon={<PlanIcon />}>
+                  <ManagePlanPage
+                    isUnlimited={isUnlimited}
+                    credits={credits}
+                    paidCredits={paidCredits}
+                    refreshCredits={refreshCredits}
+                    returnPath="/helmet"
+                  />
+                </UserButton.UserProfilePage>
+              </UserButton>
             : <button onClick={() => openSignIn({ afterSignInUrl:'/helmet?upgrade=true' })} style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 20, padding: '4px 12px', cursor: 'pointer', fontSize: 11, fontWeight: 700, color: '#e2e8f0', fontFamily: "'Barlow Condensed', sans-serif" }}>SIGN IN</button>
           )}
         </div>

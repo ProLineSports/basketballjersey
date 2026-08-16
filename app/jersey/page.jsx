@@ -2,6 +2,7 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useRouter } from 'next/navigation';
 import { useUser, useClerk, UserButton } from "@clerk/nextjs";
+import ManagePlanPage, { PlanIcon } from "../../components/ManagePlanPage";
 
 const CREDITS_INITIAL = 3;
 
@@ -1142,7 +1143,17 @@ export default function JerseyCustomizer() {
           <button onClick={() => setHideControls(h => !h)} style={{ background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.12)", borderRadius:6, padding:"6px 14px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800, fontSize:12, letterSpacing:"0.05em", color:"#9ca3af", cursor:"pointer" }}>{hideControls ? "SHOW CONTROLS" : "HIDE CONTROLS"}</button>
           <button onClick={handleGetCredits} style={{ background:"linear-gradient(135deg,#efff00,#c8d900)", border:"none", borderRadius:6, padding:"6px 14px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800, fontSize:12, letterSpacing:"0.05em", color:"#000", cursor:"pointer" }}>{isSignedIn ? (isUnlimited ? "UNLIMITED ACTIVE" : "GET CREDITS") : "GET STARTED"}</button>
           {isSignedIn
-            ? <UserButton afterSignOutUrl="/" appearance={{ elements: { avatarBox: { width:28, height:28 } } }} />
+            ? <UserButton afterSignOutUrl="/" appearance={{ elements: { avatarBox: { width:28, height:28 } } }}>
+                <UserButton.UserProfilePage label="Manage Plan" url="plan" labelIcon={<PlanIcon />}>
+                  <ManagePlanPage
+                    isUnlimited={isUnlimited}
+                    credits={credits}
+                    paidCredits={paidCredits}
+                    refreshCredits={refreshCredits}
+                    returnPath="/jersey"
+                  />
+                </UserButton.UserProfilePage>
+              </UserButton>
             : <button onClick={() => openSignIn({ afterSignInUrl:"/jersey?upgrade=true" })} style={{ background:"rgba(255,255,255,0.08)", border:"1px solid rgba(255,255,255,0.12)", borderRadius:"50%", width:28, height:28, cursor:"pointer", fontSize:12, color:"#e2e8f0", display:"flex", alignItems:"center", justifyContent:"center" }}>👤</button>
           }
         </div>
