@@ -82,6 +82,26 @@ export default function ManagePlanPage({
     setBusy('portal');
     setError('');
 
+    // The Builder itself can be embedded inside the ProLine site. Stripe explicitly
+    // does not allow the hosted Customer Portal to render inside an iframe, so open
+    // a real top-level tab synchronously from the user's click. Opening it before
+    // the async fetch also avoids popup blockers that can reject window.open()
+    // after user activation has expired.
+    const portalWindow = window.open('', '_blank');
+
+    if (!portalWindow) {
+      setBusy('');
+      setError('Your browser blocked the billing window. Allow pop-ups for ProLine, then try again.');
+      return;
+    }
+
+    try {
+      portalWindow.document.title = 'Opening Stripe billing…';
+      portalWindow.document.body.style.cssText =
+        'margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#171416;color:#f3f4f6;font:600 16px Arial,sans-serif;';
+      portalWindow.document.body.textContent = 'Opening secure billing…';
+    } catch {}
+
     try {
       const res = await fetch('/api/stripe/portal', {
         method: 'POST',
@@ -91,11 +111,16 @@ export default function ManagePlanPage({
       const data = await res.json();
 
       if (!res.ok || !data?.url) {
+        try { portalWindow.close(); } catch {}
         throw new Error(data?.error || 'Unable to open billing management.');
       }
 
-      window.location.href = data.url;
+      // Navigate the new top-level browsing context instead of the embedded Builder
+      // frame. This is required for billing.stripe.com.
+      portalWindow.location.replace(data.url);
+      setBusy('');
     } catch (err) {
+      try { portalWindow.close(); } catch {}
       console.error('Manage Plan portal error:', err);
       setError(err?.message || 'Unable to open billing management.');
       setBusy('');
