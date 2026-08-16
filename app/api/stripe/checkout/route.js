@@ -53,11 +53,19 @@ export async function POST(req) {
 
     const { data: user, error: userError } = await supabaseAdmin
       .from('users')
-      .select('stripe_customer_id')
+      .select('stripe_customer_id, is_unlimited')
       .eq('id', userId)
       .single();
 
     if (userError) throw userError;
+
+    // Enforce Unlimited status on the server as well as in the UI.
+    if (user?.is_unlimited) {
+      return Response.json(
+        { error: 'Unlimited plan already active', code: 'ALREADY_UNLIMITED' },
+        { status: 409 }
+      );
+    }
 
     let customerId = user?.stripe_customer_id;
 

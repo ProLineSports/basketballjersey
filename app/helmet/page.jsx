@@ -2212,6 +2212,24 @@ export default function HelmetBuilder() {
   useEffect(() => {
     if (typeof window === 'undefined' || !isSignedIn) return;
 
+    const refreshOnFocus = () => {
+      refreshCredits().catch(err => console.error('Credit refresh on focus:', err));
+    };
+    const refreshOnVisibility = () => {
+      if (document.visibilityState === 'visible') refreshOnFocus();
+    };
+
+    window.addEventListener('focus', refreshOnFocus);
+    document.addEventListener('visibilitychange', refreshOnVisibility);
+    return () => {
+      window.removeEventListener('focus', refreshOnFocus);
+      document.removeEventListener('visibilitychange', refreshOnVisibility);
+    };
+  }, [isSignedIn, refreshCredits]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !isSignedIn) return;
+
     const url = new URL(window.location.href);
     const checkoutState = url.searchParams.get('checkout');
     const legacySuccess = url.searchParams.get('success') === 'true';
@@ -5722,9 +5740,14 @@ export default function HelmetBuilder() {
     debugMode
   ]);
 
-  const handleGetCredits = () => {
-    if (!isSignedIn) { openSignIn({ afterSignInUrl: '/helmet?upgrade=true', afterSignUpUrl: '/helmet?upgrade=true' }); return; }
+  const handleGetCredits = async () => {
+    if (!isSignedIn) {
+      openSignIn({ afterSignInUrl: '/helmet?upgrade=true', afterSignUpUrl: '/helmet?upgrade=true' });
+      return;
+    }
     setSelectedPlan(null);
+    try { await refreshCredits(); }
+    catch (err) { console.error('Credits refresh before upgrade modal:', err); }
     setShowUpgrade(true);
   };
 
@@ -5769,7 +5792,7 @@ export default function HelmetBuilder() {
               <span style={{ fontSize:14, fontWeight:700, color:credits>0?'#f3f4f6':'#ef4444', fontFamily:"'Barlow Condensed',sans-serif" }}>{isUnlimited ? '∞' : credits}</span>
             </div>
           )}
-          <button onClick={handleGetCredits} style={{ background:'linear-gradient(135deg,#efff00,#c8d900)', border:'none', borderRadius:6, padding:'6px 14px', fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800, fontSize:12, letterSpacing:'0.05em', color:'#000', cursor:'pointer' }}>{isSignedIn ? 'GET CREDITS' : 'GET STARTED'}</button>
+          <button onClick={handleGetCredits} style={{ background:'linear-gradient(135deg,#efff00,#c8d900)', border:'none', borderRadius:6, padding:'6px 14px', fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800, fontSize:12, letterSpacing:'0.05em', color:'#000', cursor:'pointer' }}>{isSignedIn ? (isUnlimited ? 'UNLIMITED ACTIVE' : 'GET CREDITS') : 'GET STARTED'}</button>
           {isLoaded && (isSignedIn
             ? <UserButton afterSignOutUrl="/" appearance={{ elements: { avatarBox: { width: 28, height: 28 } } }} />
             : <button onClick={() => openSignIn({ afterSignInUrl:'/helmet?upgrade=true' })} style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 20, padding: '4px 12px', cursor: 'pointer', fontSize: 11, fontWeight: 700, color: '#e2e8f0', fontFamily: "'Barlow Condensed', sans-serif" }}>SIGN IN</button>
@@ -6902,11 +6925,25 @@ export default function HelmetBuilder() {
       {showUpgrade && (
         <div onClick={() => setShowUpgrade(false)} style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.78)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000 }}>
           <div onClick={e => e.stopPropagation()} style={{ background:'#161314', borderRadius:16, border:'1px solid rgba(255,255,255,0.1)', padding:'30px', width:460, maxWidth:'90vw' }}>
-            <div style={{ textAlign:'center', marginBottom:20 }}>
-              <div style={{ fontSize:26, marginBottom:8 }}>⚡</div>
-              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:24, letterSpacing:'0.05em', marginBottom:6 }}>UPGRADE YOUR PLAN</div>
-              <div style={{ fontSize:12, color:'#9ca3af', lineHeight:1.6 }}>Remove the ProLine watermark and get more exports.</div>
-            </div>
+            {isUnlimited ? (
+              <>
+                <div style={{ textAlign:'center', marginBottom:20 }}>
+                  <div style={{ fontSize:30, marginBottom:8 }}>✓</div>
+                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:24, letterSpacing:'0.05em', marginBottom:6, color:'#efff00' }}>YOU ALREADY HAVE UNLIMITED CREDITS</div>
+                  <div style={{ fontSize:12, color:'#9ca3af', lineHeight:1.7 }}>Your Unlimited Monthly plan is active, so all exports are watermark-free and no credits are consumed.</div>
+                </div>
+                <div style={{ background:'rgba(16,185,129,0.08)', border:'1px solid rgba(16,185,129,0.24)', borderRadius:10, padding:'12px 14px', marginBottom:16, fontSize:10, color:'#a7f3d0', lineHeight:1.55, textAlign:'center' }}>
+                  Purchase options will automatically return if the subscription ends or Stripe marks it unpaid or canceled.
+                </div>
+                <button onClick={() => setShowUpgrade(false)} style={{ width:'100%', background:'linear-gradient(135deg,#efff00,#c8d900)', border:'none', borderRadius:8, padding:'13px', fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:14, letterSpacing:'0.06em', color:'#000', cursor:'pointer' }}>CLOSE</button>
+              </>
+            ) : (
+              <>
+                <div style={{ textAlign:'center', marginBottom:20 }}>
+                  <div style={{ fontSize:26, marginBottom:8 }}>⚡</div>
+                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:24, letterSpacing:'0.05em', marginBottom:6 }}>UPGRADE YOUR PLAN</div>
+                  <div style={{ fontSize:12, color:'#9ca3af', lineHeight:1.6 }}>Remove the ProLine watermark and get more exports.</div>
+                </div>
 
             <button onClick={() => setSelectedPlan('NEXT_PUBLIC_STRIPE_PRICE_UNLIMITED')} style={{ width:'100%', background:selectedPlan==='NEXT_PUBLIC_STRIPE_PRICE_UNLIMITED'?'rgba(239,255,0,0.2)':'rgba(239,255,0,0.04)', border:selectedPlan==='NEXT_PUBLIC_STRIPE_PRICE_UNLIMITED'?'2px solid #efff00':'1px solid rgba(239,255,0,0.25)', borderRadius:10, padding:'14px 16px', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:16, position:'relative' }}>
               <div style={{ position:'absolute', top:-10, left:16, background:'#efff00', color:'#000', fontSize:8, fontWeight:800, padding:'2px 8px', borderRadius:3, fontFamily:"'Barlow Condensed',sans-serif", whiteSpace:'nowrap' }}>MOST POPULAR</div>
@@ -6963,6 +7000,8 @@ export default function HelmetBuilder() {
               }
             }} style={{ width:'100%', background:selectedPlan?'linear-gradient(135deg,#efff00,#c8d900)':'rgba(255,255,255,0.08)', border:'none', borderRadius:8, padding:'13px', fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:14, letterSpacing:'0.06em', color:selectedPlan?'#000':'#6b7280', cursor:selectedPlan?'pointer':'default', marginBottom:8 }}>{checkingOut ? 'LOADING...' : 'CONTINUE TO CHECKOUT →'}</button>
             <button onClick={() => setShowUpgrade(false)} style={{ width:'100%', background:'none', border:'none', fontSize:11, color:'#6b7280', cursor:'pointer', padding:'7px', fontFamily:"'Barlow Condensed',sans-serif" }}>Maybe later</button>
+              </>
+            )}
           </div>
         </div>
       )}

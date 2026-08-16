@@ -653,6 +653,24 @@ export default function JerseyCustomizer() {
 
   useEffect(() => {
     if (typeof window === 'undefined' || !isSignedIn) return;
+
+    const refreshOnFocus = () => {
+      refreshCredits().catch(err => console.error('Credit refresh on focus:', err));
+    };
+    const refreshOnVisibility = () => {
+      if (document.visibilityState === 'visible') refreshOnFocus();
+    };
+
+    window.addEventListener('focus', refreshOnFocus);
+    document.addEventListener('visibilitychange', refreshOnVisibility);
+    return () => {
+      window.removeEventListener('focus', refreshOnFocus);
+      document.removeEventListener('visibilitychange', refreshOnVisibility);
+    };
+  }, [isSignedIn, refreshCredits]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !isSignedIn) return;
     const url = new URL(window.location.href);
     const checkoutState = url.searchParams.get('checkout');
     const legacySuccess = url.searchParams.get('success') === 'true';
@@ -1040,9 +1058,14 @@ export default function JerseyCustomizer() {
     }
   };
 
-  const handleGetCredits = () => {
-    if (!isSignedIn) { openSignIn({ afterSignInUrl:"/jersey?upgrade=true", afterSignUpUrl:"/jersey?upgrade=true" }); return; }
+  const handleGetCredits = async () => {
+    if (!isSignedIn) {
+      openSignIn({ afterSignInUrl:"/jersey?upgrade=true", afterSignUpUrl:"/jersey?upgrade=true" });
+      return;
+    }
     setSelectedPlan(null);
+    try { await refreshCredits(); }
+    catch (err) { console.error('Credits refresh before upgrade modal:', err); }
     setShowUpgrade(true);
   };
 
@@ -1117,7 +1140,7 @@ export default function JerseyCustomizer() {
             </div>
           )}
           <button onClick={() => setHideControls(h => !h)} style={{ background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.12)", borderRadius:6, padding:"6px 14px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800, fontSize:12, letterSpacing:"0.05em", color:"#9ca3af", cursor:"pointer" }}>{hideControls ? "SHOW CONTROLS" : "HIDE CONTROLS"}</button>
-          <button onClick={handleGetCredits} style={{ background:"linear-gradient(135deg,#efff00,#c8d900)", border:"none", borderRadius:6, padding:"6px 14px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800, fontSize:12, letterSpacing:"0.05em", color:"#000", cursor:"pointer" }}>{isSignedIn ? "GET CREDITS" : "GET STARTED"}</button>
+          <button onClick={handleGetCredits} style={{ background:"linear-gradient(135deg,#efff00,#c8d900)", border:"none", borderRadius:6, padding:"6px 14px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800, fontSize:12, letterSpacing:"0.05em", color:"#000", cursor:"pointer" }}>{isSignedIn ? (isUnlimited ? "UNLIMITED ACTIVE" : "GET CREDITS") : "GET STARTED"}</button>
           {isSignedIn
             ? <UserButton afterSignOutUrl="/" appearance={{ elements: { avatarBox: { width:28, height:28 } } }} />
             : <button onClick={() => openSignIn({ afterSignInUrl:"/jersey?upgrade=true" })} style={{ background:"rgba(255,255,255,0.08)", border:"1px solid rgba(255,255,255,0.12)", borderRadius:"50%", width:28, height:28, cursor:"pointer", fontSize:12, color:"#e2e8f0", display:"flex", alignItems:"center", justifyContent:"center" }}>👤</button>
@@ -1582,11 +1605,25 @@ export default function JerseyCustomizer() {
       {showUpgrade && (
         <div onClick={()=>setShowUpgrade(false)} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.78)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000 }}>
           <div onClick={e=>e.stopPropagation()} style={{ background:"#161314", borderRadius:16, border:"1px solid rgba(255,255,255,0.1)", padding:"30px", width:460, maxWidth:"90vw", animation:"fadeIn 0.2s ease" }}>
-            <div style={{ textAlign:"center", marginBottom:20 }}>
-              <div style={{ fontSize:26, marginBottom:8 }}>⚡</div>
-              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:24, letterSpacing:"0.05em", marginBottom:6 }}>UPGRADE YOUR PLAN</div>
-              <div style={{ fontSize:12, color:"#9ca3af", lineHeight:1.6 }}>Remove the ProLine watermark and get more exports.</div>
-            </div>
+            {isUnlimited ? (
+              <>
+                <div style={{ textAlign:"center", marginBottom:20 }}>
+                  <div style={{ fontSize:30, marginBottom:8 }}>✓</div>
+                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:24, letterSpacing:"0.05em", marginBottom:6, color:"#efff00" }}>YOU ALREADY HAVE UNLIMITED CREDITS</div>
+                  <div style={{ fontSize:12, color:"#9ca3af", lineHeight:1.7 }}>Your Unlimited Monthly plan is active, so all exports are watermark-free and no credits are consumed.</div>
+                </div>
+                <div style={{ background:"rgba(16,185,129,0.08)", border:"1px solid rgba(16,185,129,0.24)", borderRadius:10, padding:"12px 14px", marginBottom:16, fontSize:10, color:"#a7f3d0", lineHeight:1.55, textAlign:"center" }}>
+                  Purchase options will automatically return if the subscription ends or Stripe marks it unpaid or canceled.
+                </div>
+                <button onClick={()=>setShowUpgrade(false)} style={{ width:"100%", background:"linear-gradient(135deg,#efff00,#c8d900)", border:"none", borderRadius:8, padding:"13px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:14, letterSpacing:"0.06em", color:"#000", cursor:"pointer" }}>CLOSE</button>
+              </>
+            ) : (
+              <>
+                <div style={{ textAlign:"center", marginBottom:20 }}>
+                  <div style={{ fontSize:26, marginBottom:8 }}>⚡</div>
+                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:24, letterSpacing:"0.05em", marginBottom:6 }}>UPGRADE YOUR PLAN</div>
+                  <div style={{ fontSize:12, color:"#9ca3af", lineHeight:1.6 }}>Remove the ProLine watermark and get more exports.</div>
+                </div>
 
             {/* Subscription option */}
             <button onClick={() => setSelectedPlan("NEXT_PUBLIC_STRIPE_PRICE_UNLIMITED")} style={{ width:"100%", background:selectedPlan==="NEXT_PUBLIC_STRIPE_PRICE_UNLIMITED"?"rgba(239,255,0,0.2)":"rgba(239,255,0,0.04)", border:selectedPlan==="NEXT_PUBLIC_STRIPE_PRICE_UNLIMITED"?"2px solid #efff00":"1px solid rgba(239,255,0,0.25)", borderRadius:10, padding:"14px 16px", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16, position:"relative" }}>
@@ -1652,6 +1689,8 @@ export default function JerseyCustomizer() {
               Not into credits? Want more control? Purchase the Photoshop template{" "}
               <a href="https://www.prolinemockups.com/templates/p/proline-basketball-jersey-hanger" target="_blank" rel="noopener noreferrer" style={{ color:"#efff00", textDecoration:"underline", cursor:"pointer" }}>here</a>.
             </div>
+              </>
+            )}
           </div>
         </div>
       )}
