@@ -547,6 +547,17 @@ export default function JerseyCustomizer() {
   const { user, isLoaded, isSignedIn } = useUser();
   const [showProductMenu, setShowProductMenu] = useState(false);
   const { openSignIn } = useClerk();
+
+  const openBuilderAuth = useCallback((returnUrl = '/jersey') => {
+    openSignIn({
+      withSignUp: true,
+      transferable: true,
+      oauthFlow: 'popup',
+      signUpUrl: '/sign-in#/create',
+      fallbackRedirectUrl: returnUrl,
+      signUpFallbackRedirectUrl: returnUrl,
+    });
+  }, [openSignIn]);
   const [credits, setCredits]           = useState(0);
   const [paidCredits, setPaidCredits]   = useState(0);
   const [isUnlimited, setIsUnlimited]   = useState(false);
@@ -881,7 +892,7 @@ export default function JerseyCustomizer() {
   }, []);
 
   const handleExport = async () => {
-    if (!isSignedIn) { openSignIn({ afterSignInUrl:"/jersey?upgrade=true", afterSignUpUrl:"/jersey?upgrade=true" }); return; }
+    if (!isSignedIn) { openBuilderAuth('/jersey?upgrade=true'); return; }
     if (!isUnlimited && credits <= 0) { setShowUpgrade(true); return; }
     setExporting(true);
 
@@ -1061,7 +1072,7 @@ export default function JerseyCustomizer() {
 
   const handleGetCredits = async () => {
     if (!isSignedIn) {
-      openSignIn({ afterSignInUrl:"/jersey?upgrade=true", afterSignUpUrl:"/jersey?upgrade=true" });
+      openBuilderAuth('/jersey?upgrade=true');
       return;
     }
     setSelectedPlan(null);
@@ -1192,7 +1203,7 @@ export default function JerseyCustomizer() {
                   />
                 </UserButton.UserProfilePage>
               </UserButton>
-            : <button onClick={() => openSignIn({ afterSignInUrl:"/jersey?upgrade=true" })} style={{ background:"rgba(255,255,255,0.08)", border:"1px solid rgba(255,255,255,0.12)", borderRadius:"50%", width:28, height:28, cursor:"pointer", fontSize:12, color:"#e2e8f0", display:"flex", alignItems:"center", justifyContent:"center" }}>👤</button>
+            : <button onClick={() => openBuilderAuth('/jersey')} style={{ background:"rgba(255,255,255,0.08)", border:"1px solid rgba(255,255,255,0.12)", borderRadius:"50%", width:28, height:28, cursor:"pointer", fontSize:12, color:"#e2e8f0", display:"flex", alignItems:"center", justifyContent:"center" }}>👤</button>
           }
         </div>
       </div>

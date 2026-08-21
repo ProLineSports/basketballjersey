@@ -1682,6 +1682,17 @@ export default function HelmetBuilder() {
   const { isSignedIn, isLoaded } = useUser();
   const { openSignIn } = useClerk();
 
+  const openBuilderAuth = useCallback((returnUrl = '/helmet') => {
+    openSignIn({
+      withSignUp: true,
+      transferable: true,
+      oauthFlow: 'popup',
+      signUpUrl: '/sign-in#/create',
+      fallbackRedirectUrl: returnUrl,
+      signUpFallbackRedirectUrl: returnUrl,
+    });
+  }, [openSignIn]);
+
   const mountRef    = useRef(null);
   const sceneRef    = useRef(null);
   const modelRef    = useRef(null);
@@ -5408,7 +5419,7 @@ export default function HelmetBuilder() {
   const handleExport = useCallback(async () => {
     if (!rendererRef.current) return;
     if (!isSignedIn) {
-      openSignIn({ afterSignInUrl: '/helmet?upgrade=true', afterSignUpUrl: '/helmet?upgrade=true' });
+      openBuilderAuth('/helmet?upgrade=true');
       return;
     }
     if (!isUnlimited && credits <= 0) {
@@ -5733,7 +5744,7 @@ export default function HelmetBuilder() {
     isSignedIn,
     isUnlimited,
     credits,
-    openSignIn,
+    openBuilderAuth,
     transparentBg,
     viewportBgColor,
     exportResolution,
@@ -5743,7 +5754,7 @@ export default function HelmetBuilder() {
 
   const handleGetCredits = async () => {
     if (!isSignedIn) {
-      openSignIn({ afterSignInUrl: '/helmet?upgrade=true', afterSignUpUrl: '/helmet?upgrade=true' });
+      openBuilderAuth('/helmet?upgrade=true');
       return;
     }
     setSelectedPlan(null);
@@ -5844,7 +5855,7 @@ export default function HelmetBuilder() {
                   />
                 </UserButton.UserProfilePage>
               </UserButton>
-            : <button onClick={() => openSignIn({ afterSignInUrl:'/helmet?upgrade=true' })} style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 20, padding: '4px 12px', cursor: 'pointer', fontSize: 11, fontWeight: 700, color: '#e2e8f0', fontFamily: "'Barlow Condensed', sans-serif" }}>SIGN IN</button>
+            : <button onClick={() => openBuilderAuth('/helmet')} style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 20, padding: '4px 12px', cursor: 'pointer', fontSize: 11, fontWeight: 700, color: '#e2e8f0', fontFamily: "'Barlow Condensed', sans-serif" }}>SIGN IN</button>
           )}
         </div>
       </div>
