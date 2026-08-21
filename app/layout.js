@@ -103,6 +103,7 @@ export default function RootLayout({ children }) {
   return (
     <ClerkProvider
       appearance={clerkAppearance}
+      afterSignOutUrl="/helmet"
       signInUrl="/sign-in"
       signInFallbackRedirectUrl="/helmet"
       signUpFallbackRedirectUrl="/helmet"
