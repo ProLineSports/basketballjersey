@@ -5807,7 +5807,7 @@ export default function HelmetBuilder() {
           <button onClick={handleGetCredits} style={{ background:'linear-gradient(135deg,#efff00,#c8d900)', border:'none', borderRadius:6, padding:'6px 14px', fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800, fontSize:12, letterSpacing:'0.05em', color:'#000', cursor:'pointer' }}>{isSignedIn ? (isUnlimited ? 'UNLIMITED ACTIVE' : 'GET CREDITS') : 'GET STARTED'}</button>
           {isLoaded && (isSignedIn
             ? <UserButton
-                afterSignOutUrl="/"
+                afterSignOutUrl="/helmet"
                 appearance={{ elements: { avatarBox: { width: 28, height: 28 } } }}
                 userProfileProps={{
                   appearance: {
