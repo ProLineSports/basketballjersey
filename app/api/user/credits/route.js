@@ -17,33 +17,52 @@ function getAdminClient() {
 export async function GET() {
   try {
     const { userId } = await auth();
-    if (!userId) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!userId) {
+      return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
     const supabaseAdmin = getAdminClient();
 
-    // Atomic first-login creation. The Postgres function guarantees the welcome
-    // credits + transaction can only be created once, even if two tabs load together.
+    // Creates the Builder row + 3 welcome credits exactly once.
+    // Concurrent first loads cannot duplicate the welcome grant.
     const { data, error } = await supabaseAdmin.rpc('get_or_create_builder_user', {
       p_user_id: userId,
     });
 
     if (error) {
-      console.error('Credits RPC error:', { userId, code: error.code, message: error.message });
+      console.error('Credits RPC error:', {
+        userId,
+        code: error.code,
+        message: error.message,
+      });
       return Response.json({ error: 'Database error' }, { status: 500 });
     }
 
     const user = Array.isArray(data) ? data[0] : data;
-    if (!user) return Response.json({ error: 'User not found' }, { status: 404 });
+    if (!user) {
+      return Response.json({ error: 'User not found' }, { status: 404 });
+    }
 
-    return Response.json({
-      freeCredits: user.free_credits,
-      paidCredits: user.paid_credits,
-      isUnlimited: user.is_unlimited,
-      totalCredits: user.is_unlimited ? 999 : user.free_credits + user.paid_credits,
-      hasWatermark: !user.is_unlimited && user.paid_credits === 0,
-    }, {
-      headers: { 'Cache-Control': 'no-store, max-age=0' },
-    });
+    const freeCredits = Number(user.free_credits || 0);
+    const paidCredits = Number(user.paid_credits || 0);
+    const isUnlimited = user.is_unlimited === true;
+
+    return Response.json(
+      {
+        freeCredits,
+        paidCredits,
+        isUnlimited,
+        totalCredits: isUnlimited ? 999 : freeCredits + paidCredits,
+        // Paid credits are intentionally consumed before free credits so any
+        // remaining paid balance keeps exports watermark-free.
+        hasWatermark: !isUnlimited && paidCredits === 0,
+      },
+      {
+        headers: {
+          'Cache-Control': 'no-store, max-age=0',
+        },
+      }
+    );
   } catch (err) {
     console.error('Credits route error:', err);
     return Response.json({ error: 'Unexpected error' }, { status: 500 });

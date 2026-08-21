@@ -22,140 +22,237 @@ function getAdminClient() {
   );
 }
 
-function firstRow(data) {
+function stripeId(value) {
+  if (!value) return null;
+  return typeof value === 'string' ? value : value.id || null;
+}
+
+async function applyCreditPurchase(supabaseAdmin, event, userId, credits) {
+  const { data, error } = await supabaseAdmin.rpc('process_credit_purchase', {
+    p_event_id: event.id,
+    p_event_type: event.type,
+    p_user_id: userId,
+    p_credits: credits,
+  });
+
+  if (error) throw error;
   return Array.isArray(data) ? data[0] : data;
 }
 
-async function processStripeMutation(supabaseAdmin, params) {
-  const { data, error } = await supabaseAdmin.rpc('process_stripe_event', params);
+async function applySubscriptionState({
+  supabaseAdmin,
+  event,
+  userId,
+  customerId,
+  subscriptionId,
+  status,
+}) {
+  const { data, error } = await supabaseAdmin.rpc('process_subscription_event', {
+    p_event_id: event.id,
+    p_event_type: event.type,
+    p_user_id: userId || null,
+    p_customer_id: customerId,
+    p_subscription_id: subscriptionId,
+    p_status: status,
+    p_event_created: Number(event.created || 0),
+  });
+
   if (error) throw error;
-  return firstRow(data);
+  return Array.isArray(data) ? data[0] : data;
 }
 
 export async function POST(req) {
   const body = await req.text();
-  const sig = req.headers.get('stripe-signature');
+  const signature = req.headers.get('stripe-signature');
 
   let event;
+
   try {
-    event = stripe.webhooks.constructEvent(body, sig, process.env.STRIPE_WEBHOOK_SECRET);
+    event = stripe.webhooks.constructEvent(
+      body,
+      signature,
+      process.env.STRIPE_WEBHOOK_SECRET
+    );
   } catch (err) {
     console.error('Stripe signature verification failed:', err.message);
-    return Response.json({ error: 'Invalid webhook signature' }, { status: 400 });
+    return Response.json(
+      { error: 'Invalid webhook signature' },
+      { status: 400 }
+    );
   }
 
   try {
     const supabaseAdmin = getAdminClient();
 
-    if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') {
+    // ── CHECKOUT FULFILLMENT ─────────────────────────────────────────────────
+    if (
+      event.type === 'checkout.session.completed' ||
+      event.type === 'checkout.session.async_payment_succeeded'
+    ) {
       const session = event.data.object;
-      const userId = session.metadata?.clerk_user_id;
-      const priceId = session.metadata?.price_id;
+      const userId = session.metadata?.clerk_user_id || null;
+      const priceId = session.metadata?.price_id || null;
 
       if (!userId || !priceId) {
-        console.warn('Checkout event missing metadata:', { eventId: event.id, sessionId: session.id });
-        return Response.json({ received: true, ignored: 'missing_metadata' });
+        console.warn('Checkout event missing Builder metadata:', {
+          eventId: event.id,
+          sessionId: session.id,
+        });
+        return Response.json({
+          received: true,
+          ignored: 'missing_metadata',
+        });
       }
 
-      const credits = CREDIT_MAP[priceId];
+      const paymentReady =
+        session.payment_status === 'paid' ||
+        session.payment_status === 'no_payment_required';
 
-      if (credits) {
-        // With delayed payment methods, checkout.session.completed can arrive before
-        // funds are paid. Wait for async_payment_succeeded in that case.
-        const paymentReady = session.payment_status === 'paid' || session.payment_status === 'no_payment_required';
-        if (!paymentReady && event.type === 'checkout.session.completed') {
-          return Response.json({ received: true, awaitingPayment: true });
-        }
-
-        const result = await processStripeMutation(supabaseAdmin, {
-          p_event_id: event.id,
-          p_event_type: event.type,
-          p_operation: 'credit_purchase',
-          p_user_id: userId,
-          p_customer_id: typeof session.customer === 'string' ? session.customer : null,
-          p_credits: credits,
-          p_is_unlimited: null,
+      // A delayed payment can emit checkout.session.completed before the money
+      // actually clears. In that case we wait for async_payment_succeeded.
+      if (!paymentReady && event.type === 'checkout.session.completed') {
+        return Response.json({
+          received: true,
+          awaitingPayment: true,
         });
+      }
 
-        return Response.json({ received: true, applied: result?.applied !== false, reason: result?.reason });
+      const purchasedCredits = CREDIT_MAP[priceId];
+
+      if (purchasedCredits) {
+        const result = await applyCreditPurchase(
+          supabaseAdmin,
+          event,
+          userId,
+          purchasedCredits
+        );
+
+        return Response.json({
+          received: true,
+          creditPurchase: true,
+          processed: result?.processed === true,
+          alreadyProcessed: result?.alreadyProcessed === true,
+        });
       }
 
       if (priceId === process.env.STRIPE_PRICE_UNLIMITED) {
-        const paymentReady = session.payment_status === 'paid' || session.payment_status === 'no_payment_required';
-        if (!paymentReady && event.type === 'checkout.session.completed') {
-          return Response.json({ received: true, awaitingPayment: true });
+        const subscriptionId = stripeId(session.subscription);
+        const customerId = stripeId(session.customer);
+
+        if (!subscriptionId || !customerId) {
+          throw new Error(
+            'Unlimited checkout missing Stripe customer or subscription ID'
+          );
         }
 
-        const result = await processStripeMutation(supabaseAdmin, {
-          p_event_id: event.id,
-          p_event_type: event.type,
-          p_operation: 'set_unlimited_by_user',
-          p_user_id: userId,
-          p_customer_id: typeof session.customer === 'string' ? session.customer : null,
-          p_credits: 0,
-          p_is_unlimited: true,
+        // Read Stripe's current subscription state rather than assuming that a
+        // completed Checkout always means the subscription is active.
+        const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+
+        const result = await applySubscriptionState({
+          supabaseAdmin,
+          event,
+          userId,
+          customerId,
+          subscriptionId,
+          status: subscription.status,
         });
 
-        return Response.json({ received: true, applied: result?.applied !== false, reason: result?.reason });
+        return Response.json({
+          received: true,
+          subscriptionCheckout: true,
+          processed: result?.processed === true,
+          alreadyProcessed: result?.alreadyProcessed === true,
+          staleEvent: result?.staleEvent === true,
+          isUnlimited: result?.isUnlimited === true,
+          status: result?.status || subscription.status,
+        });
       }
 
-      console.warn('Checkout event has unknown price ID:', { eventId: event.id, priceId });
-      return Response.json({ received: true, ignored: 'unknown_price' });
+      console.warn('Checkout event has unknown price ID:', {
+        eventId: event.id,
+        priceId,
+      });
+
+      return Response.json({
+        received: true,
+        ignored: 'unknown_price',
+      });
     }
 
+    // ── SUBSCRIPTION LIFECYCLE ────────────────────────────────────────────────
     if (
-      event.type === 'customer.subscription.created'
-      || event.type === 'customer.subscription.updated'
-      || event.type === 'customer.subscription.deleted'
+      event.type === 'customer.subscription.created' ||
+      event.type === 'customer.subscription.updated' ||
+      event.type === 'customer.subscription.deleted'
     ) {
       const subscription = event.data.object;
-      const customerId = typeof subscription.customer === 'string'
-        ? subscription.customer
-        : subscription.customer?.id;
+      const subscriptionId = subscription.id;
+      const customerId = stripeId(subscription.customer);
+      const userId = subscription.metadata?.clerk_user_id || null;
+
+      if (!subscriptionId || !customerId) {
+        throw new Error(
+          'Subscription event missing Stripe customer or subscription ID'
+        );
+      }
 
       let effectiveStatus = subscription.status;
 
-      // Stripe doesn't guarantee webhook delivery order. For created/updated events,
-      // retrieve the subscription's CURRENT status so a late older event cannot
-      // accidentally restore Unlimited after a newer cancellation/unpaid transition.
+      // Stripe webhook ordering is not guaranteed. For non-deleted events, read
+      // the subscription's CURRENT state so a late delivery does not revive a
+      // subscription that has already moved to a newer status.
       if (event.type !== 'customer.subscription.deleted') {
         try {
-          const currentSubscription = await stripe.subscriptions.retrieve(subscription.id);
-          effectiveStatus = currentSubscription.status;
-        } catch (statusError) {
-          if (statusError?.code === 'resource_missing') effectiveStatus = 'canceled';
-          else throw statusError;
+          const current = await stripe.subscriptions.retrieve(subscriptionId);
+          effectiveStatus = current.status;
+        } catch (err) {
+          if (err?.code === 'resource_missing') {
+            effectiveStatus = 'canceled';
+          } else {
+            throw err;
+          }
         }
       } else {
         effectiveStatus = 'canceled';
       }
 
-      // Keep access during Stripe's normal payment-recovery window (past_due), but
-      // remove it once the subscription is unpaid/canceled/paused/etc.
-      const keepUnlimited = ['active', 'trialing', 'past_due'].includes(effectiveStatus);
-
-      const result = await processStripeMutation(supabaseAdmin, {
-        p_event_id: event.id,
-        p_event_type: event.type,
-        p_operation: 'set_unlimited_by_customer',
-        p_user_id: null,
-        p_customer_id: customerId,
-        p_credits: 0,
-        p_is_unlimited: keepUnlimited,
+      const result = await applySubscriptionState({
+        supabaseAdmin,
+        event,
+        userId,
+        customerId,
+        subscriptionId,
+        status: effectiveStatus,
       });
 
-      return Response.json({ received: true, applied: result?.applied !== false, reason: result?.reason });
+      return Response.json({
+        received: true,
+        subscriptionEvent: true,
+        processed: result?.processed === true,
+        alreadyProcessed: result?.alreadyProcessed === true,
+        staleEvent: result?.staleEvent === true,
+        isUnlimited: result?.isUnlimited === true,
+        status: result?.status || effectiveStatus,
+      });
     }
 
-    return Response.json({ received: true, ignored: 'unhandled_event' });
+    return Response.json({
+      received: true,
+      ignored: 'unhandled_event',
+    });
   } catch (err) {
-    // Returning 500 is deliberate. Stripe will retry, and the database function's
-    // transaction rolls back its event claim if fulfillment failed.
+    // Deliberately return 500. Stripe will retry the webhook. If an RPC failed,
+    // Postgres rolls its transaction back, including the event-id claim.
     console.error('Stripe webhook processing error:', {
       eventId: event.id,
       eventType: event.type,
       message: err.message,
     });
-    return Response.json({ error: 'Webhook processing failed' }, { status: 500 });
+
+    return Response.json(
+      { error: 'Webhook processing failed' },
+      { status: 500 }
+    );
   }
 }

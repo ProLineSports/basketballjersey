@@ -17,46 +17,82 @@ function getAdminClient() {
 export async function POST() {
   try {
     const { userId } = await auth();
-    if (!userId) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!userId) {
+      return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
     const supabaseAdmin = getAdminClient();
 
-    // One Postgres transaction locks the user row, checks entitlement, consumes
-    // paid-before-free, and writes the transaction ledger entry.
+    // Make this endpoint safe even if it is the first authenticated API request
+    // a brand-new account makes.
+    const { error: ensureUserError } = await supabaseAdmin.rpc(
+      'get_or_create_builder_user',
+      { p_user_id: userId }
+    );
+
+    if (ensureUserError) {
+      console.error('Export user init RPC error:', {
+        userId,
+        code: ensureUserError.code,
+        message: ensureUserError.message,
+      });
+      return Response.json({ error: 'Failed to initialize account' }, { status: 500 });
+    }
+
+    // One Postgres transaction locks the user row, checks Unlimited, consumes
+    // paid-before-free, and records the transaction ledger entry.
     const { data, error } = await supabaseAdmin.rpc('consume_export_credit', {
       p_user_id: userId,
     });
 
     if (error) {
-      console.error('Export credit RPC error:', { userId, code: error.code, message: error.message });
+      console.error('Export credit RPC error:', {
+        userId,
+        code: error.code,
+        message: error.message,
+      });
       return Response.json({ error: 'Failed to authorize export' }, { status: 500 });
     }
 
     const result = Array.isArray(data) ? data[0] : data;
-    if (!result) return Response.json({ error: 'Invalid export authorization response' }, { status: 500 });
 
-    if (!result.allowed) {
-      const status = result.reason === 'user_not_found' ? 404 : 402;
-      return Response.json({
-        allowed: false,
-        error: result.reason === 'user_not_found' ? 'User not found' : 'No credits remaining',
-        reason: result.reason,
-        freeCredits: result.free_credits,
-        paidCredits: result.paid_credits,
-        isUnlimited: result.is_unlimited,
-      }, { status });
+    if (!result || typeof result !== 'object') {
+      return Response.json(
+        { error: 'Invalid export authorization response' },
+        { status: 500 }
+      );
     }
 
-    return Response.json({
-      allowed: true,
-      hasWatermark: result.has_watermark,
-      isUnlimited: result.is_unlimited,
-      freeCredits: result.free_credits,
-      paidCredits: result.paid_credits,
-      reason: result.reason,
-    }, {
-      headers: { 'Cache-Control': 'no-store, max-age=0' },
-    });
+    if (result.allowed !== true) {
+      const isMissingUser = result.error === 'User not found';
+
+      return Response.json(
+        {
+          allowed: false,
+          error: result.error || 'No credits remaining',
+          freeCredits: Number(result.freeCredits || 0),
+          paidCredits: Number(result.paidCredits || 0),
+          isUnlimited: result.isUnlimited === true,
+        },
+        {
+          status: isMissingUser ? 404 : 402,
+          headers: { 'Cache-Control': 'no-store, max-age=0' },
+        }
+      );
+    }
+
+    return Response.json(
+      {
+        allowed: true,
+        hasWatermark: result.hasWatermark === true,
+        isUnlimited: result.isUnlimited === true,
+        freeCredits: Number(result.freeCredits || 0),
+        paidCredits: Number(result.paidCredits || 0),
+      },
+      {
+        headers: { 'Cache-Control': 'no-store, max-age=0' },
+      }
+    );
   } catch (err) {
     console.error('Export route error:', err);
     return Response.json({ error: 'Unexpected error' }, { status: 500 });
