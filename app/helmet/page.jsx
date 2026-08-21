@@ -1355,19 +1355,13 @@ function applyStripeBumperStencilMask(partsMap, stripeMaterials) {
 //               under the regular scene lights), rough, non-metallic.
 //   Flecks    → AO≈1.0 (full env exposure), near-zero roughness, near-full metalness
 //               → sharp bright glints only exactly where a flake is.
-// A second canvas — black everywhere except tinted dots at the exact same flake
-// positions — drives emissiveMap, so the sparkle color can be picked independently of
-// the paint's own base color (which stays on mat.color / the Zone Colors swatch).
-// `intensity` (0–1, Glitter slider) controls flake density; `flakeSize` (0–1)
-// controls the average speck size; `colorHex` is the chosen Sparkle Color.
-function hexToRgb(hex) {
-  const m = /^#?([0-9a-f]{6})$/i.exec(hex || '');
-  if (!m) return { r: 255, g: 255, b: 255 };
-  const int = parseInt(m[1], 16);
-  return { r: (int >> 16) & 255, g: (int >> 8) & 255, b: int & 255 };
-}
-
-function createFlakeTextures(intensity, flakeSize, colorHex) {
+// A second canvas — black everywhere except grayscale dots at the exact same flake
+// positions — drives emissiveMap. The selected sparkle hue now lives on the material's
+// emissive Color uniform rather than being baked into this canvas. That is important:
+// changing Sparkle Color can now be a cheap GPU uniform update instead of rebuilding
+// thousands of ellipses and re-uploading two 1024px textures for every color-picker tick.
+// `intensity` controls flake density and `flakeSize` controls average speck size.
+function createFlakeTextures(intensity, flakeSize) {
   // A much larger, asymmetrically repeated field avoids the obvious 16×16 tiled grid
   // that appeared at medium/high glitter density.
   const size = 1024;
@@ -1386,7 +1380,6 @@ function createFlakeTextures(intensity, flakeSize, colorHex) {
   colorCtx.fillStyle = 'rgb(0,0,0)';
   colorCtx.fillRect(0, 0, size, size);
 
-  const { r, g, b } = hexToRgb(colorHex);
   // Keep the current look near the default mid setting, but allow much smaller
   // Raiders-style fine metallic flecks when the user drags the new Size slider down.
   const sizeBias = THREE.MathUtils.clamp(flakeSize ?? 0.55, 0, 1);
@@ -1412,11 +1405,14 @@ function createFlakeTextures(intensity, flakeSize, colorHex) {
     ormCtx.fill();
     ormCtx.restore();
 
+    // Grayscale brightness variation preserves the random sparkle intensity while
+    // allowing mat.emissive to tint the whole field instantly at render time.
     const jitter = 0.55 + Math.random() * 0.45;
+    const mask = Math.round(255 * jitter);
     colorCtx.save();
     colorCtx.translate(x, y);
     colorCtx.rotate(angle);
-    colorCtx.fillStyle = `rgb(${Math.round(r * jitter)},${Math.round(g * jitter)},${Math.round(b * jitter)})`;
+    colorCtx.fillStyle = `rgb(${mask},${mask},${mask})`;
     colorCtx.beginPath();
     colorCtx.ellipse(0, 0, major, minor, 0, 0, Math.PI * 2);
     colorCtx.fill();
@@ -5306,7 +5302,7 @@ export default function HelmetBuilder() {
       });
 
       if (finish === 'carpaint') {
-        const { ormTex, colorTex } = createFlakeTextures(glitter, glitterSize, glitterColor);
+        const { ormTex, colorTex } = createFlakeTextures(glitter, glitterSize);
         mats.forEach(mat => {
           if (mat.roughnessMap && mat.roughnessMap !== satinMicroTex) mat.roughnessMap.dispose?.();
           if (mat.emissiveMap) mat.emissiveMap.dispose?.();
@@ -5318,7 +5314,9 @@ export default function HelmetBuilder() {
           mat.aoMap = null;
           mat.aoMapIntensity = 1.0;
           mat.emissiveMap = colorTex;
-          mat.emissive.set(0xffffff);
+          // Sparkle hue is a material uniform, not baked into the generated map.
+          // This makes interactive color changes essentially free even at high density.
+          mat.emissive.set(glitterColor);
           mat.emissiveIntensity = 1.0;
           mat.roughness = 1.0;
           mat.metalness = 1.0;
@@ -5405,7 +5403,22 @@ export default function HelmetBuilder() {
         mat.needsUpdate = true;
       });
     });
-  }, [glitter, glitterSize, glitterColor, satinMetallic, satinTexture, carbonFiberSize, finish, loaded]);
+  }, [glitter, glitterSize, satinMetallic, satinTexture, carbonFiberSize, finish, loaded]);
+
+  // Sparkle Color is intentionally isolated from the expensive texture-generation
+  // effect above. Native color inputs can emit many changes per second; here each one
+  // only updates the existing MeshPhysicalMaterial emissive uniform.
+  useEffect(() => {
+    if (!loaded || finish !== 'carpaint') return;
+    SHELL_MATERIAL_NAMES.forEach(name => {
+      const mats = materialsRef.current[name];
+      if (!mats) return;
+      mats.forEach(mat => {
+        if (!mat.emissiveMap) return;
+        mat.emissive.set(glitterColor);
+      });
+    });
+  }, [glitterColor, finish, loaded]);
 
   useEffect(() => () => {
     satinMicroTextureRef.current?.dispose?.();
