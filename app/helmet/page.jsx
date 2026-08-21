@@ -1305,31 +1305,53 @@ function applyPremiumPartMaterialCalibration(partsMap) {
   });
 }
 
-function applyStripeBumperStencilMask(partsMap, stripeMaterials) {
-  // The optimized GLB can change the exact proximity between the baked Decal Surface
-  // and the real bumper mesh by tiny amounts. Relying only on physical depth therefore
-  // risks the raised stripe carrier poking through the bumper again.
+function applyStripeBumperStencilMask(partObjectsMap, stripeMaterials) {
+  // The bumper stencil is SCREEN-SPACE, so render order matters.
   //
-  // Use the actual visible Bumpers as a stencil mask instead: wherever a bumper fragment
-  // is visible, the stripe shader is forbidden from drawing. This keeps the masking tied
-  // to the production bumper geometry and remains correct from every camera angle.
-  const bumperMaterials = partsMap[partKey('Bumpers')] || [];
+  // Previously the bumper material could write its silhouette into the stencil before
+  // the shell had populated the depth buffer. That meant a bumper on the far side of
+  // the helmet could still punch a bumper-shaped hole in the stripe when viewed from
+  // the opposite side/top — exactly the moving gaps that appeared while orbiting.
+  //
+  // Force the REAL bumper meshes to render after the main opaque helmet surface but
+  // before the transparent stripe carrier (renderOrder 28). Their stencil write only
+  // happens on Z-PASS, so hidden/far-side bumper fragments now fail against the already
+  // rendered shell and cannot mask the stripe. Visible bumper pixels still mask it.
+  const bumperRoots = partObjectsMap[partKey('Bumpers')] || [];
+  const seenMaterials = new Set();
 
-  bumperMaterials.forEach(mat => {
-    mat.stencilWrite = true;
-    mat.stencilWriteMask = 0xff;
-    mat.stencilFunc = THREE.AlwaysStencilFunc;
-    mat.stencilRef = 1;
-    mat.stencilFuncMask = 0xff;
-    mat.stencilFail = THREE.KeepStencilOp;
-    mat.stencilZFail = THREE.KeepStencilOp;
-    mat.stencilZPass = THREE.ReplaceStencilOp;
-    mat.needsUpdate = true;
+  bumperRoots.forEach(root => {
+    root.traverse(obj => {
+      if (!obj.isMesh) return;
+
+      // Opaque objects are sorted by renderOrder before material/program order.
+      // 26 keeps bumpers after the normal helmet (0) and before stripe overlays (28).
+      obj.renderOrder = 26;
+
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      mats.forEach(mat => {
+        if (!mat || seenMaterials.has(mat)) return;
+        seenMaterials.add(mat);
+
+        // The stencil must respect actual visibility.
+        mat.depthTest = true;
+        mat.depthWrite = true;
+        mat.stencilWrite = true;
+        mat.stencilWriteMask = 0xff;
+        mat.stencilFunc = THREE.AlwaysStencilFunc;
+        mat.stencilRef = 1;
+        mat.stencilFuncMask = 0xff;
+        mat.stencilFail = THREE.KeepStencilOp;
+        mat.stencilZFail = THREE.KeepStencilOp;
+        mat.stencilZPass = THREE.ReplaceStencilOp;
+        mat.needsUpdate = true;
+      });
+    });
   });
 
   stripeMaterials.forEach(mat => {
     if (!mat) return;
-    // Enable stencil testing, but never modify the stencil buffer from the stripe pass.
+    // Read the bumper stencil but never modify it from the stripe pass.
     mat.stencilWrite = true;
     mat.stencilWriteMask = 0x00;
     mat.stencilFunc = THREE.NotEqualStencilFunc;
@@ -3336,7 +3358,7 @@ export default function HelmetBuilder() {
       // robust than relying on the Decal Surface cutout alone and survives mesh
       // optimization/subdivision changes in future GLBs.
       applyStripeBumperStencilMask(
-        partsRef.current,
+        partObjectsRef.current,
         stripeCarrierOverlayMaterialsRef.current
       );
 
@@ -5161,7 +5183,7 @@ export default function HelmetBuilder() {
     ], sceneRef.current, decalFinish);
 
     applyStripeBumperStencilMask(
-      partsRef.current,
+      partObjectsRef.current,
       stripeCarrierOverlayMaterialsRef.current
     );
   }, [loaded, decalFinish]);
