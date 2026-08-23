@@ -1619,13 +1619,13 @@ const NFL_HELMET_PRESETS = [
     "visorOn": true,
     "stripe": {
       "enabled": true,
-      "preset": "threeThickCenter",
-      "outerColor": "#FCFCFC",
-      "innerColor": null,
+      "preset": "fivePiped",
+      "outerColor": "#0076B6",
+      "innerColor": "#FCFCFC",
       "centerColor": "#0076B6",
       "finish": "gloss",
       "customRequired": false,
-      "notes": "White / Honolulu blue / white; blue center stripe is wider."
+      "notes": "Honolulu blue / white / Honolulu blue / white / Honolulu blue five-stripe pattern."
     }
   },
   {
@@ -7369,8 +7369,7 @@ export default function HelmetBuilder() {
                     <div style={{ background:'rgba(255,255,255,0.035)', border:'1px solid rgba(255,255,255,0.09)', borderRadius:8, padding:10, marginBottom:10 }}>
                       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:8, marginBottom:10 }}>
                         <div style={{ minWidth:0 }}>
-                          <div style={{ fontSize:13, fontWeight:900, color:'#e5e7eb', fontFamily:"'Barlow Condensed',sans-serif", lineHeight:1.15 }}>{selectedNflPreset.team.toUpperCase()}</div>
-                          <div style={{ fontSize:8, color:'#6b7280', marginTop:2, letterSpacing:'0.08em' }}>{selectedNflPreset.conference} {selectedNflPreset.division.toUpperCase()} · {selectedNflPreset.abbr}</div>
+                          <div style={{ fontSize:13, fontWeight:900, color:'#e5e7eb', fontFamily:"'Barlow Condensed',sans-serif", lineHeight:1.15 }}>{selectedNflPreset.city.toUpperCase()}</div>
                         </div>
                         {activeNflPresetId === selectedNflPreset.id && (
                           <span style={{ flexShrink:0, background:'rgba(239,255,0,0.12)', border:'1px solid rgba(239,255,0,0.30)', color:'#efff00', borderRadius:4, padding:'2px 6px', fontSize:7, fontWeight:800, letterSpacing:'0.08em', fontFamily:"'Barlow Condensed',sans-serif" }}>LOADED</span>
@@ -7767,7 +7766,7 @@ export default function HelmetBuilder() {
                   <div style={{ height:1, background:'rgba(255,255,255,0.06)', margin:'12px 0 10px' }} />
                   <SectionLabel>Custom Stripe Design</SectionLabel>
                   <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.5, marginBottom:10 }}>
-                    Upload a PNG or JPEG to place artwork inside the stripe zone. For a full-width full-length design, ideal artwork is around 1200×3600px or larger, but narrower or shorter artwork is perfectly fine too.
+                    Upload a transparent PNG or JPEG to place artwork inside the stripe zone. For a full-width full-length design, ideal artwork is around 1200×3600px or larger. Taller files such as 1500×4500px are also great, and narrower or shorter artwork is perfectly fine too.
                   </div>
                   <div style={{ fontSize:8, color:'#4b5563', lineHeight:1.45, marginBottom:10 }}>
                     The current Width and Length sliders define the available stripe area on the helmet. Your uploaded design fits inside that live area and can be used with or without the preset stripe colors underneath.
