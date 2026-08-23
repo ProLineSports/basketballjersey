@@ -2537,9 +2537,10 @@ const BUILT_IN_WRAP_DESIGNS = {
     src: 'data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPHN2ZyBpZD0iTGF5ZXJfMiIgZGF0YS1uYW1lPSJMYXllciAyIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMTExLjgxOSIgaGVpZ2h0PSIxOTk0LjA4NiIgdmlld0JveD0iMCAwIDMxMTEuODE5IDE5OTQuMDg2Ij4KICA8ZyBpZD0iTGF5ZXJfMS0yIiBkYXRhLW5hbWU9IkxheWVyIDEiPgogICAgPHBhdGggaWQ9IkNpbmNpbm5hdGkiIGQ9Ik0xNjA5LjQ3Myw3ODEuMjU5YzUyLjgyNy0xNi4xMTQsMTAwLjIzMy0zNy43ODQsMTQ0Ljc2OS02Ny40ODdsNzcuMTc2LTUxLjQ3MmM5My4yMzctNjcuNTg2LDE3Ny42NjktMTQzLjI0NywyNTguODc0LTIyNC41ODNsMzQuOTAzLTM0Ljk1OSw4Ni42NjUtODkuNTc5LDgzLjE5LTkwLjRjNzIuMzY1LTc4LjYzNiwxOTUuMDYyLTE4Mi43ODIsMjk0LjE5LTIxNy4zMjIsMjQuOTM2LTguNjg5LDUxLjI4NS02LjU0Nyw3NS42MjUsMy4yMDYsNTEuMjQzLDIwLjUzNSw5NS45MzQsNTAuOTM5LDEzMi45OTEsOTQuNDc5LTEyLjcwNSw5LjE4Ny0yNC4zMDEsMTMuNjM4LTM3LjM1MywxNy43NzlsLTE0NC40NTYsNDUuODMyYy0zOS4zMTgsMTIuNDc1LTczLjAyNiwzMy4wMzMtMTA4LjczNyw1NC4zNzEtOTIuOTUsNTUuNTQyLTE3OC4xMjQsMTE4LjkzNS0yNjAuMzc3LDE4OC45MjktMzguNTQ5LDMyLjgwNC02OC40Myw2Ni42MzEtOTUuNjk2LDEwOS4yNTUtNDkuNzkzLDc3LjgzNy0xMDEuNDE0LDE1Mi4wNTktMTU5Ljk0NCwyMjMuNDQ0bC03NS41ODcsODMuODg3LTIwLjk1LDIwLjg5N2MtMTAxLjMxMSwxMDEuMDUzLTIzOS45NzMsMTg4LjA4NS0zODcuMjgzLDE3OC4wNC0xMzIuOTc1LTkuMDY3LTI1MC45ODEtOTkuNjc2LTM0Ni4wMDEtMTg4LjA2M2wtODQuMTc5LTg2LjE1NGMtNzguMTI3LTg1Ljk5OC0xNDcuNzUyLTE3Ni4wMTItMjE5LjU3Ni0yNjcuNzU5LTExMi40NzEtMTQzLjY2OS0xNzEuMjk0LTIyNi40NjUtMzQ5LjA0Ni0yOTguNDgxLTY2LjY1MS0yNy4wMDMtMTMzLjg1My00My42MDEtMjAzLjg2OS01OS4xOC0xNy43MzEtMy45NDUtMzMuNjUzLTcuODQtNTEuOTYtMTYuNTM2LDQxLjczMy01MC44NDMsOTcuNzM5LTg0LjQzNiwxNTguNzgyLTEwNS4zMjgsNDEuOTQxLTE0LjM1NCw5OS40MTQsMTUuNDQ3LDE0MC45NjQsNDAuNzUsNzYuNzE0LDQ2LjcxNiwxNDUuODc1LDEwMC40NjIsMjEyLjUxNCwxNjAuOTc3bDEwOC45ODUsMTA4LjgyNCwxMDYuMTUsMTE4Ljg3LDU1LjEzNiw1OS4xODYsNjUuNTM1LDY2LjMzM2M4OC4yNjQsODkuMzM5LDIyNC4zNzUsMTkxLjksMzQ2LjU4NywyMjMuNjIsNTQuMjYxLDE0LjA4MywxMDYuNzE3LDE1LjQ3OSwxNjEuOTc4LTEuMzc3Wk04MzcuMjE5LDgyNS45N2MtMTMxLjU0Ni03MS4xMDEtMzMyLjE3NS0xODEuNTYzLTQ3Ni4xODItMTU5LjU3OC0xMDMuNDg5LDE1Ljc5OS0yMDEuNDA5LDU3LjIyMS0yODYuNzQxLDExNy43NDYtMTQuOTc5LDEwLjYyNS0yOC42MTUsMjMuMzYzLTM5LjE5MywzNy41NTQtMzMuMTI5LDQ0LjQ0NS01MS4xMTksMTEzLjcyNS0xNS45NTQsOTcuNjY0LDEwOS45MzQtNTAuMjEsMjI3LjI2NC04Mi44NjcsMzQ5LjYxNy03OS40MTcsMTc5LjQzOCw1LjA1OSwzODkuNzQ1LDk5LjIzNiw1NTcuODUsMTY2LjIxOWwyNzkuNjgsMTExLjQ0MWM2NS45NiwyNi4yODIsMTMxLjM1Niw0NC4yMTksMjAwLjQwOCw1OS40MTgsNjUuOTI3LDE0LjUxMSwxMjguODg1LDE2LjI4NiwxOTUuOTI1LDExLjYxMiw0NjIuNzYyLTMyLjI2MSw3ODcuOTk3LTM0NC42OTcsMTExOS42MjYtMzUyLjAxMSwxMDYuNjg5LTIuMzUzLDIwOC4yNzIsMjEuMjMsMzA2LjQ3OCw2MC4yMjJsNzEuNjc3LDI4LjQ1OWMyLjc0NiwxLjA5LDExLjU1NywxLjA5OSwxMS40MDktMS4yNTlsLS43NTMtMTEuOTY4Yy00Ni4yMjYtOTAuMjM3LTExOS4yMzktMTYyLjU1OS0yMTAuMzUzLTIwOC4yMjEtMjE2LjQxMi0xMDEuODYxLTQxNy4xMjMsMTAuODM1LTYwOC44MTksMTE4LjQ0OS03MS40NDMsNDAuMTA3LTE0MC4wMyw3OS4wODMtMjEzLjcwOSwxMTQuODMzLTE1Ny4zMDgsNzYuMzI4LTMwOC42ODMsMTIzLjE5OC00ODQuMTgzLDEzMy43MDctMTgzLjE5OSwxMC45Ny0zMzYuOTUzLTM2LjMwNS01MDEuMzcxLTExMy4wMjEtODcuOTUxLTQxLjAzNy0xNzAuMTAyLTg1Ljc0LTI1NS40MS0xMzEuODQ5Wk0xMzAyLjc4NCwxMjE1LjI3MWMtMTA1Ljk3Ni01Ni4yOTctMjE4LjM3NC03OC44MTctMzM4Ljk3OC03Ni4wNDQtMTQ2Ljk1NSwzLjM3OS0yODkuNTc0LDM2LjI1Mi00MjIuODMzLDk4LjExLTUzLjg2MywyNS4wMDMtMTAzLjA0Niw1My4yNjMtMTQ4LjcyOCw5MC4wNzQtMjYuMDkyLDIxLjAyNS00NS45NzEsNTEuNDI1LTM4LjY0Myw1My45MDFsMTEuOTgyLDQuMDQ5LDEzMC44NzMtMjkuNjQyYzE4OS44OTMtNDcuNDgzLDM1OC42MTMtODAuODczLDU1Mi42NDMtMjUuMzQ1bDE0MC4wOSw0MC4wOTFjMjMzLjY0Miw2Ni44NjQsNDQxLjQzLDgxLjM1MSw2NzUuNDE2LDQuMTJsMTcxLjc2OS01Ni42OTVjMjEzLjgtNzAuNTY4LDQ1NC4wOTktMTEuNjY0LDY2NC44MTcsNDkuMjQ0LDE3LjY0LDUuMDk5LDMxLjgxOCw4LjE0MSw1My4xMiw5LjA4MS05LjA0Ny0xOC43MjktMTguOTI3LTMwLjcyNy0zMi45ODgtNDMuNTk1LTQzLjY5My0zOS45ODYtOTEuNDU1LTcyLjY4Ni0xNDQuMDctMTAxLjIyMS0xMzYuODc0LTc0LjIzMi0yODguNTYzLTEwNy40NDktNDQzLjk4OC0xMDEuMjY4LTEzMi40NzYsNS4yNjgtMjU3LjIwNiwzNC40MTEtMzc2LjMyNCw5MS42NTktMTA4Ljg0LDUyLjMwOC0yMjMuNzk1LDEwNy4xNi0zNDYuNjYsNDYuNTNsLTEwNy40OTgtNTMuMDQ3Wk04MTUuNzEyLDE5NjEuODY4YzIwOC4zODYtMTM3LjQzOCw0NjguMTU3LTE4Mi43MjMsNzE1Ljk3MS0xODMuOTc2LDI2NC4yNDktMS4zMzcsNTE4LjcyNSw0NS41OTcsNzQyLjg2NywxODguMzk2bDQ2LjYyOCwyNi41MzNjMi40NDgsMS4zOTMsMTEuODM5LjA1MywxMi4zODYtMi42MzIsNC42NDItMjIuODAzLTQzLjYzOS04MS45ODMtNjkuOTUyLTEwOS43NzYtNjYuNTk4LTcwLjM0NS0xNDMuODctMTI2LjAwMS0yMzAuNTg3LTE3MC41NjktMTMwLjk5MS02Ny4zMjItMjczLjkwMS0xMDEuODA2LTQyMS43MTktMTA2LjkyMi0yMDcuODU0LTcuMTkzLTQxMS42NDcsNDAuNjYxLTU5MC45NTgsMTQ0Ljk5MS04NC40MTMsNDkuMTE1LTE2MC40NTIsMTA3LjQxLTIyMy40NCwxODEuMTk0LTE2LjczMiwxOS42LTMzLjczNiwzNy45OTktMzMuNzczLDY0Ljk3OWw1Mi41NzctMzIuMjE4Wk02MTIuNTY0LDE3NDEuNjI4YzE4My45MjUtMTIyLjQ0MywzODcuODg1LTIxNS40NDMsNjEyLjg4NS0yMDYuNzcybDE1MC44NzgsMTIuMzM2YzE0My4wMDQsMTEuNjkyLDI4My4xMTQsOS42MjIsNDI0Ljg5LTEwLjgyMywyOTcuNDM0LTQyLjg5Miw1MTMuMTEzLDQzLjYzOCw3MTkuNTg4LDI1My4wMiwxMS45NjYsMTIuMTM0LDI0LjE0OSwyMS4yNzgsNDAuNTczLDMzLjExOCw0LjE3My0yMS40MTQtMi40ODQtMzkuMzE2LTExLjMyMy01OC40Mi05MS40NDktMTk3LjY0My0yODguMDYzLTMyMy43MjMtNTA2LjI1NS0zMjcuMjE0LTg5LjU3LTEuNDMzLTE3NC4zMzEsMy4wODItMjYyLjcyOSwxNy4xMjUtODAuMzc3LDEyLjc2OC0xNTcuNjU4LDE0LjY5OC0yMzguOTIzLDE0Ljk0NC03Ny40ODkuMjM0LTE1MC44NDYtNC42MjItMjI2LjQzMi0yMC40ODktNDUuNzM1LTkuNjAxLTkwLjI3My0xMS4xMjItMTM2Ljk0Ni0xMS44NzMtNzkuODktMS4yODYtMTU1LjM4Niw3LjQ3OS0yMzIuMTM0LDMwLjctMTQ3Ljk0NSw0NC43NjItMjgwLjE0MiwxMjcuNjEtMzgxLjU5MSwyNDMuNjY2LTQ2LjE1Nyw1Mi44MDItNTQuODQ1LDk4LjgyOS0zOS44ODYsODguODcxbDg3LjQwNS01OC4xODdaTTEzOTMuMzE5LDQzOS4xNjhjLTU1LjU5My03OS42MDItNzAuODY3LTE0Ny45MTUtOTkuOTcxLTIzMi4xODRsLTMwLjk4Mi04OS43MDhjLTEuMi0zLjQ3NS05LjM0LTguMDc4LTEyLjgxNy03Ljk4My0xMi43OTYuMzQ5LTkuNjk4LDg2Ljk2NC01LjMyOCwxMjkuMzQ4LDguMDksNzguNDc4LDIzLjc4MiwxNTMuMjQ2LDQ5LjU4NSwyMjcuMDkzLDE5LjY1OSw1Ni4yNjIsNDYuMjA1LDEwNi40ODUsODQuMjI3LDE1MS4wMDcsNTYuMDk2LDY1LjY4NiwxNDQuMjMsODkuNDg3LDIyMi4yMTksNDkuODkyLDE0Mi4xMzUtNzIuMTYyLDIwNC4wNi0zMTIuMjQxLDIxOS4yOTktNDY1LjkxMSwzLjE3MS0zMS45NzMsNS4yOTItNjIuMzc1LTUuODI1LTkyLjA3OC05LjQ4NCwxLjI4OC0xOC41OTcsOS4wMDMtMjEuNTgzLDE2Ljc4bC00MC4zMDcsMTA0Ljk1MmMtMzIuNjI2LDg0Ljk1My03Mi40NTcsMTkwLjU5Ni0xNDEuODg3LDI0OC42Ny0zMS45MzUsMjYuNzEyLTcyLjQ4Nyw0MS41NTgtMTE0Ljk5MywzMy4xMDctNDQuNTM2LTguODU1LTc3LjI2OC0zOC4wOTEtMTAxLjYzOC03Mi45ODVaIi8+CiAgPC9nPgo8L3N2Zz4=',
     scale: 0.82,
     rotation: 0,
-    offsetX: 0,
+    offsetX: 50,
     offsetY: 0,
-    opacity: 1
+    opacity: 1,
+    transparentBackground: true
   }
 };
 
@@ -3447,6 +3448,7 @@ export default function HelmetBuilder() {
   const [wrapOffsetX, setWrapOffsetX]       = useState(0);
   const [wrapOffsetY, setWrapOffsetY]       = useState(0);
   const [wrapOpacity, setWrapOpacity]       = useState(1);
+  const [wrapTransparentBackground, setWrapTransparentBackground] = useState(false);
   const [wrapRevision, setWrapRevision]     = useState(0);
 
   const [helmetStripesEnabled, setHelmetStripesEnabled] = useState(false);
@@ -3916,11 +3918,12 @@ export default function HelmetBuilder() {
     setWrapFileName('');
     setWrapError('');
     setWrapEnabled(false);
+    setWrapTransparentBackground(false);
     resetWrapTransform();
     setWrapRevision(r => r + 1);
   }, [resetWrapTransform]);
 
-  const loadWrapFromSource = useCallback(({ src, fileName = 'helmet-wrap.png', scale = 1, rotation = 0, offsetX = 0, offsetY = 0, opacity = 1 }) => {
+  const loadWrapFromSource = useCallback(({ src, fileName = 'helmet-wrap.png', scale = 1, rotation = 0, offsetX = 0, offsetY = 0, opacity = 1, transparentBackground = false }) => {
     if (!src) return;
 
     const img = new Image();
@@ -3940,6 +3943,7 @@ export default function HelmetBuilder() {
       setWrapOffsetX(offsetX);
       setWrapOffsetY(offsetY);
       setWrapOpacity(opacity);
+      setWrapTransparentBackground(!!transparentBackground);
       setWrapRevision(r => r + 1);
     };
     img.onerror = () => {
@@ -3976,6 +3980,7 @@ export default function HelmetBuilder() {
       setWrapFileName(file.name);
       setWrapError('');
       setWrapEnabled(true);
+      setWrapTransparentBackground(false);
       resetWrapTransform();
       setWrapRevision(r => r + 1);
     };
@@ -4807,20 +4812,26 @@ export default function HelmetBuilder() {
       materialsRef.current.__ShellContinuousSurface = continuousShellMaterials;
       continuousShellMaterials.forEach(mat => installShellFinishTriplanar(mat));
 
-      // The full wrap remains on the real Shell. Stripes use a visible overlay cloned
-      // from the hidden baked Decal Surface. The Decal Surface itself is the stripe mask:
-      // it should include the smooth helmet shell but EXCLUDE any area physically covered
-      // by front/rear bumpers. That makes bumper occlusion exact with no render-order hacks.
-      shellWrapUniformsRef.current.centerX.value = shellProjection?.centerX || 0;
+      // Use the hidden filled Decal Surface for both panoramic preset artwork and the
+      // normal stripe layer whenever it exists. It bridges the shell cutouts like a real
+      // decal film while the real bumper geometry remains the final foreground mask.
+      let carrierProjection = null;
+      if (decalSurfaceObjectsRef.current.length) {
+        carrierProjection = applyPanoramicShellWrapUV(model, decalSurfaceObjectsRef.current);
+      }
+
+      const wrapOverlayRoots = decalSurfaceObjectsRef.current.length
+        ? decalSurfaceObjectsRef.current
+        : shellRoots;
+      shellWrapUniformsRef.current.centerX.value = carrierProjection?.centerX ?? shellProjection?.centerX ?? 0;
       const decalOverlays = createShellDecalOverlays(
-        shellRoots,
+        wrapOverlayRoots,
         shellWrapUniformsRef.current
       );
       decalOverlayMeshesRef.current = decalOverlays.overlays;
       decalOverlayMaterialsRef.current = decalOverlays.materials;
 
       if (decalSurfaceObjectsRef.current.length) {
-        const carrierProjection = applyPanoramicShellWrapUV(model, decalSurfaceObjectsRef.current);
         stripeUniformsRef.current.centerX.value = carrierProjection?.centerX ?? shellProjection?.centerX ?? 0;
         const stripeCarrier = createWorldSpaceDecalOverlays(
           scene,
@@ -4848,12 +4859,14 @@ export default function HelmetBuilder() {
         ...stripeCarrierOverlayMaterialsRef.current,
       ], scene, decalFinishRef.current);
 
-      // Hard-mask stripe artwork with the real front/rear bumper geometry. This is more
-      // robust than relying on the Decal Surface cutout alone and survives mesh
-      // optimization/subdivision changes in future GLBs.
+      // Both custom/preset wraps and stripe artwork stay behind the real front/rear
+      // bumpers, matching the existing decal behavior.
       applyStripeBumperStencilMask(
         partObjectsRef.current,
-        stripeCarrierOverlayMaterialsRef.current
+        [
+          ...decalOverlayMaterialsRef.current,
+          ...stripeCarrierOverlayMaterialsRef.current,
+        ]
       );
 
       scene.add(model);
@@ -5186,8 +5199,10 @@ export default function HelmetBuilder() {
     const h = canvas.height;
 
     ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = colors.shell;
-    ctx.fillRect(0, 0, w, h);
+    if (!wrapTransparentBackground) {
+      ctx.fillStyle = colors.shell;
+      ctx.fillRect(0, 0, w, h);
+    }
 
     const coverScale = Math.max(w / img.naturalWidth, h / img.naturalHeight);
     const drawScale = coverScale * wrapScale;
@@ -5217,7 +5232,7 @@ export default function HelmetBuilder() {
     texture.needsUpdate = true;
     uniforms.wrapMap.value = texture;
     uniforms.wrapEnabled.value = 1;
-  }, [loaded, colors.shell, wrapEnabled, wrapRevision, wrapScale, wrapRotation, wrapOffsetX, wrapOffsetY, wrapOpacity]);
+  }, [loaded, colors.shell, wrapEnabled, wrapRevision, wrapScale, wrapRotation, wrapOffsetX, wrapOffsetY, wrapOpacity, wrapTransparentBackground]);
 
 
   // ── STRIPE DESIGN TEXTURE ───────────────────────────────────────────────────
