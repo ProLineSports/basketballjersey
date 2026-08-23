@@ -1261,6 +1261,9 @@ function installSideLogoSurfaceProjection(material, uniforms, cacheKey) {
     shader.uniforms.uSideLogoNormal = uniforms.normal;
     shader.uniforms.uSideLogoDepth = uniforms.depth;
     shader.uniforms.uSideLogoLift = uniforms.lift;
+    shader.uniforms.uSideLogoMedianOrigin = uniforms.medianOrigin;
+    shader.uniforms.uSideLogoMedianNormal = uniforms.medianNormal;
+    shader.uniforms.uSideLogoMedianSide = uniforms.medianSide;
 
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -1289,6 +1292,9 @@ uniform float uSideLogoWidth;
 uniform float uSideLogoHeight;
 uniform vec3 uSideLogoNormal;
 uniform float uSideLogoDepth;
+uniform vec3 uSideLogoMedianOrigin;
+uniform vec3 uSideLogoMedianNormal;
+uniform float uSideLogoMedianSide;
 varying vec3 vSideLogoWorldPosition;
 varying vec3 vSideLogoWorldNormal;`
       )
@@ -1300,15 +1306,19 @@ float sideLogoU = dot(sideLogoDelta, uSideLogoRight) / max(uSideLogoWidth, 0.000
 float sideLogoV = dot(sideLogoDelta, uSideLogoUp) / max(uSideLogoHeight, 0.000001) + 0.5;
 float sideLogoDepth = abs(dot(sideLogoDelta, normalize(uSideLogoNormal)));
 float sideLogoFacing = dot(normalize(vSideLogoWorldNormal), normalize(uSideLogoNormal));
+float sideLogoMedian = dot(vSideLogoWorldPosition - uSideLogoMedianOrigin, normalize(uSideLogoMedianNormal));
+float sideLogoMedianMask = step(0.0, sideLogoMedian * uSideLogoMedianSide + 0.00075);
 vec4 sideLogoSample = vec4(0.0);
 // Width/height define the artwork rectangle. Depth + facing only prevent the same
 // planar coordinates from landing on a second fold of the carrier shell; they do not
-// add a visible circular/elliptical mask to the logo itself.
+// add a visible circular/elliptical mask to the logo itself. The extra median-plane
+// mask keeps side logos from crossing onto the opposite half of the helmet.
 if (
   sideLogoU >= 0.0 && sideLogoU <= 1.0 &&
   sideLogoV >= 0.0 && sideLogoV <= 1.0 &&
   sideLogoDepth <= uSideLogoDepth &&
-  sideLogoFacing > 0.05
+  sideLogoFacing > 0.05 &&
+  sideLogoMedianMask > 0.5
 ) {
   sideLogoSample = texture2D(map, vec2(sideLogoU, sideLogoV));
 }
@@ -5787,6 +5797,11 @@ export default function HelmetBuilder() {
       // pixels outside the image disappear; there is no geometric decal mask at all.
       const physicalDepth = Math.max(boundsModel.width * 0.00055, 0.00024);
       const projectionDepth = Math.max(baseHeight * 0.32, boundsModel.width * 0.10);
+      const medianOriginLocal = new THREE.Vector3(boundsModel.centerX, boundsModel.centerY, boundsModel.centerZ);
+      const medianOriginWorld = model.localToWorld(medianOriginLocal.clone());
+      const medianNormalWorld = new THREE.Vector3(1, 0, 0).transformDirection(model.matrixWorld).normalize();
+      const medianSideSign = side === 'left' ? -1 : 1;
+
       const shadowUniforms = {
         center: { value: logoCenter },
         right: { value: frameRight },
@@ -5796,6 +5811,9 @@ export default function HelmetBuilder() {
         height: { value: baseHeight * 1.018 },
         depth: { value: projectionDepth },
         lift: { value: physicalDepth * 0.20 },
+        medianOrigin: { value: medianOriginWorld },
+        medianNormal: { value: medianNormalWorld },
+        medianSide: { value: medianSideSign },
       };
       const mainUniforms = {
         center: { value: logoCenter },
@@ -5806,6 +5824,9 @@ export default function HelmetBuilder() {
         height: { value: baseHeight },
         depth: { value: projectionDepth },
         lift: { value: physicalDepth * 0.55 },
+        medianOrigin: { value: medianOriginWorld },
+        medianNormal: { value: medianNormalWorld },
+        medianSide: { value: medianSideSign },
       };
 
       const shadowMat = new THREE.MeshPhysicalMaterial({
