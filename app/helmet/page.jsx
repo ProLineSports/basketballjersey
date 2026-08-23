@@ -1160,6 +1160,1327 @@ const STRIPE_PRESET_OPTIONS = [
   { id: 'fivePiped', label: '5 Stripe — Center + Piping' },
 ];
 
+
+// ── 2026 NFL PRIMARY HELMET BASE PRESETS ────────────────────────────────────
+// Generated from ProLine-Helmets-Base-Presets.xlsx. These presets intentionally
+// include only base part colors, shell/facemask finishes, visor state, and supported
+// procedural stripe patterns. They do not load team logos, bumper logos, or rear decals.
+const NFL_HELMET_PRESETS = [
+  {
+    "id": "NFL_ARI",
+    "conference": "NFC",
+    "division": "West",
+    "team": "Arizona Cardinals",
+    "abbr": "ARI",
+    "colors": {
+      "shell": "#FAFAFA",
+      "bumpers": "#FCFCFC",
+      "facemask": "#B4B8BD",
+      "facemaskclips": "#FAFAFA",
+      "facemaskhardware": "#FCFCFC",
+      "innerpads": "#EAEAEA",
+      "visor": "#000000",
+      "visorclips": "#B4B8BD",
+      "chinguardinner": "#FCFCFC",
+      "chinguardouter": "#FCFCFC",
+      "metalparts": "#FCFCFC",
+      "strapclipslower": "#151515",
+      "strapclipsupper": "#FAFAFA",
+      "straps": "#FCFCFC"
+    },
+    "shellFinish": "carpaint",
+    "satinMetallic": null,
+    "satinTexture": null,
+    "glitterAmount": 0.1,
+    "glitterSize": 0.22,
+    "glitterColor": "#D0D4D8",
+    "facemaskFinish": "chrome",
+    "visorOn": true,
+    "stripe": {
+      "enabled": false,
+      "preset": null,
+      "outerColor": null,
+      "innerColor": null,
+      "centerColor": null,
+      "finish": null,
+      "customRequired": false,
+      "notes": null
+    }
+  },
+  {
+    "id": "NFL_ATL",
+    "conference": "NFC",
+    "division": "South",
+    "team": "Atlanta Falcons",
+    "abbr": "ATL",
+    "colors": {
+      "shell": "#111111",
+      "bumpers": "#FCFCFC",
+      "facemask": "#A7A9AC",
+      "facemaskclips": "#111111",
+      "facemaskhardware": "#FCFCFC",
+      "innerpads": "#EAEAEA",
+      "visor": "#000000",
+      "visorclips": "#A7A9AC",
+      "chinguardinner": "#FCFCFC",
+      "chinguardouter": "#FCFCFC",
+      "metalparts": "#FCFCFC",
+      "strapclipslower": "#151515",
+      "strapclipsupper": "#111111",
+      "straps": "#FCFCFC"
+    },
+    "shellFinish": "matte",
+    "satinMetallic": null,
+    "satinTexture": null,
+    "glitterAmount": null,
+    "glitterSize": null,
+    "glitterColor": null,
+    "facemaskFinish": "chrome",
+    "visorOn": true,
+    "stripe": {
+      "enabled": false,
+      "preset": null,
+      "outerColor": null,
+      "innerColor": null,
+      "centerColor": null,
+      "finish": null,
+      "customRequired": false,
+      "notes": null
+    }
+  },
+  {
+    "id": "NFL_BAL",
+    "conference": "AFC",
+    "division": "North",
+    "team": "Baltimore Ravens",
+    "abbr": "BAL",
+    "colors": {
+      "shell": "#101010",
+      "bumpers": "#FCFCFC",
+      "facemask": "#101010",
+      "facemaskclips": "#101010",
+      "facemaskhardware": "#FCFCFC",
+      "innerpads": "#EAEAEA",
+      "visor": "#000000",
+      "visorclips": "#101010",
+      "chinguardinner": "#FCFCFC",
+      "chinguardouter": "#FCFCFC",
+      "metalparts": "#FCFCFC",
+      "strapclipslower": "#151515",
+      "strapclipsupper": "#101010",
+      "straps": "#FCFCFC"
+    },
+    "shellFinish": "gloss",
+    "satinMetallic": null,
+    "satinTexture": null,
+    "glitterAmount": null,
+    "glitterSize": null,
+    "glitterColor": null,
+    "facemaskFinish": "gloss",
+    "visorOn": true,
+    "stripe": {
+      "enabled": false,
+      "preset": null,
+      "outerColor": null,
+      "innerColor": null,
+      "centerColor": null,
+      "finish": null,
+      "customRequired": true,
+      "notes": null
+    }
+  },
+  {
+    "id": "NFL_BUF",
+    "conference": "AFC",
+    "division": "East",
+    "team": "Buffalo Bills",
+    "abbr": "BUF",
+    "colors": {
+      "shell": "#FAFAFA",
+      "bumpers": "#FCFCFC",
+      "facemask": "#FAFAFA",
+      "facemaskclips": "#FAFAFA",
+      "facemaskhardware": "#FCFCFC",
+      "innerpads": "#EAEAEA",
+      "visor": "#000000",
+      "visorclips": "#FAFAFA",
+      "chinguardinner": "#FCFCFC",
+      "chinguardouter": "#FCFCFC",
+      "metalparts": "#FCFCFC",
+      "strapclipslower": "#151515",
+      "strapclipsupper": "#FAFAFA",
+      "straps": "#FCFCFC"
+    },
+    "shellFinish": "gloss",
+    "satinMetallic": null,
+    "satinTexture": null,
+    "glitterAmount": null,
+    "glitterSize": null,
+    "glitterColor": null,
+    "facemaskFinish": "gloss",
+    "visorOn": true,
+    "stripe": {
+      "enabled": false,
+      "preset": null,
+      "outerColor": null,
+      "innerColor": null,
+      "centerColor": null,
+      "finish": null,
+      "customRequired": true,
+      "notes": null
+    }
+  },
+  {
+    "id": "NFL_CAR",
+    "conference": "NFC",
+    "division": "South",
+    "team": "Carolina Panthers",
+    "abbr": "CAR",
+    "colors": {
+      "shell": "#BFC2C5",
+      "bumpers": "#FCFCFC",
+      "facemask": "#101010",
+      "facemaskclips": "#BFC2C5",
+      "facemaskhardware": "#FCFCFC",
+      "innerpads": "#EAEAEA",
+      "visor": "#000000",
+      "visorclips": "#101010",
+      "chinguardinner": "#FCFCFC",
+      "chinguardouter": "#FCFCFC",
+      "metalparts": "#FCFCFC",
+      "strapclipslower": "#151515",
+      "strapclipsupper": "#BFC2C5",
+      "straps": "#FCFCFC"
+    },
+    "shellFinish": "satin",
+    "satinMetallic": 0.86,
+    "satinTexture": 0.31,
+    "glitterAmount": null,
+    "glitterSize": null,
+    "glitterColor": null,
+    "facemaskFinish": "gloss",
+    "visorOn": true,
+    "stripe": {
+      "enabled": false,
+      "preset": null,
+      "outerColor": null,
+      "innerColor": null,
+      "centerColor": null,
+      "finish": null,
+      "customRequired": true,
+      "notes": null
+    }
+  },
+  {
+    "id": "NFL_CHI",
+    "conference": "NFC",
+    "division": "North",
+    "team": "Chicago Bears",
+    "abbr": "CHI",
+    "colors": {
+      "shell": "#0B162A",
+      "bumpers": "#FCFCFC",
+      "facemask": "#0B162A",
+      "facemaskclips": "#0B162A",
+      "facemaskhardware": "#FCFCFC",
+      "innerpads": "#EAEAEA",
+      "visor": "#000000",
+      "visorclips": "#0B162A",
+      "chinguardinner": "#FCFCFC",
+      "chinguardouter": "#FCFCFC",
+      "metalparts": "#FCFCFC",
+      "strapclipslower": "#151515",
+      "strapclipsupper": "#0B162A",
+      "straps": "#FCFCFC"
+    },
+    "shellFinish": "gloss",
+    "satinMetallic": null,
+    "satinTexture": null,
+    "glitterAmount": null,
+    "glitterSize": null,
+    "glitterColor": null,
+    "facemaskFinish": "gloss",
+    "visorOn": true,
+    "stripe": {
+      "enabled": false,
+      "preset": null,
+      "outerColor": null,
+      "innerColor": null,
+      "centerColor": null,
+      "finish": null,
+      "customRequired": false,
+      "notes": null
+    }
+  },
+  {
+    "id": "NFL_CIN",
+    "conference": "AFC",
+    "division": "North",
+    "team": "Cincinnati Bengals",
+    "abbr": "CIN",
+    "colors": {
+      "shell": "#FB4F14",
+      "bumpers": "#FCFCFC",
+      "facemask": "#101010",
+      "facemaskclips": "#FB4F14",
+      "facemaskhardware": "#FCFCFC",
+      "innerpads": "#EAEAEA",
+      "visor": "#000000",
+      "visorclips": "#101010",
+      "chinguardinner": "#FCFCFC",
+      "chinguardouter": "#FCFCFC",
+      "metalparts": "#FCFCFC",
+      "strapclipslower": "#151515",
+      "strapclipsupper": "#FB4F14",
+      "straps": "#FCFCFC"
+    },
+    "shellFinish": "gloss",
+    "satinMetallic": null,
+    "satinTexture": null,
+    "glitterAmount": null,
+    "glitterSize": null,
+    "glitterColor": null,
+    "facemaskFinish": "gloss",
+    "visorOn": true,
+    "stripe": {
+      "enabled": false,
+      "preset": null,
+      "outerColor": null,
+      "innerColor": null,
+      "centerColor": null,
+      "finish": null,
+      "customRequired": true,
+      "notes": "Bengal tiger-stripe artwork requires a custom uploaded stripe."
+    }
+  },
+  {
+    "id": "NFL_CLE",
+    "conference": "AFC",
+    "division": "North",
+    "team": "Cleveland Browns",
+    "abbr": "CLE",
+    "colors": {
+      "shell": "#FF3C00",
+      "bumpers": "#FCFCFC",
+      "facemask": "#311D00",
+      "facemaskclips": "#FF3C00",
+      "facemaskhardware": "#FCFCFC",
+      "innerpads": "#EAEAEA",
+      "visor": "#000000",
+      "visorclips": "#311D00",
+      "chinguardinner": "#FCFCFC",
+      "chinguardouter": "#FCFCFC",
+      "metalparts": "#FCFCFC",
+      "strapclipslower": "#151515",
+      "strapclipsupper": "#FF3C00",
+      "straps": "#FCFCFC"
+    },
+    "shellFinish": "gloss",
+    "satinMetallic": null,
+    "satinTexture": null,
+    "glitterAmount": null,
+    "glitterSize": null,
+    "glitterColor": null,
+    "facemaskFinish": "gloss",
+    "visorOn": true,
+    "stripe": {
+      "enabled": true,
+      "preset": "threeThickCenter",
+      "outerColor": "#311D00",
+      "innerColor": null,
+      "centerColor": "#FCFCFC",
+      "finish": "gloss",
+      "customRequired": false,
+      "notes": "Brown / white / brown."
+    }
+  },
+  {
+    "id": "NFL_DAL",
+    "conference": "NFC",
+    "division": "East",
+    "team": "Dallas Cowboys",
+    "abbr": "DAL",
+    "colors": {
+      "shell": "#B7C1C6",
+      "bumpers": "#FCFCFC",
+      "facemask": "#A5ACAF",
+      "facemaskclips": "#B7C1C6",
+      "facemaskhardware": "#FCFCFC",
+      "innerpads": "#EAEAEA",
+      "visor": "#000000",
+      "visorclips": "#A5ACAF",
+      "chinguardinner": "#FCFCFC",
+      "chinguardouter": "#FCFCFC",
+      "metalparts": "#FCFCFC",
+      "strapclipslower": "#151515",
+      "strapclipsupper": "#B7C1C6",
+      "straps": "#FCFCFC"
+    },
+    "shellFinish": "satin",
+    "satinMetallic": 0.88,
+    "satinTexture": 0.3,
+    "glitterAmount": null,
+    "glitterSize": null,
+    "glitterColor": null,
+    "facemaskFinish": "gloss",
+    "visorOn": true,
+    "stripe": {
+      "enabled": true,
+      "preset": "threeThickCenter",
+      "outerColor": "#041E42",
+      "innerColor": null,
+      "centerColor": "#FCFCFC",
+      "finish": "gloss",
+      "customRequired": false,
+      "notes": "Navy / white / navy."
+    }
+  },
+  {
+    "id": "NFL_DEN",
+    "conference": "AFC",
+    "division": "West",
+    "team": "Denver Broncos",
+    "abbr": "DEN",
+    "colors": {
+      "shell": "#002244",
+      "bumpers": "#FCFCFC",
+      "facemask": "#101820",
+      "facemaskclips": "#002244",
+      "facemaskhardware": "#FCFCFC",
+      "innerpads": "#EAEAEA",
+      "visor": "#000000",
+      "visorclips": "#101820",
+      "chinguardinner": "#FCFCFC",
+      "chinguardouter": "#FCFCFC",
+      "metalparts": "#FCFCFC",
+      "strapclipslower": "#151515",
+      "strapclipsupper": "#002244",
+      "straps": "#FCFCFC"
+    },
+    "shellFinish": "satin",
+    "satinMetallic": 0.68,
+    "satinTexture": 0.34,
+    "glitterAmount": null,
+    "glitterSize": null,
+    "glitterColor": null,
+    "facemaskFinish": "gloss",
+    "visorOn": true,
+    "stripe": {
+      "enabled": false,
+      "preset": null,
+      "outerColor": null,
+      "innerColor": null,
+      "centerColor": null,
+      "finish": null,
+      "customRequired": true,
+      "notes": "Mile High triangular/tapered stripe requires a custom uploaded stripe."
+    }
+  },
+  {
+    "id": "NFL_DET",
+    "conference": "NFC",
+    "division": "North",
+    "team": "Detroit Lions",
+    "abbr": "DET",
+    "colors": {
+      "shell": "#B0B7BC",
+      "bumpers": "#FCFCFC",
+      "facemask": "#0076B6",
+      "facemaskclips": "#B0B7BC",
+      "facemaskhardware": "#FCFCFC",
+      "innerpads": "#EAEAEA",
+      "visor": "#000000",
+      "visorclips": "#0076B6",
+      "chinguardinner": "#FCFCFC",
+      "chinguardouter": "#FCFCFC",
+      "metalparts": "#FCFCFC",
+      "strapclipslower": "#151515",
+      "strapclipsupper": "#B0B7BC",
+      "straps": "#FCFCFC"
+    },
+    "shellFinish": "satin",
+    "satinMetallic": 0.88,
+    "satinTexture": 0.3,
+    "glitterAmount": null,
+    "glitterSize": null,
+    "glitterColor": null,
+    "facemaskFinish": "gloss",
+    "visorOn": true,
+    "stripe": {
+      "enabled": true,
+      "preset": "threeThickCenter",
+      "outerColor": "#FCFCFC",
+      "innerColor": null,
+      "centerColor": "#0076B6",
+      "finish": "gloss",
+      "customRequired": false,
+      "notes": "White / Honolulu blue / white; blue center stripe is wider."
+    }
+  },
+  {
+    "id": "NFL_GB",
+    "conference": "NFC",
+    "division": "North",
+    "team": "Green Bay Packers",
+    "abbr": "GB",
+    "colors": {
+      "shell": "#FFB612",
+      "bumpers": "#FCFCFC",
+      "facemask": "#203731",
+      "facemaskclips": "#FFB612",
+      "facemaskhardware": "#FCFCFC",
+      "innerpads": "#EAEAEA",
+      "visor": "#000000",
+      "visorclips": "#203731",
+      "chinguardinner": "#FCFCFC",
+      "chinguardouter": "#FCFCFC",
+      "metalparts": "#FCFCFC",
+      "strapclipslower": "#151515",
+      "strapclipsupper": "#FFB612",
+      "straps": "#FCFCFC"
+    },
+    "shellFinish": "gloss",
+    "satinMetallic": null,
+    "satinTexture": null,
+    "glitterAmount": null,
+    "glitterSize": null,
+    "glitterColor": null,
+    "facemaskFinish": "gloss",
+    "visorOn": true,
+    "stripe": {
+      "enabled": true,
+      "preset": "threeThickCenter",
+      "outerColor": "#203731",
+      "innerColor": null,
+      "centerColor": "#FCFCFC",
+      "finish": "gloss",
+      "customRequired": false,
+      "notes": "Green / white / green."
+    }
+  },
+  {
+    "id": "NFL_HOU",
+    "conference": "AFC",
+    "division": "South",
+    "team": "Houston Texans",
+    "abbr": "HOU",
+    "colors": {
+      "shell": "#03202F",
+      "bumpers": "#FCFCFC",
+      "facemask": "#03202F",
+      "facemaskclips": "#03202F",
+      "facemaskhardware": "#FCFCFC",
+      "innerpads": "#EAEAEA",
+      "visor": "#000000",
+      "visorclips": "#03202F",
+      "chinguardinner": "#FCFCFC",
+      "chinguardouter": "#FCFCFC",
+      "metalparts": "#FCFCFC",
+      "strapclipslower": "#151515",
+      "strapclipsupper": "#03202F",
+      "straps": "#FCFCFC"
+    },
+    "shellFinish": "carpaint",
+    "satinMetallic": null,
+    "satinTexture": null,
+    "glitterAmount": 0.12,
+    "glitterSize": 0.22,
+    "glitterColor": "#526A7D",
+    "facemaskFinish": "gloss",
+    "visorOn": true,
+    "stripe": {
+      "enabled": false,
+      "preset": null,
+      "outerColor": null,
+      "innerColor": null,
+      "centerColor": null,
+      "finish": null,
+      "customRequired": false,
+      "notes": null
+    }
+  },
+  {
+    "id": "NFL_IND",
+    "conference": "AFC",
+    "division": "South",
+    "team": "Indianapolis Colts",
+    "abbr": "IND",
+    "colors": {
+      "shell": "#FAFAFA",
+      "bumpers": "#FCFCFC",
+      "facemask": "#A5ACAF",
+      "facemaskclips": "#FAFAFA",
+      "facemaskhardware": "#FCFCFC",
+      "innerpads": "#EAEAEA",
+      "visor": "#000000",
+      "visorclips": "#A5ACAF",
+      "chinguardinner": "#FCFCFC",
+      "chinguardouter": "#FCFCFC",
+      "metalparts": "#FCFCFC",
+      "strapclipslower": "#151515",
+      "strapclipsupper": "#FAFAFA",
+      "straps": "#FCFCFC"
+    },
+    "shellFinish": "gloss",
+    "satinMetallic": null,
+    "satinTexture": null,
+    "glitterAmount": null,
+    "glitterSize": null,
+    "glitterColor": null,
+    "facemaskFinish": "gloss",
+    "visorOn": true,
+    "stripe": {
+      "enabled": true,
+      "preset": "threeThickCenter",
+      "outerColor": "#002C5F",
+      "innerColor": null,
+      "centerColor": "#FAFAFA",
+      "finish": "gloss",
+      "customRequired": false,
+      "notes": "Blue / shell white / blue; the white center remains visible between the blue stripes."
+    }
+  },
+  {
+    "id": "NFL_JAX",
+    "conference": "AFC",
+    "division": "South",
+    "team": "Jacksonville Jaguars",
+    "abbr": "JAX",
+    "colors": {
+      "shell": "#101820",
+      "bumpers": "#FCFCFC",
+      "facemask": "#101010",
+      "facemaskclips": "#101820",
+      "facemaskhardware": "#FCFCFC",
+      "innerpads": "#EAEAEA",
+      "visor": "#000000",
+      "visorclips": "#101010",
+      "chinguardinner": "#FCFCFC",
+      "chinguardouter": "#FCFCFC",
+      "metalparts": "#FCFCFC",
+      "strapclipslower": "#151515",
+      "strapclipsupper": "#101820",
+      "straps": "#FCFCFC"
+    },
+    "shellFinish": "gloss",
+    "satinMetallic": null,
+    "satinTexture": null,
+    "glitterAmount": null,
+    "glitterSize": null,
+    "glitterColor": null,
+    "facemaskFinish": "gloss",
+    "visorOn": true,
+    "stripe": {
+      "enabled": false,
+      "preset": null,
+      "outerColor": null,
+      "innerColor": null,
+      "centerColor": null,
+      "finish": null,
+      "customRequired": false,
+      "notes": null
+    }
+  },
+  {
+    "id": "NFL_KC",
+    "conference": "AFC",
+    "division": "West",
+    "team": "Kansas City Chiefs",
+    "abbr": "KC",
+    "colors": {
+      "shell": "#E31837",
+      "bumpers": "#FCFCFC",
+      "facemask": "#FAFAFA",
+      "facemaskclips": "#E31837",
+      "facemaskhardware": "#FCFCFC",
+      "innerpads": "#EAEAEA",
+      "visor": "#000000",
+      "visorclips": "#FAFAFA",
+      "chinguardinner": "#FCFCFC",
+      "chinguardouter": "#FCFCFC",
+      "metalparts": "#FCFCFC",
+      "strapclipslower": "#151515",
+      "strapclipsupper": "#E31837",
+      "straps": "#FCFCFC"
+    },
+    "shellFinish": "gloss",
+    "satinMetallic": null,
+    "satinTexture": null,
+    "glitterAmount": null,
+    "glitterSize": null,
+    "glitterColor": null,
+    "facemaskFinish": "gloss",
+    "visorOn": true,
+    "stripe": {
+      "enabled": false,
+      "preset": null,
+      "outerColor": null,
+      "innerColor": null,
+      "centerColor": null,
+      "finish": null,
+      "customRequired": false,
+      "notes": null
+    }
+  },
+  {
+    "id": "NFL_LV",
+    "conference": "AFC",
+    "division": "West",
+    "team": "Las Vegas Raiders",
+    "abbr": "LV",
+    "colors": {
+      "shell": "#A5ACAF",
+      "bumpers": "#FCFCFC",
+      "facemask": "#8A8D8F",
+      "facemaskclips": "#A5ACAF",
+      "facemaskhardware": "#FCFCFC",
+      "innerpads": "#EAEAEA",
+      "visor": "#000000",
+      "visorclips": "#8A8D8F",
+      "chinguardinner": "#FCFCFC",
+      "chinguardouter": "#FCFCFC",
+      "metalparts": "#FCFCFC",
+      "strapclipslower": "#151515",
+      "strapclipsupper": "#A5ACAF",
+      "straps": "#FCFCFC"
+    },
+    "shellFinish": "satin",
+    "satinMetallic": 0.9,
+    "satinTexture": 0.28,
+    "glitterAmount": null,
+    "glitterSize": null,
+    "glitterColor": null,
+    "facemaskFinish": "gloss",
+    "visorOn": true,
+    "stripe": {
+      "enabled": true,
+      "preset": "single",
+      "outerColor": "#151515",
+      "innerColor": null,
+      "centerColor": null,
+      "finish": "gloss",
+      "customRequired": false,
+      "notes": "Thin single black stripe."
+    }
+  },
+  {
+    "id": "NFL_LAC",
+    "conference": "AFC",
+    "division": "West",
+    "team": "Los Angeles Chargers",
+    "abbr": "LAC",
+    "colors": {
+      "shell": "#FAFAFA",
+      "bumpers": "#FCFCFC",
+      "facemask": "#FFC20E",
+      "facemaskclips": "#FAFAFA",
+      "facemaskhardware": "#FCFCFC",
+      "innerpads": "#EAEAEA",
+      "visor": "#000000",
+      "visorclips": "#FFC20E",
+      "chinguardinner": "#FCFCFC",
+      "chinguardouter": "#FCFCFC",
+      "metalparts": "#FCFCFC",
+      "strapclipslower": "#151515",
+      "strapclipsupper": "#FAFAFA",
+      "straps": "#FCFCFC"
+    },
+    "shellFinish": "gloss",
+    "satinMetallic": null,
+    "satinTexture": null,
+    "glitterAmount": null,
+    "glitterSize": null,
+    "glitterColor": null,
+    "facemaskFinish": "gloss",
+    "visorOn": true,
+    "stripe": {
+      "enabled": false,
+      "preset": null,
+      "outerColor": null,
+      "innerColor": null,
+      "centerColor": null,
+      "finish": null,
+      "customRequired": false,
+      "notes": null
+    }
+  },
+  {
+    "id": "NFL_LAR",
+    "conference": "NFC",
+    "division": "West",
+    "team": "Los Angeles Rams",
+    "abbr": "LAR",
+    "colors": {
+      "shell": "#003594",
+      "bumpers": "#FCFCFC",
+      "facemask": "#003594",
+      "facemaskclips": "#003594",
+      "facemaskhardware": "#FCFCFC",
+      "innerpads": "#EAEAEA",
+      "visor": "#000000",
+      "visorclips": "#003594",
+      "chinguardinner": "#FCFCFC",
+      "chinguardouter": "#FCFCFC",
+      "metalparts": "#FCFCFC",
+      "strapclipslower": "#151515",
+      "strapclipsupper": "#003594",
+      "straps": "#FCFCFC"
+    },
+    "shellFinish": "gloss",
+    "satinMetallic": null,
+    "satinTexture": null,
+    "glitterAmount": null,
+    "glitterSize": null,
+    "glitterColor": null,
+    "facemaskFinish": "gloss",
+    "visorOn": true,
+    "stripe": {
+      "enabled": false,
+      "preset": null,
+      "outerColor": null,
+      "innerColor": null,
+      "centerColor": null,
+      "finish": null,
+      "customRequired": false,
+      "notes": null
+    }
+  },
+  {
+    "id": "NFL_MIA",
+    "conference": "AFC",
+    "division": "East",
+    "team": "Miami Dolphins",
+    "abbr": "MIA",
+    "colors": {
+      "shell": "#FAFAFA",
+      "bumpers": "#FCFCFC",
+      "facemask": "#FAFAFA",
+      "facemaskclips": "#FAFAFA",
+      "facemaskhardware": "#FCFCFC",
+      "innerpads": "#EAEAEA",
+      "visor": "#000000",
+      "visorclips": "#FAFAFA",
+      "chinguardinner": "#FCFCFC",
+      "chinguardouter": "#FCFCFC",
+      "metalparts": "#FCFCFC",
+      "strapclipslower": "#151515",
+      "strapclipsupper": "#FAFAFA",
+      "straps": "#FCFCFC"
+    },
+    "shellFinish": "carpaint",
+    "satinMetallic": null,
+    "satinTexture": null,
+    "glitterAmount": 0.07,
+    "glitterSize": 0.18,
+    "glitterColor": "#FFFFFF",
+    "facemaskFinish": "gloss",
+    "visorOn": true,
+    "stripe": {
+      "enabled": true,
+      "preset": "threeThickCenter",
+      "outerColor": "#FC4C02",
+      "innerColor": null,
+      "centerColor": "#008C95",
+      "finish": null,
+      "customRequired": false,
+      "notes": null
+    }
+  },
+  {
+    "id": "NFL_MIN",
+    "conference": "NFC",
+    "division": "North",
+    "team": "Minnesota Vikings",
+    "abbr": "MIN",
+    "colors": {
+      "shell": "#4F2683",
+      "bumpers": "#FCFCFC",
+      "facemask": "#101010",
+      "facemaskclips": "#4F2683",
+      "facemaskhardware": "#FCFCFC",
+      "innerpads": "#EAEAEA",
+      "visor": "#000000",
+      "visorclips": "#101010",
+      "chinguardinner": "#FCFCFC",
+      "chinguardouter": "#FCFCFC",
+      "metalparts": "#FCFCFC",
+      "strapclipslower": "#151515",
+      "strapclipsupper": "#4F2683",
+      "straps": "#FCFCFC"
+    },
+    "shellFinish": "matte",
+    "satinMetallic": null,
+    "satinTexture": null,
+    "glitterAmount": null,
+    "glitterSize": null,
+    "glitterColor": null,
+    "facemaskFinish": "gloss",
+    "visorOn": true,
+    "stripe": {
+      "enabled": false,
+      "preset": null,
+      "outerColor": null,
+      "innerColor": null,
+      "centerColor": null,
+      "finish": null,
+      "customRequired": false,
+      "notes": null
+    }
+  },
+  {
+    "id": "NFL_NE",
+    "conference": "AFC",
+    "division": "East",
+    "team": "New England Patriots",
+    "abbr": "NE",
+    "colors": {
+      "shell": "#B0B7BC",
+      "bumpers": "#FCFCFC",
+      "facemask": "#C60C30",
+      "facemaskclips": "#B0B7BC",
+      "facemaskhardware": "#FCFCFC",
+      "innerpads": "#EAEAEA",
+      "visor": "#000000",
+      "visorclips": "#C60C30",
+      "chinguardinner": "#FCFCFC",
+      "chinguardouter": "#FCFCFC",
+      "metalparts": "#FCFCFC",
+      "strapclipslower": "#151515",
+      "strapclipsupper": "#B0B7BC",
+      "straps": "#FCFCFC"
+    },
+    "shellFinish": "satin",
+    "satinMetallic": 0.88,
+    "satinTexture": 0.31,
+    "glitterAmount": null,
+    "glitterSize": null,
+    "glitterColor": null,
+    "facemaskFinish": "gloss",
+    "visorOn": true,
+    "stripe": {
+      "enabled": false,
+      "preset": null,
+      "outerColor": null,
+      "innerColor": null,
+      "centerColor": null,
+      "finish": null,
+      "customRequired": false,
+      "notes": null
+    }
+  },
+  {
+    "id": "NFL_NO",
+    "conference": "NFC",
+    "division": "South",
+    "team": "New Orleans Saints",
+    "abbr": "NO",
+    "colors": {
+      "shell": "#D3BC8D",
+      "bumpers": "#FCFCFC",
+      "facemask": "#101010",
+      "facemaskclips": "#D3BC8D",
+      "facemaskhardware": "#FCFCFC",
+      "innerpads": "#EAEAEA",
+      "visor": "#000000",
+      "visorclips": "#101010",
+      "chinguardinner": "#FCFCFC",
+      "chinguardouter": "#FCFCFC",
+      "metalparts": "#FCFCFC",
+      "strapclipslower": "#151515",
+      "strapclipsupper": "#D3BC8D",
+      "straps": "#FCFCFC"
+    },
+    "shellFinish": "satin",
+    "satinMetallic": 0.84,
+    "satinTexture": 0.3,
+    "glitterAmount": null,
+    "glitterSize": null,
+    "glitterColor": null,
+    "facemaskFinish": "gloss",
+    "visorOn": true,
+    "stripe": {
+      "enabled": true,
+      "preset": "fivePiped",
+      "outerColor": "#101010",
+      "innerColor": "#FCFCFC",
+      "centerColor": "#101010",
+      "finish": "gloss",
+      "customRequired": false,
+      "notes": "Black / white / black / white / black."
+    }
+  },
+  {
+    "id": "NFL_NYG",
+    "conference": "NFC",
+    "division": "East",
+    "team": "New York Giants",
+    "abbr": "NYG",
+    "colors": {
+      "shell": "#0B2265",
+      "bumpers": "#FCFCFC",
+      "facemask": "#A5ACAF",
+      "facemaskclips": "#0B2265",
+      "facemaskhardware": "#FCFCFC",
+      "innerpads": "#EAEAEA",
+      "visor": "#000000",
+      "visorclips": "#A5ACAF",
+      "chinguardinner": "#FCFCFC",
+      "chinguardouter": "#FCFCFC",
+      "metalparts": "#FCFCFC",
+      "strapclipslower": "#151515",
+      "strapclipsupper": "#0B2265",
+      "straps": "#FCFCFC"
+    },
+    "shellFinish": "gloss",
+    "satinMetallic": null,
+    "satinTexture": null,
+    "glitterAmount": null,
+    "glitterSize": null,
+    "glitterColor": null,
+    "facemaskFinish": "gloss",
+    "visorOn": true,
+    "stripe": {
+      "enabled": true,
+      "preset": "single",
+      "outerColor": null,
+      "innerColor": null,
+      "centerColor": "#A71930",
+      "finish": "gloss",
+      "customRequired": false,
+      "notes": "Single red center stripe."
+    }
+  },
+  {
+    "id": "NFL_NYJ",
+    "conference": "AFC",
+    "division": "East",
+    "team": "New York Jets",
+    "abbr": "NYJ",
+    "colors": {
+      "shell": "#115740",
+      "bumpers": "#FCFCFC",
+      "facemask": "#FAFAFA",
+      "facemaskclips": "#115740",
+      "facemaskhardware": "#FCFCFC",
+      "innerpads": "#EAEAEA",
+      "visor": "#000000",
+      "visorclips": "#FAFAFA",
+      "chinguardinner": "#FCFCFC",
+      "chinguardouter": "#FCFCFC",
+      "metalparts": "#FCFCFC",
+      "strapclipslower": "#151515",
+      "strapclipsupper": "#115740",
+      "straps": "#FCFCFC"
+    },
+    "shellFinish": "carpaint",
+    "satinMetallic": null,
+    "satinTexture": null,
+    "glitterAmount": 0.11,
+    "glitterSize": 0.2,
+    "glitterColor": "#BFD2C5",
+    "facemaskFinish": "gloss",
+    "visorOn": true,
+    "stripe": {
+      "enabled": false,
+      "preset": null,
+      "outerColor": null,
+      "innerColor": null,
+      "centerColor": null,
+      "finish": null,
+      "customRequired": false,
+      "notes": null
+    }
+  },
+  {
+    "id": "NFL_PHI",
+    "conference": "NFC",
+    "division": "East",
+    "team": "Philadelphia Eagles",
+    "abbr": "PHI",
+    "colors": {
+      "shell": "#004C54",
+      "bumpers": "#FCFCFC",
+      "facemask": "#101010",
+      "facemaskclips": "#004C54",
+      "facemaskhardware": "#FCFCFC",
+      "innerpads": "#EAEAEA",
+      "visor": "#000000",
+      "visorclips": "#101010",
+      "chinguardinner": "#FCFCFC",
+      "chinguardouter": "#FCFCFC",
+      "metalparts": "#FCFCFC",
+      "strapclipslower": "#151515",
+      "strapclipsupper": "#004C54",
+      "straps": "#FCFCFC"
+    },
+    "shellFinish": "carpaint",
+    "satinMetallic": null,
+    "satinTexture": null,
+    "glitterAmount": 0.09,
+    "glitterSize": 0.2,
+    "glitterColor": "#9BAEAA",
+    "facemaskFinish": "gloss",
+    "visorOn": true,
+    "stripe": {
+      "enabled": false,
+      "preset": null,
+      "outerColor": null,
+      "innerColor": null,
+      "centerColor": null,
+      "finish": null,
+      "customRequired": false,
+      "notes": null
+    }
+  },
+  {
+    "id": "NFL_PIT",
+    "conference": "AFC",
+    "division": "North",
+    "team": "Pittsburgh Steelers",
+    "abbr": "PIT",
+    "colors": {
+      "shell": "#101010",
+      "bumpers": "#FCFCFC",
+      "facemask": "#101010",
+      "facemaskclips": "#101010",
+      "facemaskhardware": "#FCFCFC",
+      "innerpads": "#EAEAEA",
+      "visor": "#000000",
+      "visorclips": "#101010",
+      "chinguardinner": "#FCFCFC",
+      "chinguardouter": "#FCFCFC",
+      "metalparts": "#FCFCFC",
+      "strapclipslower": "#151515",
+      "strapclipsupper": "#101010",
+      "straps": "#FCFCFC"
+    },
+    "shellFinish": "gloss",
+    "satinMetallic": null,
+    "satinTexture": null,
+    "glitterAmount": null,
+    "glitterSize": null,
+    "glitterColor": null,
+    "facemaskFinish": "gloss",
+    "visorOn": true,
+    "stripe": {
+      "enabled": true,
+      "preset": "single",
+      "outerColor": null,
+      "innerColor": null,
+      "centerColor": "#FFB612",
+      "finish": "gloss",
+      "customRequired": false,
+      "notes": "Single gold/yellow center stripe."
+    }
+  },
+  {
+    "id": "NFL_SF",
+    "conference": "NFC",
+    "division": "West",
+    "team": "San Francisco 49ers",
+    "abbr": "SF",
+    "colors": {
+      "shell": "#B3995D",
+      "bumpers": "#FCFCFC",
+      "facemask": "#A5ACAF",
+      "facemaskclips": "#B3995D",
+      "facemaskhardware": "#FCFCFC",
+      "innerpads": "#EAEAEA",
+      "visor": "#000000",
+      "visorclips": "#A5ACAF",
+      "chinguardinner": "#FCFCFC",
+      "chinguardouter": "#FCFCFC",
+      "metalparts": "#FCFCFC",
+      "strapclipslower": "#151515",
+      "strapclipsupper": "#B3995D",
+      "straps": "#FCFCFC"
+    },
+    "shellFinish": "satin",
+    "satinMetallic": 0.84,
+    "satinTexture": 0.29,
+    "glitterAmount": null,
+    "glitterSize": null,
+    "glitterColor": null,
+    "facemaskFinish": "gloss",
+    "visorOn": true,
+    "stripe": {
+      "enabled": true,
+      "preset": "threeThickCenter",
+      "outerColor": "#AA0000",
+      "innerColor": null,
+      "centerColor": "#FCFCFC",
+      "finish": "gloss",
+      "customRequired": false,
+      "notes": "Red / white / red."
+    }
+  },
+  {
+    "id": "NFL_SEA",
+    "conference": "NFC",
+    "division": "West",
+    "team": "Seattle Seahawks",
+    "abbr": "SEA",
+    "colors": {
+      "shell": "#002244",
+      "bumpers": "#FCFCFC",
+      "facemask": "#101820",
+      "facemaskclips": "#002244",
+      "facemaskhardware": "#FCFCFC",
+      "innerpads": "#EAEAEA",
+      "visor": "#000000",
+      "visorclips": "#101820",
+      "chinguardinner": "#FCFCFC",
+      "chinguardouter": "#FCFCFC",
+      "metalparts": "#FCFCFC",
+      "strapclipslower": "#151515",
+      "strapclipsupper": "#002244",
+      "straps": "#FCFCFC"
+    },
+    "shellFinish": "satin",
+    "satinMetallic": 0.46,
+    "satinTexture": 0.38,
+    "glitterAmount": null,
+    "glitterSize": null,
+    "glitterColor": null,
+    "facemaskFinish": "gloss",
+    "visorOn": true,
+    "stripe": {
+      "enabled": false,
+      "preset": null,
+      "outerColor": null,
+      "innerColor": null,
+      "centerColor": null,
+      "finish": null,
+      "customRequired": true,
+      "notes": "Tapered team-specific center graphic requires a custom uploaded stripe."
+    }
+  },
+  {
+    "id": "NFL_TB",
+    "conference": "NFC",
+    "division": "South",
+    "team": "Tampa Bay Buccaneers",
+    "abbr": "TB",
+    "colors": {
+      "shell": "#57534F",
+      "bumpers": "#FCFCFC",
+      "facemask": "#101010",
+      "facemaskclips": "#57534F",
+      "facemaskhardware": "#FCFCFC",
+      "innerpads": "#EAEAEA",
+      "visor": "#000000",
+      "visorclips": "#101010",
+      "chinguardinner": "#FCFCFC",
+      "chinguardouter": "#FCFCFC",
+      "metalparts": "#FCFCFC",
+      "strapclipslower": "#151515",
+      "strapclipsupper": "#57534F",
+      "straps": "#FCFCFC"
+    },
+    "shellFinish": "satin",
+    "satinMetallic": 0.86,
+    "satinTexture": 0.36,
+    "glitterAmount": null,
+    "glitterSize": null,
+    "glitterColor": null,
+    "facemaskFinish": "gloss",
+    "visorOn": true,
+    "stripe": {
+      "enabled": false,
+      "preset": null,
+      "outerColor": null,
+      "innerColor": null,
+      "centerColor": null,
+      "finish": null,
+      "customRequired": false,
+      "notes": null
+    }
+  },
+  {
+    "id": "NFL_TEN",
+    "conference": "AFC",
+    "division": "South",
+    "team": "Tennessee Titans",
+    "abbr": "TEN",
+    "colors": {
+      "shell": "#FAFAFA",
+      "bumpers": "#FCFCFC",
+      "facemask": "#FAFAFA",
+      "facemaskclips": "#FAFAFA",
+      "facemaskhardware": "#FCFCFC",
+      "innerpads": "#EAEAEA",
+      "visor": "#000000",
+      "visorclips": "#FAFAFA",
+      "chinguardinner": "#FCFCFC",
+      "chinguardouter": "#FCFCFC",
+      "metalparts": "#FCFCFC",
+      "strapclipslower": "#151515",
+      "strapclipsupper": "#FAFAFA",
+      "straps": "#FCFCFC"
+    },
+    "shellFinish": "gloss",
+    "satinMetallic": null,
+    "satinTexture": null,
+    "glitterAmount": null,
+    "glitterSize": null,
+    "glitterColor": null,
+    "facemaskFinish": "gloss",
+    "visorOn": true,
+    "stripe": {
+      "enabled": false,
+      "preset": null,
+      "outerColor": null,
+      "innerColor": null,
+      "centerColor": null,
+      "finish": null,
+      "customRequired": true,
+      "notes": "The 2026 Six-String stripe requires a custom uploaded stripe."
+    }
+  },
+  {
+    "id": "NFL_WAS",
+    "conference": "NFC",
+    "division": "East",
+    "team": "Washington Commanders",
+    "abbr": "WAS",
+    "colors": {
+      "shell": "#651C32",
+      "bumpers": "#FCFCFC",
+      "facemask": "#FFB81C",
+      "facemaskclips": "#5A1414",
+      "facemaskhardware": "#FCFCFC",
+      "innerpads": "#EAEAEA",
+      "visor": "#000000",
+      "visorclips": "#FFB612",
+      "chinguardinner": "#FCFCFC",
+      "chinguardouter": "#FCFCFC",
+      "metalparts": "#FCFCFC",
+      "strapclipslower": "#151515",
+      "strapclipsupper": "#5A1414",
+      "straps": "#FCFCFC"
+    },
+    "shellFinish": "gloss",
+    "satinMetallic": null,
+    "satinTexture": null,
+    "glitterAmount": null,
+    "glitterSize": null,
+    "glitterColor": null,
+    "facemaskFinish": "gloss",
+    "visorOn": true,
+    "stripe": {
+      "enabled": true,
+      "preset": "threeThickCenter",
+      "outerColor": "#FCFCFC",
+      "innerColor": null,
+      "centerColor": "#FFB612",
+      "finish": "gloss",
+      "customRequired": false,
+      "notes": "White / gold / white; gold center stripe is wider."
+    }
+  }
+];
+const NFL_PRESET_DIVISIONS = ['East', 'North', 'South', 'West'];
+
 const HDRI_PRESETS = [
   { id: 'neutral', label: 'Neutral Studio', url: null },
   { id: 'studio01', label: 'Studio 01', url: '/hdri/studio_small_01_2k.exr' },
@@ -1870,6 +3191,8 @@ export default function HelmetBuilder() {
   });
 
   const [activeTab, setActiveTab]     = useState('colors');
+  const [selectedNflPresetId, setSelectedNflPresetId] = useState('NFL_ARI');
+  const [activeNflPresetId, setActiveNflPresetId] = useState(null);
   const [colors, setColors]           = useState(() => Object.fromEntries(ZONES.map(z => [z.id, z.defaultColor])));
   const [finish, setFinish]           = useState('gloss');
   const [loaded, setLoaded]           = useState(false);
@@ -5798,8 +7121,68 @@ export default function HelmetBuilder() {
     setShowUpgrade(true);
   };
 
-  const TABS = ['colors', 'finish', 'decals'];
-  const TAB_LABELS = { colors: 'Colors', finish: 'Finish', decals: 'Decals' };
+  const selectedNflPreset = NFL_HELMET_PRESETS.find(p => p.id === selectedNflPresetId) || NFL_HELMET_PRESETS[0];
+
+  const applyNflHelmetPreset = (preset) => {
+    if (!preset) return;
+
+    // Apply all spreadsheet-defined base-part colors in one React update while
+    // preserving any future color zones that are not part of the preset schema.
+    setColors(current => ({ ...current, ...preset.colors }));
+
+    setFinish(preset.shellFinish || 'gloss');
+    setFacemaskFinish(preset.facemaskFinish || 'gloss');
+    setVisorOn(preset.visorOn !== false);
+
+    // Reset hidden surface-tuning values before applying team-specific values so
+    // switching between a metallic/flake preset and a plain preset cannot carry
+    // stale tuning into a later manual finish change.
+    setSatinMetallic(preset.satinMetallic ?? 0.62);
+    setSatinTexture(preset.satinTexture ?? 0.45);
+    setGlitter(preset.glitterAmount ?? 0.3);
+    setGlitterSize(preset.glitterSize ?? 0.55);
+    setGlitterColor(preset.glitterColor || '#ffffff');
+
+    // Preset bases use the established procedural stripe defaults. Uploaded stripe
+    // artwork is only toggled off, not deleted, so the user's upload can be restored.
+    setHelmetStripeWidth(2);
+    setHelmetStripeLength(1);
+    setHelmetStripeDesignEnabled(false);
+    setHelmetStripeSingleColor('#efff00');
+    setHelmetStripeOuterColor('#efff00');
+    setHelmetStripeCenterColor('#fcfcfc');
+    setHelmetStripePipingColor('#151515');
+
+    const stripe = preset.stripe || {};
+    setHelmetStripesEnabled(!!stripe.enabled);
+
+    if (stripe.enabled && stripe.preset) {
+      setHelmetStripePreset(stripe.preset);
+
+      if (stripe.preset === 'single') {
+        setHelmetStripeSingleColor(
+          stripe.centerColor || stripe.outerColor || stripe.innerColor || '#efff00'
+        );
+      } else {
+        setHelmetStripeOuterColor(stripe.outerColor || '#efff00');
+        setHelmetStripeCenterColor(stripe.centerColor || stripe.innerColor || '#fcfcfc');
+        if (stripe.preset === 'fivePiped') {
+          setHelmetStripePipingColor(stripe.innerColor || '#151515');
+        }
+      }
+
+      // The current Builder intentionally shares one finish control across all decal
+      // layers. Only change it when the spreadsheet actually defines a preset stripe.
+      if (stripe.finish) setDecalFinish(stripe.finish);
+    } else {
+      setHelmetStripePreset('threeEqual');
+    }
+
+    setActiveNflPresetId(preset.id);
+  };
+
+  const TABS = ['presets', 'colors', 'finish', 'decals'];
+  const TAB_LABELS = { presets: 'Presets', colors: 'Colors', finish: 'Finish', decals: 'Decals' };
 
   return (
     <div style={{ height: '100vh', maxHeight: '100dvh', background: '#1f1c1e', fontFamily: "'Barlow', sans-serif", color: '#e2e8f0', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -5911,6 +7294,104 @@ export default function HelmetBuilder() {
 
           {/* Tab content */}
           <div style={{ flex: 1, overflowY: 'auto', padding: 14, minHeight: 0 }}>
+
+            {/* PRESETS */}
+            {activeTab === 'presets' && (
+              <div>
+                <CollapsibleSection title="NFL TEAM BASES" defaultOpen={true}>
+                  <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.5, marginBottom:10 }}>
+                    Load a clean 2026 NFL primary helmet base from the approved preset sheet. Presets change part colors, finishes, visor state, and supported standard stripes only. Existing uploaded logos and artwork are preserved.
+                  </div>
+
+                  <div style={{ fontSize:9, color:'#9ca3af', marginBottom:6 }}>Team</div>
+                  <select
+                    value={selectedNflPresetId}
+                    onChange={e => setSelectedNflPresetId(e.target.value)}
+                    style={{ width:'100%', background:'rgba(0,0,0,0.22)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:6, padding:'9px 10px', color:'#e5e7eb', fontSize:10, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.03em', marginBottom:10 }}
+                  >
+                    {['AFC','NFC'].map(conference => (
+                      NFL_PRESET_DIVISIONS.map(division => {
+                        const teams = NFL_HELMET_PRESETS.filter(p => p.conference === conference && p.division === division);
+                        if (!teams.length) return null;
+                        return (
+                          <optgroup key={`${conference}-${division}`} label={`${conference} — ${division.toUpperCase()}`}>
+                            {teams.map(preset => (
+                              <option key={preset.id} value={preset.id}>{preset.team}</option>
+                            ))}
+                          </optgroup>
+                        );
+                      })
+                    ))}
+                  </select>
+
+                  {selectedNflPreset && (
+                    <div style={{ background:'rgba(255,255,255,0.035)', border:'1px solid rgba(255,255,255,0.09)', borderRadius:8, padding:10, marginBottom:10 }}>
+                      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:8, marginBottom:10 }}>
+                        <div style={{ minWidth:0 }}>
+                          <div style={{ fontSize:13, fontWeight:900, color:'#e5e7eb', fontFamily:"'Barlow Condensed',sans-serif", lineHeight:1.15 }}>{selectedNflPreset.team.toUpperCase()}</div>
+                          <div style={{ fontSize:8, color:'#6b7280', marginTop:2, letterSpacing:'0.08em' }}>{selectedNflPreset.conference} {selectedNflPreset.division.toUpperCase()} · {selectedNflPreset.abbr}</div>
+                        </div>
+                        {activeNflPresetId === selectedNflPreset.id && (
+                          <span style={{ flexShrink:0, background:'rgba(239,255,0,0.12)', border:'1px solid rgba(239,255,0,0.30)', color:'#efff00', borderRadius:4, padding:'2px 6px', fontSize:7, fontWeight:800, letterSpacing:'0.08em', fontFamily:"'Barlow Condensed',sans-serif" }}>LOADED</span>
+                        )}
+                      </div>
+
+                      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:7, marginBottom:9 }}>
+                        <div style={{ background:'rgba(0,0,0,0.18)', borderRadius:6, padding:7 }}>
+                          <div style={{ fontSize:7, color:'#6b7280', letterSpacing:'0.08em', marginBottom:5 }}>SHELL</div>
+                          <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                            <span style={{ width:16, height:16, borderRadius:4, background:selectedNflPreset.colors.shell, border:'1px solid rgba(255,255,255,0.18)', flexShrink:0 }} />
+                            <div>
+                              <div style={{ fontSize:9, color:'#d1d5db', fontFamily:'monospace' }}>{selectedNflPreset.colors.shell}</div>
+                              <div style={{ fontSize:7, color:'#6b7280', marginTop:1 }}>{FINISHES.find(f => f.id === selectedNflPreset.shellFinish)?.label || selectedNflPreset.shellFinish}</div>
+                            </div>
+                          </div>
+                        </div>
+                        <div style={{ background:'rgba(0,0,0,0.18)', borderRadius:6, padding:7 }}>
+                          <div style={{ fontSize:7, color:'#6b7280', letterSpacing:'0.08em', marginBottom:5 }}>FACEMASK</div>
+                          <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                            <span style={{ width:16, height:16, borderRadius:4, background:selectedNflPreset.colors.facemask, border:'1px solid rgba(255,255,255,0.18)', flexShrink:0 }} />
+                            <div>
+                              <div style={{ fontSize:9, color:'#d1d5db', fontFamily:'monospace' }}>{selectedNflPreset.colors.facemask}</div>
+                              <div style={{ fontSize:7, color:'#6b7280', marginTop:1 }}>{selectedNflPreset.facemaskFinish.toUpperCase()}</div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, borderTop:'1px solid rgba(255,255,255,0.06)', paddingTop:8 }}>
+                        <span style={{ fontSize:8, color:'#6b7280' }}>STRIPE</span>
+                        <span style={{ fontSize:8, fontWeight:800, textAlign:'right', color:selectedNflPreset.stripe.enabled?'#d1d5db':selectedNflPreset.stripe.customRequired?'#f5c451':'#6b7280', fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.04em' }}>
+                          {selectedNflPreset.stripe.enabled
+                            ? (STRIPE_PRESET_OPTIONS.find(option => option.id === selectedNflPreset.stripe.preset)?.label || 'STANDARD')
+                            : selectedNflPreset.stripe.customRequired
+                              ? 'CUSTOM STRIPE NOT INCLUDED'
+                              : 'NONE'}
+                        </span>
+                      </div>
+
+                      {selectedNflPreset.stripe.customRequired && (
+                        <div style={{ marginTop:7, fontSize:8, color:'#8b7351', lineHeight:1.4 }}>
+                          This team's primary stripe requires custom artwork, so the preset loads the approved base without that stripe.
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => applyNflHelmetPreset(selectedNflPreset)}
+                    style={{ width:'100%', background:'linear-gradient(135deg,#efff00,#c8d900)', border:'none', borderRadius:6, padding:'9px 12px', cursor:'pointer', color:'#000', fontSize:10, fontWeight:900, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.08em' }}
+                  >
+                    APPLY NFL BASE
+                  </button>
+
+                  <div style={{ fontSize:8, color:'#4b5563', lineHeight:1.45, marginTop:8 }}>
+                    No team logos, bumper logos, rear decals, or other team artwork are included in these bases.
+                  </div>
+                </CollapsibleSection>
+              </div>
+            )}
 
             {/* COLORS */}
             {activeTab === 'colors' && (
