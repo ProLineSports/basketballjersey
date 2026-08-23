@@ -1171,6 +1171,7 @@ const NFL_HELMET_PRESETS = [
     "conference": "NFC",
     "division": "West",
     "team": "Arizona Cardinals",
+    "city": "Arizona",
     "abbr": "ARI",
     "colors": {
       "shell": "#FAFAFA",
@@ -1212,6 +1213,7 @@ const NFL_HELMET_PRESETS = [
     "conference": "NFC",
     "division": "South",
     "team": "Atlanta Falcons",
+    "city": "Atlanta",
     "abbr": "ATL",
     "colors": {
       "shell": "#111111",
@@ -1229,7 +1231,7 @@ const NFL_HELMET_PRESETS = [
       "strapclipsupper": "#111111",
       "straps": "#FCFCFC"
     },
-    "shellFinish": "matte",
+    "shellFinish": "satin",
     "satinMetallic": null,
     "satinTexture": null,
     "glitterAmount": null,
@@ -1253,6 +1255,7 @@ const NFL_HELMET_PRESETS = [
     "conference": "AFC",
     "division": "North",
     "team": "Baltimore Ravens",
+    "city": "Baltimore",
     "abbr": "BAL",
     "colors": {
       "shell": "#101010",
@@ -1294,6 +1297,7 @@ const NFL_HELMET_PRESETS = [
     "conference": "AFC",
     "division": "East",
     "team": "Buffalo Bills",
+    "city": "Buffalo",
     "abbr": "BUF",
     "colors": {
       "shell": "#FAFAFA",
@@ -1335,6 +1339,7 @@ const NFL_HELMET_PRESETS = [
     "conference": "NFC",
     "division": "South",
     "team": "Carolina Panthers",
+    "city": "Carolina",
     "abbr": "CAR",
     "colors": {
       "shell": "#BFC2C5",
@@ -1376,6 +1381,7 @@ const NFL_HELMET_PRESETS = [
     "conference": "NFC",
     "division": "North",
     "team": "Chicago Bears",
+    "city": "Chicago",
     "abbr": "CHI",
     "colors": {
       "shell": "#0B162A",
@@ -1417,6 +1423,7 @@ const NFL_HELMET_PRESETS = [
     "conference": "AFC",
     "division": "North",
     "team": "Cincinnati Bengals",
+    "city": "Cincinnati",
     "abbr": "CIN",
     "colors": {
       "shell": "#FB4F14",
@@ -1458,6 +1465,7 @@ const NFL_HELMET_PRESETS = [
     "conference": "AFC",
     "division": "North",
     "team": "Cleveland Browns",
+    "city": "Cleveland",
     "abbr": "CLE",
     "colors": {
       "shell": "#FF3C00",
@@ -1499,6 +1507,7 @@ const NFL_HELMET_PRESETS = [
     "conference": "NFC",
     "division": "East",
     "team": "Dallas Cowboys",
+    "city": "Dallas",
     "abbr": "DAL",
     "colors": {
       "shell": "#B7C1C6",
@@ -1540,6 +1549,7 @@ const NFL_HELMET_PRESETS = [
     "conference": "AFC",
     "division": "West",
     "team": "Denver Broncos",
+    "city": "Denver",
     "abbr": "DEN",
     "colors": {
       "shell": "#002244",
@@ -1581,6 +1591,7 @@ const NFL_HELMET_PRESETS = [
     "conference": "NFC",
     "division": "North",
     "team": "Detroit Lions",
+    "city": "Detroit",
     "abbr": "DET",
     "colors": {
       "shell": "#B0B7BC",
@@ -1622,6 +1633,7 @@ const NFL_HELMET_PRESETS = [
     "conference": "NFC",
     "division": "North",
     "team": "Green Bay Packers",
+    "city": "Green Bay",
     "abbr": "GB",
     "colors": {
       "shell": "#FFB612",
@@ -1663,6 +1675,7 @@ const NFL_HELMET_PRESETS = [
     "conference": "AFC",
     "division": "South",
     "team": "Houston Texans",
+    "city": "Houston",
     "abbr": "HOU",
     "colors": {
       "shell": "#03202F",
@@ -1680,12 +1693,12 @@ const NFL_HELMET_PRESETS = [
       "strapclipsupper": "#03202F",
       "straps": "#FCFCFC"
     },
-    "shellFinish": "carpaint",
+    "shellFinish": "gloss",
     "satinMetallic": null,
     "satinTexture": null,
-    "glitterAmount": 0.12,
-    "glitterSize": 0.22,
-    "glitterColor": "#526A7D",
+    "glitterAmount": null,
+    "glitterSize": null,
+    "glitterColor": null,
     "facemaskFinish": "gloss",
     "visorOn": true,
     "stripe": {
@@ -1704,6 +1717,7 @@ const NFL_HELMET_PRESETS = [
     "conference": "AFC",
     "division": "South",
     "team": "Indianapolis Colts",
+    "city": "Indianapolis",
     "abbr": "IND",
     "colors": {
       "shell": "#FAFAFA",
@@ -1745,6 +1759,7 @@ const NFL_HELMET_PRESETS = [
     "conference": "AFC",
     "division": "South",
     "team": "Jacksonville Jaguars",
+    "city": "Jacksonville",
     "abbr": "JAX",
     "colors": {
       "shell": "#101820",
@@ -1786,6 +1801,7 @@ const NFL_HELMET_PRESETS = [
     "conference": "AFC",
     "division": "West",
     "team": "Kansas City Chiefs",
+    "city": "Kansas City",
     "abbr": "KC",
     "colors": {
       "shell": "#E31837",
@@ -1827,6 +1843,7 @@ const NFL_HELMET_PRESETS = [
     "conference": "AFC",
     "division": "West",
     "team": "Las Vegas Raiders",
+    "city": "Las Vegas",
     "abbr": "LV",
     "colors": {
       "shell": "#A5ACAF",
@@ -1868,6 +1885,7 @@ const NFL_HELMET_PRESETS = [
     "conference": "AFC",
     "division": "West",
     "team": "Los Angeles Chargers",
+    "city": "Los Angeles",
     "abbr": "LAC",
     "colors": {
       "shell": "#FAFAFA",
@@ -1909,6 +1927,7 @@ const NFL_HELMET_PRESETS = [
     "conference": "NFC",
     "division": "West",
     "team": "Los Angeles Rams",
+    "city": "Los Angeles",
     "abbr": "LAR",
     "colors": {
       "shell": "#003594",
@@ -1950,6 +1969,7 @@ const NFL_HELMET_PRESETS = [
     "conference": "AFC",
     "division": "East",
     "team": "Miami Dolphins",
+    "city": "Miami",
     "abbr": "MIA",
     "colors": {
       "shell": "#FAFAFA",
@@ -1967,12 +1987,12 @@ const NFL_HELMET_PRESETS = [
       "strapclipsupper": "#FAFAFA",
       "straps": "#FCFCFC"
     },
-    "shellFinish": "carpaint",
+    "shellFinish": "gloss",
     "satinMetallic": null,
     "satinTexture": null,
-    "glitterAmount": 0.07,
-    "glitterSize": 0.18,
-    "glitterColor": "#FFFFFF",
+    "glitterAmount": null,
+    "glitterSize": null,
+    "glitterColor": null,
     "facemaskFinish": "gloss",
     "visorOn": true,
     "stripe": {
@@ -1991,6 +2011,7 @@ const NFL_HELMET_PRESETS = [
     "conference": "NFC",
     "division": "North",
     "team": "Minnesota Vikings",
+    "city": "Minnesota",
     "abbr": "MIN",
     "colors": {
       "shell": "#4F2683",
@@ -2008,7 +2029,7 @@ const NFL_HELMET_PRESETS = [
       "strapclipsupper": "#4F2683",
       "straps": "#FCFCFC"
     },
-    "shellFinish": "matte",
+    "shellFinish": "satin",
     "satinMetallic": null,
     "satinTexture": null,
     "glitterAmount": null,
@@ -2032,6 +2053,7 @@ const NFL_HELMET_PRESETS = [
     "conference": "AFC",
     "division": "East",
     "team": "New England Patriots",
+    "city": "New England",
     "abbr": "NE",
     "colors": {
       "shell": "#B0B7BC",
@@ -2073,6 +2095,7 @@ const NFL_HELMET_PRESETS = [
     "conference": "NFC",
     "division": "South",
     "team": "New Orleans Saints",
+    "city": "New Orleans",
     "abbr": "NO",
     "colors": {
       "shell": "#D3BC8D",
@@ -2114,6 +2137,7 @@ const NFL_HELMET_PRESETS = [
     "conference": "NFC",
     "division": "East",
     "team": "New York Giants",
+    "city": "New York",
     "abbr": "NYG",
     "colors": {
       "shell": "#0B2265",
@@ -2155,6 +2179,7 @@ const NFL_HELMET_PRESETS = [
     "conference": "AFC",
     "division": "East",
     "team": "New York Jets",
+    "city": "New York",
     "abbr": "NYJ",
     "colors": {
       "shell": "#115740",
@@ -2172,12 +2197,12 @@ const NFL_HELMET_PRESETS = [
       "strapclipsupper": "#115740",
       "straps": "#FCFCFC"
     },
-    "shellFinish": "carpaint",
+    "shellFinish": "gloss",
     "satinMetallic": null,
     "satinTexture": null,
-    "glitterAmount": 0.11,
-    "glitterSize": 0.2,
-    "glitterColor": "#BFD2C5",
+    "glitterAmount": null,
+    "glitterSize": null,
+    "glitterColor": null,
     "facemaskFinish": "gloss",
     "visorOn": true,
     "stripe": {
@@ -2196,6 +2221,7 @@ const NFL_HELMET_PRESETS = [
     "conference": "NFC",
     "division": "East",
     "team": "Philadelphia Eagles",
+    "city": "Philadelphia",
     "abbr": "PHI",
     "colors": {
       "shell": "#004C54",
@@ -2213,12 +2239,12 @@ const NFL_HELMET_PRESETS = [
       "strapclipsupper": "#004C54",
       "straps": "#FCFCFC"
     },
-    "shellFinish": "carpaint",
+    "shellFinish": "satin",
     "satinMetallic": null,
     "satinTexture": null,
-    "glitterAmount": 0.09,
-    "glitterSize": 0.2,
-    "glitterColor": "#9BAEAA",
+    "glitterAmount": null,
+    "glitterSize": null,
+    "glitterColor": null,
     "facemaskFinish": "gloss",
     "visorOn": true,
     "stripe": {
@@ -2237,6 +2263,7 @@ const NFL_HELMET_PRESETS = [
     "conference": "AFC",
     "division": "North",
     "team": "Pittsburgh Steelers",
+    "city": "Pittsburgh",
     "abbr": "PIT",
     "colors": {
       "shell": "#101010",
@@ -2278,6 +2305,7 @@ const NFL_HELMET_PRESETS = [
     "conference": "NFC",
     "division": "West",
     "team": "San Francisco 49ers",
+    "city": "San Francisco",
     "abbr": "SF",
     "colors": {
       "shell": "#B3995D",
@@ -2319,6 +2347,7 @@ const NFL_HELMET_PRESETS = [
     "conference": "NFC",
     "division": "West",
     "team": "Seattle Seahawks",
+    "city": "Seattle",
     "abbr": "SEA",
     "colors": {
       "shell": "#002244",
@@ -2360,6 +2389,7 @@ const NFL_HELMET_PRESETS = [
     "conference": "NFC",
     "division": "South",
     "team": "Tampa Bay Buccaneers",
+    "city": "Tampa Bay",
     "abbr": "TB",
     "colors": {
       "shell": "#57534F",
@@ -2401,6 +2431,7 @@ const NFL_HELMET_PRESETS = [
     "conference": "AFC",
     "division": "South",
     "team": "Tennessee Titans",
+    "city": "Tennessee",
     "abbr": "TEN",
     "colors": {
       "shell": "#FAFAFA",
@@ -2442,6 +2473,7 @@ const NFL_HELMET_PRESETS = [
     "conference": "NFC",
     "division": "East",
     "team": "Washington Commanders",
+    "city": "Washington",
     "abbr": "WAS",
     "colors": {
       "shell": "#651C32",
@@ -2479,7 +2511,20 @@ const NFL_HELMET_PRESETS = [
     }
   }
 ];
-const NFL_PRESET_DIVISIONS = ['East', 'North', 'South', 'West'];
+
+const NFL_HELMET_PRESETS_SORTED = [...NFL_HELMET_PRESETS].sort((a, b) =>
+  a.city.localeCompare(b.city) || a.abbr.localeCompare(b.abbr)
+);
+
+// City/region-only labels keep the menu compact. The two duplicate markets use
+// conference tags only so users can distinguish the two helmets without restoring
+// full team names.
+const getNflPresetMenuLabel = (preset) => {
+  if (preset.city === 'Los Angeles' || preset.city === 'New York') {
+    return `${preset.city} — ${preset.conference}`;
+  }
+  return preset.city;
+};
 
 const HDRI_PRESETS = [
   { id: 'neutral', label: 'Neutral Studio', url: null },
@@ -7307,20 +7352,16 @@ export default function HelmetBuilder() {
                   <select
                     value={selectedNflPresetId}
                     onChange={e => setSelectedNflPresetId(e.target.value)}
-                    style={{ width:'100%', background:'rgba(0,0,0,0.22)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:6, padding:'9px 10px', color:'#e5e7eb', fontSize:10, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.03em', marginBottom:10 }}
+                    style={{ width:'100%', background:'#1a1719', border:'1px solid rgba(255,255,255,0.18)', borderRadius:6, padding:'9px 10px', color:'#f3f4f6', fontSize:11, fontWeight:700, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.03em', marginBottom:10, colorScheme:'dark' }}
                   >
-                    {['AFC','NFC'].map(conference => (
-                      NFL_PRESET_DIVISIONS.map(division => {
-                        const teams = NFL_HELMET_PRESETS.filter(p => p.conference === conference && p.division === division);
-                        if (!teams.length) return null;
-                        return (
-                          <optgroup key={`${conference}-${division}`} label={`${conference} — ${division.toUpperCase()}`}>
-                            {teams.map(preset => (
-                              <option key={preset.id} value={preset.id}>{preset.team}</option>
-                            ))}
-                          </optgroup>
-                        );
-                      })
+                    {NFL_HELMET_PRESETS_SORTED.map(preset => (
+                      <option
+                        key={preset.id}
+                        value={preset.id}
+                        style={{ background:'#1a1719', color:'#f3f4f6', fontSize:11, fontWeight:700 }}
+                      >
+                        {getNflPresetMenuLabel(preset)}
+                      </option>
                     ))}
                   </select>
 
@@ -7383,7 +7424,7 @@ export default function HelmetBuilder() {
                     onClick={() => applyNflHelmetPreset(selectedNflPreset)}
                     style={{ width:'100%', background:'linear-gradient(135deg,#efff00,#c8d900)', border:'none', borderRadius:6, padding:'9px 12px', cursor:'pointer', color:'#000', fontSize:10, fontWeight:900, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.08em' }}
                   >
-                    APPLY NFL BASE
+                    APPLY PRESET
                   </button>
 
                   <div style={{ fontSize:8, color:'#4b5563', lineHeight:1.45, marginTop:8 }}>
