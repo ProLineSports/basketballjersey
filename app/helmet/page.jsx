@@ -2542,7 +2542,7 @@ const BUILT_IN_STRIPE_DESIGNS = {
     scaleY: 0.336,
     rotation: 0,
     offsetX: 0,
-    offsetY: -10,
+    offsetY: 10,
     opacity: 1
   },
   TENNESSEE_TITANS_STRIPE: {
