@@ -350,6 +350,185 @@ function applyPanoramicShellWrapUV(model, roots) {
   };
 }
 
+function applyLongitudinalShellWrapUV(model, roots, options = {}) {
+  if (!model || !roots?.length) return null;
+
+  const {
+    rearAtTop = true,
+    pathBins = 96,
+    edgeInset = 0.035,
+    smoothPasses = 3,
+  } = options;
+
+  const meshes = [];
+  const seen = new Set();
+  roots.forEach(root => {
+    root.traverse(obj => {
+      if (!obj.isMesh || !obj.geometry?.attributes?.position || seen.has(obj)) return;
+      seen.add(obj);
+      meshes.push(obj);
+    });
+  });
+  if (!meshes.length) return null;
+
+  model.updateMatrixWorld(true);
+  const modelInverse = new THREE.Matrix4().copy(model.matrixWorld).invert();
+  const p = new THREE.Vector3();
+  let minX = Infinity, maxX = -Infinity;
+  let minY = Infinity, maxY = -Infinity;
+  let minZ = Infinity, maxZ = -Infinity;
+
+  meshes.forEach(mesh => {
+    mesh.updateWorldMatrix(true, false);
+    const localToModel = new THREE.Matrix4().multiplyMatrices(modelInverse, mesh.matrixWorld);
+    const pos = mesh.geometry.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      p.fromBufferAttribute(pos, i).applyMatrix4(localToModel);
+      minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+      minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+      minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z);
+    }
+  });
+
+  const centerX = (minX + maxX) / 2;
+  const centerZ = (minZ + maxZ) / 2;
+  const width = Math.max(0.000001, maxX - minX);
+  const height = Math.max(0.000001, maxY - minY);
+  const depth = Math.max(0.000001, maxZ - minZ);
+
+  const stripePivotY = minY + height * 0.48;
+  let stripeRawMin = Infinity;
+  let stripeRawMax = -Infinity;
+  const centerBand = width * 0.08;
+
+  const vertexRecords = [];
+  meshes.forEach(mesh => {
+    mesh.updateWorldMatrix(true, false);
+    const localToModel = new THREE.Matrix4().multiplyMatrices(modelInverse, mesh.matrixWorld);
+    const pos = mesh.geometry.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      p.fromBufferAttribute(pos, i).applyMatrix4(localToModel);
+      const theta = Math.atan2((p.z - centerZ) / depth, (p.y - stripePivotY) / height);
+      const raw = 0.5 - theta / Math.PI;
+      vertexRecords.push({ x: p.x, raw });
+      if (Math.abs(p.x - centerX) <= centerBand) {
+        stripeRawMin = Math.min(stripeRawMin, raw);
+        stripeRawMax = Math.max(stripeRawMax, raw);
+      }
+    }
+  });
+
+  if (!Number.isFinite(stripeRawMin) || !Number.isFinite(stripeRawMax) || stripeRawMax - stripeRawMin < 0.000001) {
+    stripeRawMin = 0;
+    stripeRawMax = 1;
+  }
+
+  const binCount = Math.max(24, pathBins | 0);
+  const halfWidths = new Array(binCount).fill(0);
+
+  for (const record of vertexRecords) {
+    const { x, raw } = record;
+    const pathT = THREE.MathUtils.clamp(
+      (raw - stripeRawMin) / Math.max(0.000001, stripeRawMax - stripeRawMin),
+      0,
+      1
+    );
+    const bin = Math.min(binCount - 1, Math.max(0, Math.round(pathT * (binCount - 1))));
+    const dist = Math.abs(x - centerX);
+    if (dist > halfWidths[bin]) halfWidths[bin] = dist;
+  }
+
+  let lastKnown = width * 0.5;
+  for (let i = 0; i < binCount; i++) {
+    if (halfWidths[i] <= 0.000001) halfWidths[i] = lastKnown;
+    else lastKnown = halfWidths[i];
+  }
+  lastKnown = width * 0.5;
+  for (let i = binCount - 1; i >= 0; i--) {
+    if (halfWidths[i] <= 0.000001) halfWidths[i] = lastKnown;
+    else lastKnown = halfWidths[i];
+  }
+
+  for (let pass = 0; pass < smoothPasses; pass++) {
+    const next = halfWidths.slice();
+    for (let i = 1; i < binCount - 1; i++) {
+      next[i] = halfWidths[i - 1] * 0.25 + halfWidths[i] * 0.5 + halfWidths[i + 1] * 0.25;
+    }
+    for (let i = 0; i < binCount; i++) halfWidths[i] = Math.max(next[i], width * 0.08);
+  }
+
+  const sampleHalfWidth = (pathT) => {
+    const clamped = THREE.MathUtils.clamp(pathT, 0, 1);
+    const f = clamped * (binCount - 1);
+    const i0 = Math.floor(f);
+    const i1 = Math.min(binCount - 1, i0 + 1);
+    const t = f - i0;
+    return THREE.MathUtils.lerp(halfWidths[i0], halfWidths[i1], t);
+  };
+
+  meshes.forEach(mesh => {
+    mesh.updateWorldMatrix(true, false);
+    const localToModel = new THREE.Matrix4().multiplyMatrices(modelInverse, mesh.matrixWorld);
+    const pos = mesh.geometry.attributes.position;
+    const wrapUvValues = new Float32Array(pos.count * 2);
+    const finishUvValues = new Float32Array(pos.count * 2);
+    const modelPositionValues = new Float32Array(pos.count * 3);
+    const stripePathValues = new Float32Array(pos.count);
+
+    for (let i = 0; i < pos.count; i++) {
+      p.fromBufferAttribute(pos, i).applyMatrix4(localToModel);
+      const theta = Math.atan2((p.z - centerZ) / depth, (p.y - stripePivotY) / height);
+      const raw = 0.5 - theta / Math.PI;
+      const pathT = THREE.MathUtils.clamp(
+        (raw - stripeRawMin) / Math.max(0.000001, stripeRawMax - stripeRawMin),
+        0,
+        1
+      );
+      const halfWidthAtPath = Math.max(sampleHalfWidth(pathT), width * 0.05);
+      const normalizedX = THREE.MathUtils.clamp((p.x - centerX) / halfWidthAtPath, -1, 1);
+      const u = THREE.MathUtils.clamp(0.5 + normalizedX * (0.5 - edgeInset), 0, 1);
+      const v = rearAtTop ? pathT : 1 - pathT;
+
+      wrapUvValues[i * 2] = u;
+      wrapUvValues[i * 2 + 1] = v;
+      stripePathValues[i] = pathT;
+      modelPositionValues[i * 3] = p.x;
+      modelPositionValues[i * 3 + 1] = p.y;
+      modelPositionValues[i * 3 + 2] = p.z;
+      finishUvValues[i * 2] = THREE.MathUtils.clamp((p.x - minX) / width, 0, 1);
+      finishUvValues[i * 2 + 1] = THREE.MathUtils.clamp((p.z - minZ) / depth, 0, 1);
+    }
+
+    mesh.geometry.setAttribute('uv', new THREE.BufferAttribute(finishUvValues, 2));
+    mesh.geometry.setAttribute('uv2', new THREE.BufferAttribute(finishUvValues.slice(), 2));
+    mesh.geometry.setAttribute('helmetModelPosition', new THREE.BufferAttribute(modelPositionValues, 3));
+    mesh.geometry.setAttribute('helmetStripePath', new THREE.BufferAttribute(stripePathValues, 1));
+    mesh.geometry.setAttribute('helmetWrapUv', new THREE.BufferAttribute(wrapUvValues, 2));
+
+    mesh.geometry.attributes.uv.needsUpdate = true;
+    mesh.geometry.attributes.uv2.needsUpdate = true;
+    mesh.geometry.attributes.helmetModelPosition.needsUpdate = true;
+    mesh.geometry.attributes.helmetStripePath.needsUpdate = true;
+    mesh.geometry.attributes.helmetWrapUv.needsUpdate = true;
+  });
+
+  return {
+    minX,
+    maxX,
+    minZ,
+    maxZ,
+    width,
+    centerX,
+    centerZ,
+    maxY,
+    height,
+    depth,
+    stripePivotY,
+    stripeRawMin,
+    stripeRawMax,
+  };
+}
+
 function applyStripeProjectionAttributes(model, roots, projection, xCompression = 1) {
   if (!model || !roots?.length || !projection) return;
 
@@ -2542,7 +2721,8 @@ const BUILT_IN_WRAP_DESIGNS = {
     offsetX: 50,
     offsetY: -48,
     opacity: 1,
-    transparentBackground: true
+    transparentBackground: true,
+    projection: 'longitudinal'
   }
 };
 
@@ -3453,6 +3633,7 @@ export default function HelmetBuilder() {
   const [wrapOffsetY, setWrapOffsetY]       = useState(0);
   const [wrapOpacity, setWrapOpacity]       = useState(1);
   const [wrapTransparentBackground, setWrapTransparentBackground] = useState(false);
+  const [wrapProjectionMode, setWrapProjectionMode] = useState('panoramic');
   const [wrapRevision, setWrapRevision]     = useState(0);
 
   const [helmetStripesEnabled, setHelmetStripesEnabled] = useState(false);
@@ -3925,11 +4106,12 @@ export default function HelmetBuilder() {
     setWrapError('');
     setWrapEnabled(false);
     setWrapTransparentBackground(false);
+    setWrapProjectionMode('panoramic');
     resetWrapTransform();
     setWrapRevision(r => r + 1);
   }, [resetWrapTransform]);
 
-  const loadWrapFromSource = useCallback(({ src, fileName = 'helmet-wrap.png', scale = 1, scaleX = 1, scaleY = 1, rotation = 0, offsetX = 0, offsetY = 0, opacity = 1, transparentBackground = false }) => {
+  const loadWrapFromSource = useCallback(({ src, fileName = 'helmet-wrap.png', scale = 1, scaleX = 1, scaleY = 1, rotation = 0, offsetX = 0, offsetY = 0, opacity = 1, transparentBackground = false, projection = 'panoramic' }) => {
     if (!src) return;
 
     const img = new Image();
@@ -3952,6 +4134,7 @@ export default function HelmetBuilder() {
       setWrapOffsetY(offsetY);
       setWrapOpacity(opacity);
       setWrapTransparentBackground(!!transparentBackground);
+      setWrapProjectionMode(projection || 'panoramic');
       setWrapRevision(r => r + 1);
     };
     img.onerror = () => {
@@ -3989,6 +4172,7 @@ export default function HelmetBuilder() {
       setWrapError('');
       setWrapEnabled(true);
       setWrapTransparentBackground(false);
+      setWrapProjectionMode('panoramic');
       resetWrapTransform();
       setWrapRevision(r => r + 1);
     };
@@ -5241,6 +5425,25 @@ export default function HelmetBuilder() {
     uniforms.wrapMap.value = texture;
     uniforms.wrapEnabled.value = 1;
   }, [loaded, colors.shell, wrapEnabled, wrapRevision, wrapScale, wrapScaleX, wrapScaleY, wrapRotation, wrapOffsetX, wrapOffsetY, wrapOpacity, wrapTransparentBackground]);
+
+  useEffect(() => {
+    if (!loaded || !modelRef.current) return;
+
+    const model = modelRef.current;
+    const shellRoots = partObjectsRef.current[partKey('Shell')] || [];
+    const wrapRoots = decalSurfaceObjectsRef.current.length
+      ? decalSurfaceObjectsRef.current
+      : shellRoots;
+    if (!wrapRoots.length) return;
+
+    const projection = wrapProjectionMode === 'longitudinal'
+      ? applyLongitudinalShellWrapUV(model, wrapRoots, { rearAtTop: true })
+      : applyPanoramicShellWrapUV(model, wrapRoots);
+
+    if (projection?.centerX != null) {
+      shellWrapUniformsRef.current.centerX.value = projection.centerX;
+    }
+  }, [loaded, wrapProjectionMode]);
 
 
   // ── STRIPE DESIGN TEXTURE ───────────────────────────────────────────────────
