@@ -2759,10 +2759,7 @@ const BUILT_IN_WRAP_DESIGNS = {
     scaleY: 0.60,
     rotation: 0,
     offsetX: 0,
-    // Decal Surface authored landmark: CROWN = U 0.500746, V 0.581651.
-    // Canvas coordinates are top-left origin, so the crown sits at Y 41.8349%.
-    // Moving the artwork center from 50% to 41.8349% places the SVG center on crown.
-    offsetY: -8.1651,
+    offsetY: 30,
     opacity: 1,
     transparentBackground: true,
     flipY: true,
@@ -5480,14 +5477,18 @@ export default function HelmetBuilder() {
     const baseX = w / 2 + (wrapOffsetX / 100) * w;
     const baseY = h / 2 + (wrapOffsetY / 100) * h;
 
-    [-w, 0, w].forEach(loopX => {
-      ctx.save();
-      ctx.translate(baseX + loopX, baseY);
-      ctx.rotate((wrapRotation * Math.PI) / 180);
-      if (wrapFlipY) ctx.scale(1, -1);
-      ctx.globalAlpha = wrapOpacity;
-      ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
-      ctx.restore();
+    // Tile in both directions so front/back motion behaves like rotating around
+    // the helmet center instead of letting the artwork fall off the UV canvas.
+    [-h, 0, h].forEach(loopY => {
+      [-w, 0, w].forEach(loopX => {
+        ctx.save();
+        ctx.translate(baseX + loopX, baseY + loopY);
+        ctx.rotate((wrapRotation * Math.PI) / 180);
+        if (wrapFlipY) ctx.scale(1, -1);
+        ctx.globalAlpha = wrapOpacity;
+        ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
+        ctx.restore();
+      });
     });
 
     let texture = wrapTextureRef.current;
@@ -5496,7 +5497,7 @@ export default function HelmetBuilder() {
       texture.colorSpace = THREE.SRGBColorSpace;
       texture.flipY = false;
       texture.wrapS = THREE.RepeatWrapping;
-      texture.wrapT = THREE.ClampToEdgeWrapping;
+      texture.wrapT = THREE.RepeatWrapping; // allow front/back wrap-around during positioning
       texture.magFilter = THREE.LinearFilter;
       texture.minFilter = THREE.LinearMipmapLinearFilter;
       texture.generateMipmaps = true;
@@ -8158,13 +8159,13 @@ export default function HelmetBuilder() {
                     {/* User-facing panoramic placement guide. The canvas is intentionally
                         simple: center = front, both outer edges = the single back seam. */}
                     <div style={{ position:'relative', width:'100%', aspectRatio:'2 / 1', overflow:'hidden', borderRadius:8, border:'1px solid rgba(255,255,255,0.12)', background:colors.shell }}>
-                      {[-100,0,100].map(loop => (
+                      {[-100,0,100].flatMap(loopX => [-100,0,100].map(loopY => ({ loopX, loopY }))).map(({ loopX, loopY }) => (
                         <img
-                          key={loop}
+                          key={`${loopX}-${loopY}`}
                           src={wrapPreviewUrl}
-                          alt={loop === 0 ? 'Uploaded helmet wrap preview' : ''}
-                          aria-hidden={loop !== 0}
-                          style={{ position:'absolute', width:'100%', height:'100%', objectFit:'cover', left:`calc(50% + ${wrapOffsetX + loop}%)`, top:`calc(50% + ${wrapOffsetY}%)`, transform:`translate(-50%,-50%) rotate(${wrapRotation}deg) scale(${wrapScale * wrapScaleX}, ${(wrapFlipY ? -1 : 1) * wrapScale * wrapScaleY})`, transformOrigin:'center', opacity:wrapEnabled?wrapOpacity:0.2, filter:wrapEnabled?'none':'grayscale(1)', pointerEvents:'none', userSelect:'none' }}
+                          alt={loopX === 0 && loopY === 0 ? 'Uploaded helmet wrap preview' : ''}
+                          aria-hidden={!(loopX === 0 && loopY === 0)}
+                          style={{ position:'absolute', width:'100%', height:'100%', objectFit:'cover', left:`calc(50% + ${wrapOffsetX + loopX}%)`, top:`calc(50% + ${wrapOffsetY + loopY}%)`, transform:`translate(-50%,-50%) rotate(${wrapRotation}deg) scale(${wrapScale * wrapScaleX}, ${(wrapFlipY ? -1 : 1) * wrapScale * wrapScaleY})`, transformOrigin:'center', opacity:wrapEnabled?wrapOpacity:0.2, filter:wrapEnabled?'none':'grayscale(1)', pointerEvents:'none', userSelect:'none' }}
                         />
                       ))}
 
@@ -8179,11 +8180,11 @@ export default function HelmetBuilder() {
                       <div style={{ position:'absolute', top:5, right:5, background:'rgba(0,0,0,0.66)', borderRadius:4, padding:'2px 5px', color:'#d1d5db', fontSize:7, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.05em', pointerEvents:'none' }}>BACK SEAM</div>
                       <div style={{ position:'absolute', top:'50%', left:5, transform:'translateY(-50%)', background:'rgba(0,0,0,0.52)', borderRadius:4, padding:'2px 5px', color:'#d1d5db', fontSize:7, fontFamily:"'Barlow Condensed',sans-serif", pointerEvents:'none' }}>← wraps around shell</div>
                       <div style={{ position:'absolute', top:'50%', right:5, transform:'translateY(-50%)', background:'rgba(0,0,0,0.52)', borderRadius:4, padding:'2px 5px', color:'#d1d5db', fontSize:7, fontFamily:"'Barlow Condensed',sans-serif", pointerEvents:'none' }}>wraps around shell →</div>
-                      <div style={{ position:'absolute', left:'50%', bottom:5, transform:'translateX(-50%)', background:'rgba(0,0,0,0.62)', borderRadius:4, padding:'2px 5px', color:'#d1d5db', fontSize:7, fontFamily:"'Barlow Condensed',sans-serif", pointerEvents:'none', whiteSpace:'nowrap' }}>TOP = CROWN · BOTTOM = LOWER SHELL</div>
+                      <div style={{ position:'absolute', left:'50%', bottom:5, transform:'translateX(-50%)', background:'rgba(0,0,0,0.62)', borderRadius:4, padding:'2px 5px', color:'#d1d5db', fontSize:7, fontFamily:"'Barlow Condensed',sans-serif", pointerEvents:'none', whiteSpace:'nowrap' }}>TOP = FRONT · BOTTOM = BACK</div>
                     </div>
 
                     <div style={{ marginTop:7, fontSize:8, color:'#4b5563', lineHeight:1.45 }}>
-                      Tip: artwork whose left and right edges match will be completely seamless at the back. Use “Around Helmet” to choose where the design sits around the shell.
+                      Tip: artwork whose left and right edges match will be completely seamless at the back. Use “Around Helmet” to move left/right around the shell and “Front / Back” to rotate the art toward the front or rear.
                     </div>
 
                     <div style={{ marginTop:11 }}>
@@ -8192,24 +8193,16 @@ export default function HelmetBuilder() {
                         <input type="range" min="25" max="300" value={Math.round(wrapScale*100)} onChange={e => setWrapScale(parseInt(e.target.value)/100)} style={{ flex:1, minWidth:0 }} />
                       </div>
                       <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:8 }}>
-                        <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Scale X</span>
-                        <input type="range" min="25" max="250" value={Math.round(wrapScaleX*100)} onChange={e => setWrapScaleX(parseInt(e.target.value)/100)} style={{ flex:1, minWidth:0 }} />
-                      </div>
-                      <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:8 }}>
-                        <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Scale Y</span>
-                        <input type="range" min="25" max="250" value={Math.round(wrapScaleY*100)} onChange={e => setWrapScaleY(parseInt(e.target.value)/100)} style={{ flex:1, minWidth:0 }} />
-                      </div>
-                      <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:8 }}>
                         <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Rotate</span>
                         <input type="range" min="-180" max="180" value={wrapRotation} onChange={e => setWrapRotation(parseInt(e.target.value))} style={{ flex:1, minWidth:0 }} />
                       </div>
                       <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:8 }}>
                         <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Around Helmet</span>
-                        <input type="range" min="-100" max="100" value={wrapOffsetX} onChange={e => setWrapOffsetX(parseInt(e.target.value))} style={{ flex:1, minWidth:0 }} />
+                        <input type="range" min="-50" max="50" value={wrapOffsetX} onChange={e => setWrapOffsetX(parseInt(e.target.value))} style={{ flex:1, minWidth:0 }} />
                       </div>
                       <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:8 }}>
-                        <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Up / Down</span>
-                        <input type="range" min="-100" max="100" value={wrapOffsetY} onChange={e => setWrapOffsetY(parseInt(e.target.value))} style={{ flex:1, minWidth:0 }} />
+                        <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Front / Back</span>
+                        <input type="range" min="-50" max="50" value={wrapOffsetY} onChange={e => setWrapOffsetY(parseInt(e.target.value))} style={{ flex:1, minWidth:0 }} />
                       </div>
                       <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
                         <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Opacity</span>
