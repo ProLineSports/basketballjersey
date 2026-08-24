@@ -2759,7 +2759,10 @@ const BUILT_IN_WRAP_DESIGNS = {
     scaleY: 0.60,
     rotation: 0,
     offsetX: 0,
-    offsetY: 30,
+    // Decal Surface authored landmark: CROWN = U 0.500746, V 0.581651.
+    // Canvas coordinates are top-left origin, so the crown sits at Y 41.8349%.
+    // Moving the artwork center from 50% to 41.8349% places the SVG center on crown.
+    offsetY: -8.1651,
     opacity: 1,
     transparentBackground: true,
     flipY: true,
