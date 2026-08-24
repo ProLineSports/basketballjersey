@@ -2759,7 +2759,7 @@ const BUILT_IN_WRAP_DESIGNS = {
     scaleY: 0.60,
     rotation: 0,
     offsetX: 0,
-    offsetY: 8,
+    offsetY: 30,
     opacity: 1,
     transparentBackground: true,
     flipY: true,
