@@ -558,6 +558,21 @@ function applyAuthoredWrapUV(roots) {
   return {};
 }
 
+
+function applySavedPanoramicWrapUV(roots) {
+  if (!roots?.length) return null;
+  roots.forEach(root => {
+    root.traverse(obj => {
+      if (!obj.isMesh || !obj.geometry) return;
+      const panoramic = obj.geometry.getAttribute('helmetPanoramicWrapUv');
+      if (!panoramic) return;
+      obj.geometry.setAttribute('helmetWrapUv', panoramic.clone());
+      obj.geometry.attributes.helmetWrapUv.needsUpdate = true;
+    });
+  });
+  return {};
+}
+
 function applyStripeProjectionAttributes(model, roots, projection, xCompression = 1) {
   if (!model || !roots?.length || !projection) return;
 
@@ -866,6 +881,12 @@ function createWorldSpaceDecalOverlays(scene, roots, decalUniforms, options = {}
 
       let geometry = source.geometry.clone();
       if (subdivisionLevels > 0) geometry = subdivideGeometryWithAttributes(geometry, subdivisionLevels);
+      // The visible wrap is rendered from this cloned/subdivided carrier, not from the
+      // hidden source mesh. Save its panoramic UVs here so authored UV presets can swap
+      // the rendered carrier to the original GLB UVs and later restore normal wrapping.
+      if (geometry.getAttribute('helmetWrapUv') && !geometry.getAttribute('helmetPanoramicWrapUv')) {
+        geometry.setAttribute('helmetPanoramicWrapUv', geometry.getAttribute('helmetWrapUv').clone());
+      }
       if (normalLift) offsetGeometryAlongNormals(geometry, normalLift);
       const material = new THREE.MeshPhysicalMaterial({
         color: 0xffffff,
@@ -5518,12 +5539,20 @@ export default function HelmetBuilder() {
     if (!wrapRoots.length) return;
 
     let projection = null;
+    const renderedWrapRoots = decalOverlayMeshesRef.current || [];
     if (wrapProjectionMode === 'longitudinal') {
       projection = applyLongitudinalShellWrapUV(model, wrapRoots, { rearAtTop: true });
+      // Longitudinal is legacy/experimental; rendered overlays retain their saved
+      // panoramic coordinates unless explicitly rebuilt.
     } else if (wrapProjectionMode === 'authored') {
+      // IMPORTANT: the visible decal carrier is a cloned/subdivided mesh. Updating only
+      // the hidden Decal Surface leaves the rendered overlay on the generated panoramic
+      // UVs (the crown pinch we kept seeing). Swap BOTH to the GLB-authored UV channel.
       projection = applyAuthoredWrapUV(wrapRoots);
+      applyAuthoredWrapUV(renderedWrapRoots);
     } else {
       projection = applyPanoramicShellWrapUV(model, wrapRoots);
+      applySavedPanoramicWrapUV(renderedWrapRoots);
     }
 
     if (projection?.centerX != null) {
