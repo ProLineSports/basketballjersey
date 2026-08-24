@@ -2866,8 +2866,8 @@ const BUILT_IN_STRIPE_DESIGNS = {
     // Top of source art is the helmet front. Seattle gets a wider custom-stripe canvas
     // but still uses the normal stripe decal carrier, finish controls, and bumper masking.
     canvasAspect: 0.727051,
-    stripeWidth: 6.5,
-    stripeLength: 1.0,
+    stripeWidth: 4.55,
+    stripeLength: 0.67,
     rotation: 0,
     offsetX: 0,
     offsetY: 0,
