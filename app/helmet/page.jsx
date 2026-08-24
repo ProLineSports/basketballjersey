@@ -8192,16 +8192,24 @@ export default function HelmetBuilder() {
                         <input type="range" min="25" max="300" value={Math.round(wrapScale*100)} onChange={e => setWrapScale(parseInt(e.target.value)/100)} style={{ flex:1, minWidth:0 }} />
                       </div>
                       <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:8 }}>
+                        <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Scale X</span>
+                        <input type="range" min="25" max="250" value={Math.round(wrapScaleX*100)} onChange={e => setWrapScaleX(parseInt(e.target.value)/100)} style={{ flex:1, minWidth:0 }} />
+                      </div>
+                      <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:8 }}>
+                        <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Scale Y</span>
+                        <input type="range" min="25" max="250" value={Math.round(wrapScaleY*100)} onChange={e => setWrapScaleY(parseInt(e.target.value)/100)} style={{ flex:1, minWidth:0 }} />
+                      </div>
+                      <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:8 }}>
                         <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Rotate</span>
                         <input type="range" min="-180" max="180" value={wrapRotation} onChange={e => setWrapRotation(parseInt(e.target.value))} style={{ flex:1, minWidth:0 }} />
                       </div>
                       <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:8 }}>
                         <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Around Helmet</span>
-                        <input type="range" min="-50" max="50" value={wrapOffsetX} onChange={e => setWrapOffsetX(parseInt(e.target.value))} style={{ flex:1, minWidth:0 }} />
+                        <input type="range" min="-100" max="100" value={wrapOffsetX} onChange={e => setWrapOffsetX(parseInt(e.target.value))} style={{ flex:1, minWidth:0 }} />
                       </div>
                       <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:8 }}>
                         <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Up / Down</span>
-                        <input type="range" min="-50" max="50" value={wrapOffsetY} onChange={e => setWrapOffsetY(parseInt(e.target.value))} style={{ flex:1, minWidth:0 }} />
+                        <input type="range" min="-100" max="100" value={wrapOffsetY} onChange={e => setWrapOffsetY(parseInt(e.target.value))} style={{ flex:1, minWidth:0 }} />
                       </div>
                       <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
                         <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Opacity</span>
