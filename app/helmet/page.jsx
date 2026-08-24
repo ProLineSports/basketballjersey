@@ -2864,7 +2864,7 @@ const BUILT_IN_STRIPE_DESIGNS = {
     stripeLength: 1.0,
     rotation: 0,
     offsetX: 0,
-    offsetY: 20,
+    offsetY: -20,
     opacity: 1
   }
 };
