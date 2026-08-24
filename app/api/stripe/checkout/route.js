@@ -82,6 +82,41 @@ export async function POST(req) {
 
     let customerId = user?.stripe_customer_id || null;
 
+    const isUsableStripeCustomer = async (id) => {
+      if (!id) return false;
+
+      try {
+        const customer = await stripe.customers.retrieve(id);
+        return !(customer && customer.deleted);
+      } catch (err) {
+        // A stale/deleted Stripe customer should self-heal instead of blocking
+        // a repeat credit purchase.
+        if (
+          err?.code === 'resource_missing' ||
+          err?.raw?.code === 'resource_missing' ||
+          err?.statusCode === 404
+        ) {
+          return false;
+        }
+        throw err;
+      }
+    };
+
+    // A previous checkout can leave Supabase pointing at a Stripe customer that
+    // has since been deleted. Validate the stored ID before reusing it.
+    if (customerId && !(await isUsableStripeCustomer(customerId))) {
+      const staleCustomerId = customerId;
+
+      const { error: clearError } = await supabaseAdmin
+        .from('users')
+        .update({ stripe_customer_id: null })
+        .eq('id', userId)
+        .eq('stripe_customer_id', staleCustomerId);
+
+      if (clearError) throw clearError;
+      customerId = null;
+    }
+
     if (!customerId) {
       const customer = await stripe.customers.create({
         ...(identity.email ? { email: identity.email } : {}),
@@ -89,8 +124,7 @@ export async function POST(req) {
         metadata: { clerk_user_id: userId },
       });
 
-      // Claim the newly created customer only if another simultaneous request
-      // has not already done so.
+      // Claim the customer if the row is still unassigned.
       const { data: claimed, error: claimError } = await supabaseAdmin
         .from('users')
         .update({ stripe_customer_id: customer.id })
@@ -99,32 +133,41 @@ export async function POST(req) {
         .select('stripe_customer_id')
         .maybeSingle();
 
-      if (claimError) {
-        try {
-          await stripe.customers.del(customer.id);
-        } catch {}
-        throw claimError;
-      }
+      if (claimError) throw claimError;
 
       if (claimed?.stripe_customer_id) {
         customerId = claimed.stripe_customer_id;
       } else {
+        // Another simultaneous checkout may have assigned a customer first.
+        // Reuse it if valid. Do NOT delete either customer here: leaving a rare
+        // duplicate is much safer than deleting one that another request or
+        // completed Checkout Session may already reference.
         const { data: current, error: currentError } = await supabaseAdmin
           .from('users')
           .select('stripe_customer_id')
           .eq('id', userId)
           .single();
 
-        if (currentError || !current?.stripe_customer_id) {
-          throw currentError || new Error('Could not resolve Stripe customer');
+        if (currentError) throw currentError;
+
+        if (
+          current?.stripe_customer_id &&
+          await isUsableStripeCustomer(current.stripe_customer_id)
+        ) {
+          customerId = current.stripe_customer_id;
+        } else {
+          // The competing value was also stale. Repair it with the valid
+          // customer we just created.
+          const { data: repaired, error: repairError } = await supabaseAdmin
+            .from('users')
+            .update({ stripe_customer_id: customer.id })
+            .eq('id', userId)
+            .select('stripe_customer_id')
+            .single();
+
+          if (repairError) throw repairError;
+          customerId = repaired?.stripe_customer_id || customer.id;
         }
-
-        customerId = current.stripe_customer_id;
-
-        // Best-effort cleanup of the unused duplicate customer.
-        try {
-          await stripe.customers.del(customer.id);
-        } catch {}
       }
     }
 
