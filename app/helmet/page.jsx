@@ -5056,10 +5056,22 @@ export default function HelmetBuilder() {
         ? decalSurfaceObjectsRef.current
         : shellRoots;
       shellWrapUniformsRef.current.centerX.value = carrierProjection?.centerX ?? shellProjection?.centerX ?? 0;
-      const decalOverlays = createShellDecalOverlays(
-        wrapOverlayRoots,
-        shellWrapUniformsRef.current
-      );
+      const decalOverlays = decalSurfaceObjectsRef.current.length
+        ? createWorldSpaceDecalOverlays(
+            scene,
+            decalSurfaceObjectsRef.current,
+            shellWrapUniformsRef.current,
+            {
+              normalLift: 0.00032,
+              renderOrder: 27,
+              namePrefix: 'HelmetWrapCarrier',
+              subdivisionLevels: 1,
+            }
+          )
+        : createShellDecalOverlays(
+            wrapOverlayRoots,
+            shellWrapUniformsRef.current
+          );
       decalOverlayMeshesRef.current = decalOverlays.overlays;
       decalOverlayMaterialsRef.current = decalOverlays.materials;
 
@@ -5418,11 +5430,15 @@ export default function HelmetBuilder() {
 
     const img = wrapImageRef.current;
     let canvas = wrapCanvasRef.current;
+    const targetWrapWidth = 4096;
+    const targetWrapHeight = 2048;
     if (!canvas) {
       canvas = document.createElement('canvas');
-      canvas.width = 2048;
-      canvas.height = 1024;
       wrapCanvasRef.current = canvas;
+    }
+    if (canvas.width !== targetWrapWidth || canvas.height !== targetWrapHeight) {
+      canvas.width = targetWrapWidth;
+      canvas.height = targetWrapHeight;
     }
 
     const ctx = canvas.getContext('2d');
@@ -5459,6 +5475,13 @@ export default function HelmetBuilder() {
       texture.flipY = false;
       texture.wrapS = THREE.RepeatWrapping;
       texture.wrapT = THREE.ClampToEdgeWrapping;
+      texture.magFilter = THREE.LinearFilter;
+      texture.minFilter = THREE.LinearMipmapLinearFilter;
+      texture.generateMipmaps = true;
+      texture.anisotropy = Math.min(
+        16,
+        rendererRef.current?.capabilities?.getMaxAnisotropy?.() || 8
+      );
       wrapTextureRef.current = texture;
     }
     texture.needsUpdate = true;
