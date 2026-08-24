@@ -9238,8 +9238,23 @@ export default function HelmetBuilder() {
               try {
                 const r = await fetch('/api/stripe/checkout', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ priceId, returnPath:'/helmet' }) });
                 const d = await r.json();
-                if (d.url) window.location.href = d.url;
-                else console.error('No URL in response:', d);
+                if (!r.ok) throw new Error(d?.error || 'Unable to start checkout');
+                if (d.url) {
+                  // The Builder is commonly embedded inside the ProLine Online Builder page.
+                  // Navigate the TOP browser window so Stripe Checkout does not try to load
+                  // inside the Builder iframe, where it can remain stuck on its skeleton UI.
+                  try {
+                    if (window.top && window.top !== window.self) {
+                      window.top.location.href = d.url;
+                    } else {
+                      window.location.href = d.url;
+                    }
+                  } catch {
+                    window.location.href = d.url;
+                  }
+                } else {
+                  throw new Error('No checkout URL returned');
+                }
               } catch(err) {
                 console.error('Checkout error:', err);
               } finally {
