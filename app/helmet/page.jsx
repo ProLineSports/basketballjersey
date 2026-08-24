@@ -2758,7 +2758,7 @@ const BUILT_IN_WRAP_DESIGNS = {
     scaleY: 0.60,
     rotation: 180,
     offsetX: 0,
-    offsetY: 8,
+    offsetY: 40,
     opacity: 1,
     transparentBackground: true,
     projection: 'authored'
