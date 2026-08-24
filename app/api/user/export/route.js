@@ -1,6 +1,7 @@
 // app/api/user/export/route.js
 import { auth } from '@clerk/nextjs/server';
 import { createClient } from '@supabase/supabase-js';
+import { ensureBuilderUser } from '@/lib/builder-user';
 
 function getAdminClient() {
   if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
@@ -24,17 +25,14 @@ export async function POST() {
     const supabaseAdmin = getAdminClient();
 
     // Make this endpoint safe even if it is the first authenticated API request
-    // a brand-new account makes.
-    const { error: ensureUserError } = await supabaseAdmin.rpc(
-      'get_or_create_builder_user',
-      { p_user_id: userId }
-    );
-
-    if (ensureUserError) {
-      console.error('Export user init RPC error:', {
+    // a brand-new account makes, and synchronize Clerk identity details.
+    try {
+      await ensureBuilderUser(supabaseAdmin, userId);
+    } catch (ensureUserError) {
+      console.error('Export user init error:', {
         userId,
-        code: ensureUserError.code,
-        message: ensureUserError.message,
+        code: ensureUserError?.code,
+        message: ensureUserError?.message,
       });
       return Response.json({ error: 'Failed to initialize account' }, { status: 500 });
     }

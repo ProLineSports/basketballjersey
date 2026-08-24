@@ -2,6 +2,7 @@
 import { auth } from '@clerk/nextjs/server';
 import { createClient } from '@supabase/supabase-js';
 import Stripe from 'stripe';
+import { ensureBuilderUser } from '@/lib/builder-user';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 const ALLOWED_RETURN_PATHS = new Set(['/helmet', '/jersey']);
@@ -30,6 +31,9 @@ export async function POST(req) {
     if (!appUrl) throw new Error('Missing NEXT_PUBLIC_APP_URL');
 
     const supabaseAdmin = getAdminClient();
+
+    // Keep customer identity current even when Billing is the first authenticated action.
+    await ensureBuilderUser(supabaseAdmin, userId);
 
     const { data: user, error: userError } = await supabaseAdmin
       .from('users')

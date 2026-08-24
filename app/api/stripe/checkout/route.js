@@ -2,6 +2,7 @@
 import { auth } from '@clerk/nextjs/server';
 import { createClient } from '@supabase/supabase-js';
 import Stripe from 'stripe';
+import { ensureBuilderUser } from '@/lib/builder-user';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 const ALLOWED_RETURN_PATHS = new Set(['/helmet', '/jersey']);
@@ -53,12 +54,9 @@ export async function POST(req) {
 
     const supabaseAdmin = getAdminClient();
 
-    // Creates the Builder user safely if checkout is the first authenticated action.
-    const { error: ensureUserError } = await supabaseAdmin.rpc(
-      'get_or_create_builder_user',
-      { p_user_id: userId }
-    );
-    if (ensureUserError) throw ensureUserError;
+    // Creates the Builder user safely if checkout is the first authenticated action
+    // and keeps the Supabase customer identity synchronized with Clerk.
+    const { identity } = await ensureBuilderUser(supabaseAdmin, userId);
 
     const { data: user, error: userError } = await supabaseAdmin
       .from('users')
@@ -86,6 +84,8 @@ export async function POST(req) {
 
     if (!customerId) {
       const customer = await stripe.customers.create({
+        ...(identity.email ? { email: identity.email } : {}),
+        ...(identity.name ? { name: identity.name } : {}),
         metadata: { clerk_user_id: userId },
       });
 
@@ -125,6 +125,22 @@ export async function POST(req) {
         try {
           await stripe.customers.del(customer.id);
         } catch {}
+      }
+    }
+
+    if (customerId && (identity.email || identity.name)) {
+      try {
+        await stripe.customers.update(customerId, {
+          ...(identity.email ? { email: identity.email } : {}),
+          ...(identity.name ? { name: identity.name } : {}),
+        });
+      } catch (err) {
+        // Customer identity sync should never block checkout.
+        console.warn('Stripe customer identity sync failed:', {
+          userId,
+          customerId,
+          message: err?.message,
+        });
       }
     }
 

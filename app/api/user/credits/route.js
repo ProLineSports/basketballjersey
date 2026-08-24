@@ -1,6 +1,7 @@
 // app/api/user/credits/route.js
 import { auth } from '@clerk/nextjs/server';
 import { createClient } from '@supabase/supabase-js';
+import { ensureBuilderUser } from '@/lib/builder-user';
 
 function getAdminClient() {
   if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
@@ -23,22 +24,20 @@ export async function GET() {
 
     const supabaseAdmin = getAdminClient();
 
-    // Creates the Builder row + 3 welcome credits exactly once.
+    // Creates the Builder row + 3 welcome credits exactly once, then copies
+    // the authenticated Clerk name/email into the Supabase customer row.
     // Concurrent first loads cannot duplicate the welcome grant.
-    const { data, error } = await supabaseAdmin.rpc('get_or_create_builder_user', {
-      p_user_id: userId,
-    });
-
-    if (error) {
-      console.error('Credits RPC error:', {
+    let user;
+    try {
+      ({ user } = await ensureBuilderUser(supabaseAdmin, userId));
+    } catch (error) {
+      console.error('Credits user initialization error:', {
         userId,
-        code: error.code,
-        message: error.message,
+        code: error?.code,
+        message: error?.message,
       });
       return Response.json({ error: 'Database error' }, { status: 500 });
     }
-
-    const user = Array.isArray(data) ? data[0] : data;
     if (!user) {
       return Response.json({ error: 'User not found' }, { status: 404 });
     }
