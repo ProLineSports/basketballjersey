@@ -3819,14 +3819,14 @@ export default function HelmetBuilder() {
   const [sideLogoUndoCount, setSideLogoUndoCount] = useState(0);
 
   const [rearFlagEnabled, setRearFlagEnabled] = useState(false);
-  const [rearFlagScale, setRearFlagScale] = useState(1.00);
+  const [rearFlagScale, setRearFlagScale] = useState(5.00);
   const [rearFlagRotation, setRearFlagRotation] = useState(0);
   const [rearFlagAcross, setRearFlagAcross] = useState(-62);
   const [rearFlagVertical, setRearFlagVertical] = useState(-38);
 
   const [rearWarningEnabled, setRearWarningEnabled] = useState(false);
   const [rearWarningColor, setRearWarningColor] = useState('#FFFFFF');
-  const [rearWarningScale, setRearWarningScale] = useState(1.00);
+  const [rearWarningScale, setRearWarningScale] = useState(5.00);
   const [rearWarningRotation, setRearWarningRotation] = useState(0);
   const [rearWarningAcross, setRearWarningAcross] = useState(58);
   const [rearWarningVertical, setRearWarningVertical] = useState(-38);
@@ -8254,14 +8254,14 @@ export default function HelmetBuilder() {
     const warning = rear.warning || {};
     const custom = rear.custom || {};
     setRearFlagEnabled(!!flag.enabled);
-    setRearFlagScale(flag.scale ?? 1.0);
+    setRearFlagScale(flag.scale ?? 5.0);
     setRearFlagRotation(flag.rotation ?? 0);
     setRearFlagAcross(flag.across ?? -62);
     setRearFlagVertical(flag.vertical ?? -38);
     setRearFlagLocked(!!flag.locked);
     setRearWarningEnabled(!!warning.enabled);
     setRearWarningColor(warning.color || '#FFFFFF');
-    setRearWarningScale(warning.scale ?? 1.0);
+    setRearWarningScale(warning.scale ?? 5.0);
     setRearWarningRotation(warning.rotation ?? 0);
     setRearWarningAcross(warning.across ?? 58);
     setRearWarningVertical(warning.vertical ?? -38);
