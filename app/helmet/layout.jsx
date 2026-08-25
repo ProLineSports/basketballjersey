@@ -6,7 +6,7 @@ const MOBILE_QUERY =
   '(max-width: 900px), ((hover: none) and (pointer: coarse) and (max-width: 1180px))';
 
 const DESIGN_NOTICE_PATTERN =
-  /\b(?:design\s+(?:saved|loaded|renamed|duplicated|deleted)|(?:saved|loaded|renamed|duplicated|deleted)\s+(?:design|successfully)|saved\s+successfully|loaded\s+successfully)\b/i;
+  /(?:^|\b)(?:saved|loaded|renamed|duplicated|deleted)(?:\b|[\s"'“”])/i;
 
 const WATERMARK_TILE =
   'url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%27320%27 height=%27180%27 viewBox=%270 0 320 180%27%3E%3Cg transform=%27rotate(-28 160 90)%27 font-family=%27Arial,sans-serif%27 font-size=%2720%27 font-weight=%27700%27 letter-spacing=%272%27%3E%3Ctext x=%27-18%27 y=%2797%27 fill=%27%23ffffff%27 stroke=%27%23000000%27 stroke-width=%271.4%27 paint-order=%27stroke%27 opacity=%27.20%27%3EPROLINEMOCKUPS.COM%3C/text%3E%3C/g%3E%3C/svg%3E")';
@@ -339,64 +339,97 @@ export default function HelmetLayout({ children }) {
     };
   }, []);
 
-  // Saved-design success notices can still be dismissed manually, but if the user
-  // does nothing we automatically click their Close/X button after 3 seconds.
+  // Saved-design notices can still be dismissed manually, but if the user does
+  // nothing we automatically click their Close/X button after 3 seconds.
+  //
+  // The Builder's current toast does not expose role="alert"/role="status", so this
+  // scans close buttons as well as newly-added DOM nodes. That catches notices such
+  // as: Loaded "Cleveland Base".
   useEffect(() => {
     const scheduled = new WeakSet();
     const timers = new Set();
 
-    const scheduleIfNotice = (node) => {
-      if (!(node instanceof HTMLElement)) return;
+    const scheduleRoot = (root) => {
+      if (!(root instanceof HTMLElement)) return;
+      if (scheduled.has(root) || !isVisible(root)) return;
 
-      const candidates = [node];
+      const text = normalizeText(root.textContent);
+      if (!DESIGN_NOTICE_PATTERN.test(text)) return;
 
-      if (node.querySelectorAll) {
-        node
-          .querySelectorAll('[role="alert"],[role="status"]')
-          .forEach((element) => candidates.push(element));
-      }
+      const closeButton = findCloseButton(root);
+      if (!closeButton) return;
 
-      candidates.forEach((candidate) => {
-        const root = getLikelyNoticeRoot(candidate);
-        if (!root || scheduled.has(root) || !isVisible(root)) return;
+      scheduled.add(root);
 
-        const text = normalizeText(root.textContent);
-        if (!DESIGN_NOTICE_PATTERN.test(text)) return;
+      const timer = window.setTimeout(() => {
+        timers.delete(timer);
 
-        scheduled.add(root);
+        if (!document.body.contains(root)) return;
 
-        const timer = window.setTimeout(() => {
-          timers.delete(timer);
+        const latestCloseButton = findCloseButton(root);
+        if (latestCloseButton) latestCloseButton.click();
+      }, 3000);
 
-          if (!document.body.contains(root)) return;
+      timers.add(timer);
+    };
 
-          const closeButton = findCloseButton(root);
-          if (closeButton) {
-            closeButton.click();
-          }
-        }, 3000);
+    const inspectFrom = (element) => {
+      if (!(element instanceof HTMLElement)) return;
 
-        timers.add(timer);
+      const directRoot = getLikelyNoticeRoot(element);
+      if (directRoot) scheduleRoot(directRoot);
+
+      // Most importantly, find any close/X buttons inside the inserted subtree and
+      // walk upward from them to locate the compact toast container.
+      const buttons = [];
+      if (element.matches?.('button,[role="button"]')) buttons.push(element);
+      element
+        .querySelectorAll?.('button,[role="button"]')
+        .forEach((button) => buttons.push(button));
+
+      buttons.forEach((button) => {
+        const root = getLikelyNoticeRoot(button);
+        if (root) scheduleRoot(root);
       });
     };
 
-    document
-      .querySelectorAll('[role="alert"],[role="status"]')
-      .forEach(scheduleIfNotice);
+    const scanDocument = () => {
+      document
+        .querySelectorAll('button,[role="button"]')
+        .forEach((button) => {
+          const root = getLikelyNoticeRoot(button);
+          if (root) scheduleRoot(root);
+        });
+    };
+
+    scanDocument();
 
     const observer = new MutationObserver((mutations) => {
       mutations.forEach((mutation) => {
-        mutation.addedNodes.forEach((node) => scheduleIfNotice(node));
+        if (mutation.type === 'characterData') {
+          inspectFrom(mutation.target?.parentElement);
+          return;
+        }
+
+        mutation.addedNodes.forEach((node) => {
+          if (node instanceof HTMLElement) inspectFrom(node);
+        });
       });
     });
 
     observer.observe(document.body, {
       childList: true,
       subtree: true,
+      characterData: true,
     });
+
+    // Low-cost fallback for toast libraries that reuse an existing DOM node and only
+    // toggle CSS classes/text. It also guarantees an already-visible notice is caught.
+    const interval = window.setInterval(scanDocument, 500);
 
     return () => {
       observer.disconnect();
+      window.clearInterval(interval);
       timers.forEach((timer) => window.clearTimeout(timer));
       timers.clear();
     };
