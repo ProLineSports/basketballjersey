@@ -95,26 +95,12 @@ function installToastAutoDismiss() {
   const timers = new Set();
 
   const scan = () => {
-    const closeButtons = document.querySelectorAll(
-      'button[aria-label*="close" i], button[title*="close" i], button'
+    const dismissButtons = document.querySelectorAll(
+      'button[aria-label="Dismiss saved design message"]'
     );
 
-    for (const button of closeButtons) {
+    for (const button of dismissButtons) {
       if (scheduled.has(button)) continue;
-
-      const buttonText = (button.textContent || '').trim();
-      const labelledClose = /close/i.test(
-        `${button.getAttribute('aria-label') || ''} ${button.getAttribute('title') || ''}`
-      );
-      if (!labelledClose && !/^[x×✕✖]$/i.test(buttonText)) continue;
-
-      let toast = button.parentElement;
-      for (let depth = 0; toast && depth < 6; depth += 1, toast = toast.parentElement) {
-        const text = (toast.textContent || '').replace(/\s+/g, ' ').trim();
-        if (/\b(saved|loaded)\b/i.test(text) && text.length <= 500) break;
-      }
-
-      if (!toast || !/\b(saved|loaded)\b/i.test(toast.textContent || '')) continue;
 
       scheduled.add(button);
       const timer = window.setTimeout(() => {
