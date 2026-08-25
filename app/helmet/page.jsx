@@ -1273,6 +1273,13 @@ function warpCanvasArc(sourceCanvas, arcAmountPx = 0) {
 
 
 function installSideLogoSurfaceProjection(material, uniforms, cacheKey) {
+  // Median-plane clipping is only needed by left/right side logos. Rear decals
+  // and bumper artwork use this same shader without supplying those uniforms, so
+  // give them stable neutral values instead of placing `undefined` entries in
+  // Three.js's uniform upload table.
+  const medianOriginUniform = uniforms.medianOrigin || { value:new THREE.Vector3(0, 0, 0) };
+  const medianNormalUniform = uniforms.medianNormal || { value:new THREE.Vector3(1, 0, 0) };
+  const medianSideUniform = uniforms.medianSide || { value:0 };
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uSideLogoCenter = uniforms.center;
     shader.uniforms.uSideLogoRight = uniforms.right;
@@ -1282,9 +1289,9 @@ function installSideLogoSurfaceProjection(material, uniforms, cacheKey) {
     shader.uniforms.uSideLogoNormal = uniforms.normal;
     shader.uniforms.uSideLogoDepth = uniforms.depth;
     shader.uniforms.uSideLogoLift = uniforms.lift;
-    shader.uniforms.uSideLogoMedianOrigin = uniforms.medianOrigin;
-    shader.uniforms.uSideLogoMedianNormal = uniforms.medianNormal;
-    shader.uniforms.uSideLogoMedianSide = uniforms.medianSide;
+    shader.uniforms.uSideLogoMedianOrigin = medianOriginUniform;
+    shader.uniforms.uSideLogoMedianNormal = medianNormalUniform;
+    shader.uniforms.uSideLogoMedianSide = medianSideUniform;
 
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -1352,14 +1359,19 @@ diffuseColor.a *= sideLogoSample.a;
   material.needsUpdate = true;
 }
 
-function createCarrierSurfaceLogoMeshes(scene, sourceMeshes, material, side, layerName, renderOrder) {
+function createCarrierSurfaceLogoMeshes(scene, sourceMeshes, material, side, layerName, renderOrder, options = {}) {
+  const { shareGeometry = false } = options;
   const meshes = [];
   sourceMeshes.forEach((source, index) => {
-    const geometry = source.geometry.clone();
+    // Rear decals only need another draw of the carrier surface. Sharing its immutable
+    // BufferGeometry avoids uploading a complete helmet-sized vertex/index buffer for
+    // every decal layer (and doing it again on every placement slider update).
+    const geometry = shareGeometry ? source.geometry : source.geometry.clone();
     const overlay = new THREE.Mesh(geometry, material);
     overlay.name = `SideLogo_${side}_${layerName}_${index}`;
     overlay.userData.sideLogoSide = side;
     overlay.userData.sideLogoArtwork = true;
+    overlay.userData.sharedCarrierGeometry = shareGeometry;
     overlay.renderOrder = renderOrder;
     overlay.castShadow = false;
     overlay.receiveShadow = false;
@@ -3522,7 +3534,7 @@ export default function HelmetBuilder() {
   const rearCustomImageRef = useRef(null);
   const rearCustomObjectUrlRef = useRef(null);
 
-  // Direct-manipulation state shared by rear stickers + bumper logos.
+  // Direct-manipulation state shared by rear decals + bumper logos.
   // Placements live in refs while dragging so React state does not interrupt pointer capture.
   const editableDecalPlacementRef = useRef({
     'rear-flag':    { scale:2.70, rotation:0, across:-62, vertical:-38 },
@@ -3807,14 +3819,14 @@ export default function HelmetBuilder() {
   const [sideLogoUndoCount, setSideLogoUndoCount] = useState(0);
 
   const [rearFlagEnabled, setRearFlagEnabled] = useState(false);
-  const [rearFlagScale, setRearFlagScale] = useState(2.70);
+  const [rearFlagScale, setRearFlagScale] = useState(5.00);
   const [rearFlagRotation, setRearFlagRotation] = useState(0);
   const [rearFlagAcross, setRearFlagAcross] = useState(-62);
   const [rearFlagVertical, setRearFlagVertical] = useState(-38);
 
   const [rearWarningEnabled, setRearWarningEnabled] = useState(false);
   const [rearWarningColor, setRearWarningColor] = useState('#FFFFFF');
-  const [rearWarningScale, setRearWarningScale] = useState(2.70);
+  const [rearWarningScale, setRearWarningScale] = useState(5.00);
   const [rearWarningRotation, setRearWarningRotation] = useState(0);
   const [rearWarningAcross, setRearWarningAcross] = useState(58);
   const [rearWarningVertical, setRearWarningVertical] = useState(-38);
@@ -4482,7 +4494,7 @@ export default function HelmetBuilder() {
       };
       img.onerror = () => {
         if (!cancelled) {
-          console.warn(`[HelmetBuilder] Rear sticker preset failed to load: ${url}`);
+          console.warn(`[HelmetBuilder] Rear decal preset failed to load: ${url}`);
         }
       };
       img.src = url;
@@ -4501,7 +4513,7 @@ export default function HelmetBuilder() {
 
     const allowed = ['image/png', 'image/jpeg', 'image/webp'];
     if (!allowed.includes(file.type)) {
-      setRearStickerError('Please upload a PNG, JPEG, or WebP rear sticker.');
+      setRearStickerError('Please upload a PNG, JPEG, or WebP rear decal.');
       return;
     }
 
@@ -4526,7 +4538,7 @@ export default function HelmetBuilder() {
 
     img.onerror = () => {
       URL.revokeObjectURL(objectUrl);
-      setRearStickerError('That rear sticker could not be read. Please try another PNG, JPEG, or WebP.');
+      setRearStickerError('That rear decal could not be read. Please try another PNG, JPEG, or WebP.');
     };
 
     img.src = objectUrl;
@@ -6001,16 +6013,6 @@ export default function HelmetBuilder() {
       const frame = getSideFrame(side);
       if (!frame) return;
 
-      const nativeAspect = image.naturalWidth / Math.max(1, image.naturalHeight);
-      const projectionAspect = THREE.MathUtils.clamp(nativeAspect, 0.55, 2.6);
-      const maxTextureDimension = 1024;
-      const textureWidth = projectionAspect >= 1
-        ? maxTextureDimension
-        : Math.max(1, Math.round(maxTextureDimension * projectionAspect));
-      const textureHeight = projectionAspect >= 1
-        ? Math.max(1, Math.round(maxTextureDimension / projectionAspect))
-        : maxTextureDimension;
-
       const pack = createSideLogoTexturePack(image, {
         mirror: side === 'left' ? sideLogoLeftMirror : sideLogoRightMirror,
         rotate180: side === 'left' ? sideLogoLeftRotate180 : sideLogoRightRotate180,
@@ -6018,17 +6020,12 @@ export default function HelmetBuilder() {
         strokeColor: sideLogoStrokeColor,
         strokeThickness: sideLogoStrokeThickness,
         strokeOpacity: sideLogoStrokeOpacity,
-        // Match the side-logo texture canvas to the existing projection carrier.
-        // The source image remains intrinsically proportioned inside that canvas,
-        // so the final surface projection neither squashes nor stretches it.
-        textureWidth,
-        textureHeight,
       });
       if (!pack) return;
 
       const combinedScale = sideLogoScale * placement.scale;
       const baseHeight = boundsModel.height * 1.00 * combinedScale;
-      const baseWidth = baseHeight * THREE.MathUtils.clamp(pack.aspect, 0.55, 2.6);
+      const baseWidth = baseHeight;
 
       const { logoCenter, worldNormal, frameRight, frameUp, frameQuat } = frame;
 
@@ -6455,7 +6452,7 @@ export default function HelmetBuilder() {
     const model = modelRef.current;
     if (!loaded || !scene || !model) return;
 
-    // Rear stickers use the same filled baked Decal Surface as side logos/stripes.
+    // Rear decals use the same filled baked Decal Surface as side logos/stripes.
     // That carrier bridges vents/cutouts so artwork behaves like one continuous vinyl
     // sticker instead of being clipped by the visible shell topology.
     let shellRoots = decalSurfaceObjectsRef.current.length
@@ -6475,7 +6472,12 @@ export default function HelmetBuilder() {
     if (!shellMeshes.length || !boundsWorld || !boundsModel) return;
 
     const cleanup = () => {
-      rearStickerMeshesRef.current.forEach(mesh => { mesh.parent?.remove(mesh); mesh.geometry?.dispose?.(); });
+      rearStickerMeshesRef.current.forEach(mesh => {
+        mesh.parent?.remove(mesh);
+        // Shared carrier geometry belongs to the loaded model and must remain alive.
+        // Hit proxies and selection helpers still own and dispose their geometry.
+        if (!mesh.userData?.sharedCarrierGeometry) mesh.geometry?.dispose?.();
+      });
       rearStickerMaterialsRef.current.forEach(mat => { mat.userData?.ownedTexture?.dispose?.(); mat.dispose?.(); });
       ['rear-flag','rear-warning','rear-custom'].forEach(id => { delete editableDecalWorldFrameRef.current[id]; });
       rearStickerMeshesRef.current = [];
@@ -6504,13 +6506,18 @@ export default function HelmetBuilder() {
       );
 
       const hits = raycaster.intersectObjects(shellMeshes, false);
-      if (!hits.length) return null;
 
       const modelInverse = new THREE.Matrix4().copy(model.matrixWorld).invert();
-      return hits.find(hit => {
+      const rearHit = hits.find(hit => {
         const local = hit.point.clone().applyMatrix4(modelInverse);
         return local.z <= boundsModel.centerZ;
-      }) || null;
+      });
+      if (rearHit) return rearHit;
+
+      // A requested sticker center can land over a vent or the shell/bumper gap.
+      // The filled decal carrier still has enough nearby surface to draw on, so use
+      // the requested rear-plane point and the known rear normal as a stable center.
+      return { point:targetWorld, face:null, object:shellMeshes[0] };
     };
 
     const getPack = (slot, image) => {
@@ -6524,8 +6531,10 @@ export default function HelmetBuilder() {
 
         const pack = createSideLogoTexturePack(image, {
           strokeEnabled:false,
-          textureWidth:Math.min(3072, rendererRef.current?.capabilities?.maxTextureSize || 3072),
-          textureHeight:Math.min(1536, rendererRef.current?.capabilities?.maxTextureSize || 1536),
+          // Rear decals are small in the final frame. The former 3072x1536 pair
+          // consumed tens of MB per decal (more with mipmaps) without visible benefit.
+          textureWidth:Math.min(1024, rendererRef.current?.capabilities?.maxTextureSize || 1024),
+          textureHeight:Math.min(512, rendererRef.current?.capabilities?.maxTextureSize || 512),
         });
         cache = { key, pack };
         rearStickerPackCacheRef.current[slot] = cache;
@@ -6601,11 +6610,11 @@ export default function HelmetBuilder() {
         transparent:true,
         alphaTest:0.01,
         opacity:0.22,
-        // FrontSide prevents a rear sticker from ever showing through the opposite
-        // side of the helmet when we intentionally render it above shell hardware.
-        side:THREE.FrontSide,
+        // DoubleSide tolerates either winding on an exported carrier surface. The
+        // projection shader's normal-facing test prevents opposite-side bleed-through.
+        side:THREE.DoubleSide,
         depthWrite:false,
-        depthTest:false,
+        depthTest:true,
         roughness:0.95,
         metalness:0,
         polygonOffset:true,
@@ -6624,12 +6633,11 @@ export default function HelmetBuilder() {
         transparent:true,
         alphaTest:0.01,
         opacity:1,
-        side:THREE.FrontSide,
-        // Rear stickers are a top vinyl layer. Drawing after the shell hardware lets
-        // them cover screws exactly where the artwork overlaps, while FrontSide culling
-        // prevents the carrier from bleeding through the far side of the helmet.
+        side:THREE.DoubleSide,
+        // Rear decals are a top vinyl layer. The normal-facing projection test keeps
+        // the artwork on the rear even when the exported carrier winding is reversed.
         depthWrite:false,
-        depthTest:false,
+        depthTest:true,
         polygonOffset:true,
         polygonOffsetFactor:-2,
         polygonOffsetUnits:-2,
@@ -6650,7 +6658,8 @@ export default function HelmetBuilder() {
         shadowMat,
         `rear-${slot}`,
         'Shadow',
-        44
+        44,
+        { shareGeometry:true }
       );
       const mainMeshes = createCarrierSurfaceLogoMeshes(
         scene,
@@ -6658,7 +6667,8 @@ export default function HelmetBuilder() {
         mainMat,
         `rear-${slot}`,
         'Artwork',
-        45
+        45,
+        { shareGeometry:true }
       );
 
       shadowMeshes.forEach(mesh => {
@@ -8244,14 +8254,14 @@ export default function HelmetBuilder() {
     const warning = rear.warning || {};
     const custom = rear.custom || {};
     setRearFlagEnabled(!!flag.enabled);
-    setRearFlagScale(flag.scale ?? 2.7);
+    setRearFlagScale(flag.scale ?? 5.0);
     setRearFlagRotation(flag.rotation ?? 0);
     setRearFlagAcross(flag.across ?? -62);
     setRearFlagVertical(flag.vertical ?? -38);
     setRearFlagLocked(!!flag.locked);
     setRearWarningEnabled(!!warning.enabled);
     setRearWarningColor(warning.color || '#FFFFFF');
-    setRearWarningScale(warning.scale ?? 2.7);
+    setRearWarningScale(warning.scale ?? 5.0);
     setRearWarningRotation(warning.rotation ?? 0);
     setRearWarningAcross(warning.across ?? 58);
     setRearWarningVertical(warning.vertical ?? -38);
@@ -9504,7 +9514,7 @@ export default function HelmetBuilder() {
                 </div>
                 </CollapsibleSection>
 
-                <CollapsibleSection title="REAR STICKERS">
+                <CollapsibleSection title="REAR DECALS">
                   <div style={{ fontSize:10, color:'#6b7280', lineHeight:1.5, marginBottom:10 }}>
                     Add common rear-shell stickers or upload your own. Click a sticker on the helmet to select it, drag to move, use the corner handles to scale/rotate, then lock it when placed. Sliders remain available for precise adjustments.
                   </div>
@@ -9523,7 +9533,7 @@ export default function HelmetBuilder() {
                       <button onClick={() => setRearFlagLocked(v => !v)} style={{ background:rearFlagLocked?'rgba(239,255,0,0.10)':'rgba(255,255,255,0.04)', border:rearFlagLocked?'1px solid rgba(239,255,0,0.35)':'1px solid rgba(255,255,255,0.10)', borderRadius:5, padding:'5px 6px', cursor:'pointer', color:rearFlagLocked?'#efff00':'#9ca3af', fontSize:8, fontWeight:800 }}>{rearFlagLocked?'LOCKED':'UNLOCKED'}</button>
                     </div>
                     <div style={{ width:'100%', aspectRatio:'3 / 1', display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden', borderRadius:6, border:'1px solid rgba(255,255,255,0.08)', background:'#c8cdd4', marginBottom:8 }}>
-                      <img src={REAR_FLAG_URL} alt="US flag rear sticker" style={{ width:'100%', height:'100%', objectFit:'contain', opacity:rearFlagEnabled?1:0.4 }} />
+                      <img src={REAR_FLAG_URL} alt="US flag rear decal" style={{ width:'100%', height:'100%', objectFit:'contain', opacity:rearFlagEnabled?1:0.4 }} />
                     </div>
                     {[
                       ['Size', rearFlagScale, setRearFlagScale, 40, 500, v => v / 100, v => Math.round(v * 100)],
@@ -9578,10 +9588,10 @@ export default function HelmetBuilder() {
                   </div>
 
                   <div style={{ background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.05)', borderRadius:8, padding:9 }}>
-                    <div style={{ fontSize:9, fontWeight:800, color:'#9ca3af', letterSpacing:'0.07em', marginBottom:8 }}>CUSTOM REAR STICKER</div>
+                    <div style={{ fontSize:9, fontWeight:800, color:'#9ca3af', letterSpacing:'0.07em', marginBottom:8 }}>CUSTOM REAR DECAL</div>
                     <input id="rear-custom-sticker-upload" type="file" accept="image/png,image/jpeg,image/webp" onChange={handleRearCustomStickerUpload} style={{ display:'none' }} />
                     <label htmlFor="rear-custom-sticker-upload" style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:6, width:'100%', boxSizing:'border-box', background:'rgba(239,255,0,0.07)', border:'1px dashed rgba(239,255,0,0.30)', borderRadius:6, padding:'8px 9px', cursor:'pointer', color:'#efff00', fontSize:9, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.05em' }}>
-                      <span>＋</span>{rearCustomPreviewUrl ? 'REPLACE STICKER' : 'UPLOAD STICKER'}
+                      <span>＋</span>{rearCustomPreviewUrl ? 'REPLACE DECAL' : 'UPLOAD DECAL'}
                     </label>
 
                     {rearCustomPreviewUrl && (
@@ -9598,7 +9608,7 @@ export default function HelmetBuilder() {
                           <button onClick={() => setRearCustomLocked(v => !v)} style={{ background:rearCustomLocked?'rgba(239,255,0,0.10)':'rgba(255,255,255,0.04)', border:rearCustomLocked?'1px solid rgba(239,255,0,0.35)':'1px solid rgba(255,255,255,0.10)', borderRadius:5, padding:'5px 6px', cursor:'pointer', color:rearCustomLocked?'#efff00':'#9ca3af', fontSize:8, fontWeight:800 }}>{rearCustomLocked?'LOCKED':'UNLOCKED'}</button>
                         </div>
                         <div style={{ width:'100%', aspectRatio:'3 / 1', display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden', borderRadius:6, border:'1px solid rgba(255,255,255,0.08)', backgroundColor:'#c8cdd4', backgroundImage:'linear-gradient(45deg, rgba(255,255,255,0.95) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.95) 75%, rgba(255,255,255,0.95)), linear-gradient(45deg, rgba(255,255,255,0.95) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.95) 75%, rgba(255,255,255,0.95))', backgroundSize:'14px 14px', backgroundPosition:'0 0, 7px 7px', marginBottom:8 }}>
-                          <img src={rearCustomPreviewUrl} alt="Custom rear sticker preview" style={{ width:'100%', height:'100%', objectFit:'contain', opacity:rearCustomEnabled?1:0.4 }} />
+                          <img src={rearCustomPreviewUrl} alt="Custom rear decal preview" style={{ width:'100%', height:'100%', objectFit:'contain', opacity:rearCustomEnabled?1:0.4 }} />
                         </div>
                         {[
                           ['Size', rearCustomScale, setRearCustomScale, 40, 800, v => v / 100, v => Math.round(v * 100)],
@@ -10043,7 +10053,7 @@ export default function HelmetBuilder() {
 
             <div style={{ padding:'14px 20px 18px', overflowY:'auto' }}>
               <div style={{ marginBottom:12, padding:'9px 11px', borderRadius:8, background:'rgba(239,255,0,0.045)', border:'1px solid rgba(239,255,0,0.14)', color:'#9ca3af', fontSize:9, lineHeight:1.5 }}>
-                Uploaded wraps, stripe artwork, side logos, rear stickers, and bumper logos are saved privately with the design. Storage allowance: {savedDesignPlan === 'lifetime' ? '250 MB' : savedDesignPlan === 'unlimited' ? '100 MB' : savedDesignPlan === 'paid_credits' ? '25 MB' : '10 MB'}.
+                Uploaded wraps, stripe artwork, side logos, rear decals, and bumper logos are saved privately with the design. Storage allowance: {savedDesignPlan === 'lifetime' ? '250 MB' : savedDesignPlan === 'unlimited' ? '100 MB' : savedDesignPlan === 'paid_credits' ? '25 MB' : '10 MB'}.
               </div>
 
               {savedDesignError && (
