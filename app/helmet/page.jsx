@@ -1273,7 +1273,7 @@ function warpCanvasArc(sourceCanvas, arcAmountPx = 0) {
 
 
 function installSideLogoSurfaceProjection(material, uniforms, cacheKey) {
-  // Median-plane clipping is only needed by left/right side logos. Rear stickers
+  // Median-plane clipping is only needed by left/right side logos. Rear decals
   // and bumper artwork use this same shader without supplying those uniforms, so
   // give them stable neutral values instead of placing `undefined` entries in
   // Three.js's uniform upload table.
@@ -3534,7 +3534,7 @@ export default function HelmetBuilder() {
   const rearCustomImageRef = useRef(null);
   const rearCustomObjectUrlRef = useRef(null);
 
-  // Direct-manipulation state shared by rear stickers + bumper logos.
+  // Direct-manipulation state shared by rear decals + bumper logos.
   // Placements live in refs while dragging so React state does not interrupt pointer capture.
   const editableDecalPlacementRef = useRef({
     'rear-flag':    { scale:2.70, rotation:0, across:-62, vertical:-38 },
@@ -3819,14 +3819,14 @@ export default function HelmetBuilder() {
   const [sideLogoUndoCount, setSideLogoUndoCount] = useState(0);
 
   const [rearFlagEnabled, setRearFlagEnabled] = useState(false);
-  const [rearFlagScale, setRearFlagScale] = useState(2.70);
+  const [rearFlagScale, setRearFlagScale] = useState(1.00);
   const [rearFlagRotation, setRearFlagRotation] = useState(0);
   const [rearFlagAcross, setRearFlagAcross] = useState(-62);
   const [rearFlagVertical, setRearFlagVertical] = useState(-38);
 
   const [rearWarningEnabled, setRearWarningEnabled] = useState(false);
   const [rearWarningColor, setRearWarningColor] = useState('#FFFFFF');
-  const [rearWarningScale, setRearWarningScale] = useState(2.70);
+  const [rearWarningScale, setRearWarningScale] = useState(1.00);
   const [rearWarningRotation, setRearWarningRotation] = useState(0);
   const [rearWarningAcross, setRearWarningAcross] = useState(58);
   const [rearWarningVertical, setRearWarningVertical] = useState(-38);
@@ -4494,7 +4494,7 @@ export default function HelmetBuilder() {
       };
       img.onerror = () => {
         if (!cancelled) {
-          console.warn(`[HelmetBuilder] Rear sticker preset failed to load: ${url}`);
+          console.warn(`[HelmetBuilder] Rear decal preset failed to load: ${url}`);
         }
       };
       img.src = url;
@@ -4513,7 +4513,7 @@ export default function HelmetBuilder() {
 
     const allowed = ['image/png', 'image/jpeg', 'image/webp'];
     if (!allowed.includes(file.type)) {
-      setRearStickerError('Please upload a PNG, JPEG, or WebP rear sticker.');
+      setRearStickerError('Please upload a PNG, JPEG, or WebP rear decal.');
       return;
     }
 
@@ -4538,7 +4538,7 @@ export default function HelmetBuilder() {
 
     img.onerror = () => {
       URL.revokeObjectURL(objectUrl);
-      setRearStickerError('That rear sticker could not be read. Please try another PNG, JPEG, or WebP.');
+      setRearStickerError('That rear decal could not be read. Please try another PNG, JPEG, or WebP.');
     };
 
     img.src = objectUrl;
@@ -6452,7 +6452,7 @@ export default function HelmetBuilder() {
     const model = modelRef.current;
     if (!loaded || !scene || !model) return;
 
-    // Rear stickers use the same filled baked Decal Surface as side logos/stripes.
+    // Rear decals use the same filled baked Decal Surface as side logos/stripes.
     // That carrier bridges vents/cutouts so artwork behaves like one continuous vinyl
     // sticker instead of being clipped by the visible shell topology.
     let shellRoots = decalSurfaceObjectsRef.current.length
@@ -6531,7 +6531,7 @@ export default function HelmetBuilder() {
 
         const pack = createSideLogoTexturePack(image, {
           strokeEnabled:false,
-          // Rear stickers are small in the final frame. The former 3072x1536 pair
+          // Rear decals are small in the final frame. The former 3072x1536 pair
           // consumed tens of MB per decal (more with mipmaps) without visible benefit.
           textureWidth:Math.min(1024, rendererRef.current?.capabilities?.maxTextureSize || 1024),
           textureHeight:Math.min(512, rendererRef.current?.capabilities?.maxTextureSize || 512),
@@ -6634,7 +6634,7 @@ export default function HelmetBuilder() {
         alphaTest:0.01,
         opacity:1,
         side:THREE.DoubleSide,
-        // Rear stickers are a top vinyl layer. The normal-facing projection test keeps
+        // Rear decals are a top vinyl layer. The normal-facing projection test keeps
         // the artwork on the rear even when the exported carrier winding is reversed.
         depthWrite:false,
         depthTest:true,
@@ -8254,14 +8254,14 @@ export default function HelmetBuilder() {
     const warning = rear.warning || {};
     const custom = rear.custom || {};
     setRearFlagEnabled(!!flag.enabled);
-    setRearFlagScale(flag.scale ?? 2.7);
+    setRearFlagScale(flag.scale ?? 1.0);
     setRearFlagRotation(flag.rotation ?? 0);
     setRearFlagAcross(flag.across ?? -62);
     setRearFlagVertical(flag.vertical ?? -38);
     setRearFlagLocked(!!flag.locked);
     setRearWarningEnabled(!!warning.enabled);
     setRearWarningColor(warning.color || '#FFFFFF');
-    setRearWarningScale(warning.scale ?? 2.7);
+    setRearWarningScale(warning.scale ?? 1.0);
     setRearWarningRotation(warning.rotation ?? 0);
     setRearWarningAcross(warning.across ?? 58);
     setRearWarningVertical(warning.vertical ?? -38);
@@ -9514,7 +9514,7 @@ export default function HelmetBuilder() {
                 </div>
                 </CollapsibleSection>
 
-                <CollapsibleSection title="REAR STICKERS">
+                <CollapsibleSection title="REAR DECALS">
                   <div style={{ fontSize:10, color:'#6b7280', lineHeight:1.5, marginBottom:10 }}>
                     Add common rear-shell stickers or upload your own. Click a sticker on the helmet to select it, drag to move, use the corner handles to scale/rotate, then lock it when placed. Sliders remain available for precise adjustments.
                   </div>
@@ -9533,7 +9533,7 @@ export default function HelmetBuilder() {
                       <button onClick={() => setRearFlagLocked(v => !v)} style={{ background:rearFlagLocked?'rgba(239,255,0,0.10)':'rgba(255,255,255,0.04)', border:rearFlagLocked?'1px solid rgba(239,255,0,0.35)':'1px solid rgba(255,255,255,0.10)', borderRadius:5, padding:'5px 6px', cursor:'pointer', color:rearFlagLocked?'#efff00':'#9ca3af', fontSize:8, fontWeight:800 }}>{rearFlagLocked?'LOCKED':'UNLOCKED'}</button>
                     </div>
                     <div style={{ width:'100%', aspectRatio:'3 / 1', display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden', borderRadius:6, border:'1px solid rgba(255,255,255,0.08)', background:'#c8cdd4', marginBottom:8 }}>
-                      <img src={REAR_FLAG_URL} alt="US flag rear sticker" style={{ width:'100%', height:'100%', objectFit:'contain', opacity:rearFlagEnabled?1:0.4 }} />
+                      <img src={REAR_FLAG_URL} alt="US flag rear decal" style={{ width:'100%', height:'100%', objectFit:'contain', opacity:rearFlagEnabled?1:0.4 }} />
                     </div>
                     {[
                       ['Size', rearFlagScale, setRearFlagScale, 40, 500, v => v / 100, v => Math.round(v * 100)],
@@ -9588,10 +9588,10 @@ export default function HelmetBuilder() {
                   </div>
 
                   <div style={{ background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.05)', borderRadius:8, padding:9 }}>
-                    <div style={{ fontSize:9, fontWeight:800, color:'#9ca3af', letterSpacing:'0.07em', marginBottom:8 }}>CUSTOM REAR STICKER</div>
+                    <div style={{ fontSize:9, fontWeight:800, color:'#9ca3af', letterSpacing:'0.07em', marginBottom:8 }}>CUSTOM REAR DECAL</div>
                     <input id="rear-custom-sticker-upload" type="file" accept="image/png,image/jpeg,image/webp" onChange={handleRearCustomStickerUpload} style={{ display:'none' }} />
                     <label htmlFor="rear-custom-sticker-upload" style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:6, width:'100%', boxSizing:'border-box', background:'rgba(239,255,0,0.07)', border:'1px dashed rgba(239,255,0,0.30)', borderRadius:6, padding:'8px 9px', cursor:'pointer', color:'#efff00', fontSize:9, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.05em' }}>
-                      <span>＋</span>{rearCustomPreviewUrl ? 'REPLACE STICKER' : 'UPLOAD STICKER'}
+                      <span>＋</span>{rearCustomPreviewUrl ? 'REPLACE DECAL' : 'UPLOAD DECAL'}
                     </label>
 
                     {rearCustomPreviewUrl && (
@@ -9608,7 +9608,7 @@ export default function HelmetBuilder() {
                           <button onClick={() => setRearCustomLocked(v => !v)} style={{ background:rearCustomLocked?'rgba(239,255,0,0.10)':'rgba(255,255,255,0.04)', border:rearCustomLocked?'1px solid rgba(239,255,0,0.35)':'1px solid rgba(255,255,255,0.10)', borderRadius:5, padding:'5px 6px', cursor:'pointer', color:rearCustomLocked?'#efff00':'#9ca3af', fontSize:8, fontWeight:800 }}>{rearCustomLocked?'LOCKED':'UNLOCKED'}</button>
                         </div>
                         <div style={{ width:'100%', aspectRatio:'3 / 1', display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden', borderRadius:6, border:'1px solid rgba(255,255,255,0.08)', backgroundColor:'#c8cdd4', backgroundImage:'linear-gradient(45deg, rgba(255,255,255,0.95) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.95) 75%, rgba(255,255,255,0.95)), linear-gradient(45deg, rgba(255,255,255,0.95) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.95) 75%, rgba(255,255,255,0.95))', backgroundSize:'14px 14px', backgroundPosition:'0 0, 7px 7px', marginBottom:8 }}>
-                          <img src={rearCustomPreviewUrl} alt="Custom rear sticker preview" style={{ width:'100%', height:'100%', objectFit:'contain', opacity:rearCustomEnabled?1:0.4 }} />
+                          <img src={rearCustomPreviewUrl} alt="Custom rear decal preview" style={{ width:'100%', height:'100%', objectFit:'contain', opacity:rearCustomEnabled?1:0.4 }} />
                         </div>
                         {[
                           ['Size', rearCustomScale, setRearCustomScale, 40, 800, v => v / 100, v => Math.round(v * 100)],
@@ -10053,7 +10053,7 @@ export default function HelmetBuilder() {
 
             <div style={{ padding:'14px 20px 18px', overflowY:'auto' }}>
               <div style={{ marginBottom:12, padding:'9px 11px', borderRadius:8, background:'rgba(239,255,0,0.045)', border:'1px solid rgba(239,255,0,0.14)', color:'#9ca3af', fontSize:9, lineHeight:1.5 }}>
-                Uploaded wraps, stripe artwork, side logos, rear stickers, and bumper logos are saved privately with the design. Storage allowance: {savedDesignPlan === 'lifetime' ? '250 MB' : savedDesignPlan === 'unlimited' ? '100 MB' : savedDesignPlan === 'paid_credits' ? '25 MB' : '10 MB'}.
+                Uploaded wraps, stripe artwork, side logos, rear decals, and bumper logos are saved privately with the design. Storage allowance: {savedDesignPlan === 'lifetime' ? '250 MB' : savedDesignPlan === 'unlimited' ? '100 MB' : savedDesignPlan === 'paid_credits' ? '25 MB' : '10 MB'}.
               </div>
 
               {savedDesignError && (
