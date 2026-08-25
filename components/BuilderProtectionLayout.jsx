@@ -178,7 +178,7 @@ export default function BuilderProtectionLayout({ children }) {
           z-index: 1;
           pointer-events: none;
           overflow: hidden;
-          opacity: 0.1;
+          opacity: 0.05;
           transform: rotate(-24deg);
           transform-origin: center;
           background-image: url('/images/proline-watermark.png');
