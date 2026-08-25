@@ -24,9 +24,6 @@ export async function GET() {
 
     const supabaseAdmin = getAdminClient();
 
-    // Creates the Builder row + 3 welcome credits exactly once, then copies
-    // the authenticated Clerk name/email into the Supabase customer row.
-    // Concurrent first loads cannot duplicate the welcome grant.
     let user;
     try {
       ({ user } = await ensureBuilderUser(supabaseAdmin, userId));
@@ -38,22 +35,34 @@ export async function GET() {
       });
       return Response.json({ error: 'Database error' }, { status: 500 });
     }
+
     if (!user) {
       return Response.json({ error: 'User not found' }, { status: 404 });
     }
 
     const freeCredits = Number(user.free_credits || 0);
     const paidCredits = Number(user.paid_credits || 0);
-    const isUnlimited = user.is_unlimited === true;
+    const isSubscriptionUnlimited = user.is_unlimited === true;
+    const isLifetimeAllAccess = user.lifetime_all_access === true;
+    const isUnlimited = isSubscriptionUnlimited || isLifetimeAllAccess;
 
     return Response.json(
       {
         freeCredits,
         paidCredits,
+        // Backward-compatible effective entitlement used by existing Builder UI.
         isUnlimited,
+        // Explicit account states let UI distinguish recurring vs permanent access.
+        isSubscriptionUnlimited,
+        isLifetimeAllAccess,
+        accessLevel: isLifetimeAllAccess
+          ? 'lifetime_all_access'
+          : isSubscriptionUnlimited
+            ? 'unlimited_monthly'
+            : paidCredits > 0
+              ? 'pay_as_you_go'
+              : 'free',
         totalCredits: isUnlimited ? 999 : freeCredits + paidCredits,
-        // Paid credits are intentionally consumed before free credits so any
-        // remaining paid balance keeps exports watermark-free.
         hasWatermark: !isUnlimited && paidCredits === 0,
       },
       {

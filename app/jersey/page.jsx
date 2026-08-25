@@ -561,6 +561,8 @@ export default function JerseyCustomizer() {
   const [credits, setCredits]           = useState(0);
   const [paidCredits, setPaidCredits]   = useState(0);
   const [isUnlimited, setIsUnlimited]   = useState(false);
+  const [isSubscriptionUnlimited, setIsSubscriptionUnlimited] = useState(false);
+  const [isLifetimeAllAccess, setIsLifetimeAllAccess] = useState(false);
   const [hasWatermark, setHasWatermark] = useState(true);
   const [creditsLoaded, setCreditsLoaded] = useState(false);
   const [exporting, setExporting]         = useState(false);
@@ -568,6 +570,7 @@ export default function JerseyCustomizer() {
   const [showUpgrade, setShowUpgrade]     = useState(false);
   const [selectedPlan, setSelectedPlan]   = useState(null);
   const [checkingOut, setCheckingOut]     = useState(false);
+  const [checkoutError, setCheckoutError] = useState('');
   const [brightness, setBrightness]         = useState(0.72);
   const [hideControls, setHideControls]     = useState(false);
   const [bg, setBg] = useState({ enabled: true, color: "#ffffff" });
@@ -639,6 +642,8 @@ export default function JerseyCustomizer() {
     setCredits(data.totalCredits || 0);
     setPaidCredits(data.paidCredits || 0);
     setIsUnlimited(data.isUnlimited || false);
+    setIsSubscriptionUnlimited(data.isSubscriptionUnlimited || false);
+    setIsLifetimeAllAccess(data.isLifetimeAllAccess || false);
     setHasWatermark(data.hasWatermark !== false);
   }, []);
 
@@ -653,7 +658,7 @@ export default function JerseyCustomizer() {
   useEffect(() => {
     if (!isLoaded) return;
     if (!isSignedIn) {
-      setCredits(0); setPaidCredits(0); setIsUnlimited(false); setHasWatermark(true); setCreditsLoaded(true);
+      setCredits(0); setPaidCredits(0); setIsUnlimited(false); setIsSubscriptionUnlimited(false); setIsLifetimeAllAccess(false); setHasWatermark(true); setCreditsLoaded(true);
       return;
     }
     let cancelled = false;
@@ -1015,6 +1020,8 @@ export default function JerseyCustomizer() {
     setCredits(exportData.isUnlimited ? 999 : (exportData.freeCredits || 0) + (exportData.paidCredits || 0));
     setPaidCredits(exportData.paidCredits || 0);
     setIsUnlimited(exportData.isUnlimited || false);
+    setIsSubscriptionUnlimited(exportData.isSubscriptionUnlimited || false);
+    setIsLifetimeAllAccess(exportData.isLifetimeAllAccess || false);
     setHasWatermark(exportData.hasWatermark);
 
     // 4. Watermark — only for free credit exports
@@ -1076,9 +1083,68 @@ export default function JerseyCustomizer() {
       return;
     }
     setSelectedPlan(null);
+    setCheckoutError('');
     try { await refreshCredits(); }
     catch (err) { console.error('Credits refresh before upgrade modal:', err); }
     setShowUpgrade(true);
+  };
+
+  const startUpgradeCheckout = async () => {
+    if (!selectedPlan || checkingOut) return;
+
+    const PRICE_IDS = {
+      NEXT_PUBLIC_STRIPE_PRICE_UNLIMITED: process.env.NEXT_PUBLIC_STRIPE_PRICE_UNLIMITED,
+      NEXT_PUBLIC_STRIPE_PRICE_LIFETIME_ALL_ACCESS: process.env.NEXT_PUBLIC_STRIPE_PRICE_LIFETIME_ALL_ACCESS,
+      NEXT_PUBLIC_STRIPE_PRICE_5_CREDITS: process.env.NEXT_PUBLIC_STRIPE_PRICE_5_CREDITS,
+      NEXT_PUBLIC_STRIPE_PRICE_15_CREDITS: process.env.NEXT_PUBLIC_STRIPE_PRICE_15_CREDITS,
+      NEXT_PUBLIC_STRIPE_PRICE_50_CREDITS: process.env.NEXT_PUBLIC_STRIPE_PRICE_50_CREDITS,
+    };
+
+    const priceId = PRICE_IDS[selectedPlan];
+    if (!priceId) {
+      setCheckoutError('This purchase option is not configured yet.');
+      return;
+    }
+
+    setCheckingOut(true);
+    setCheckoutError('');
+
+    try {
+      const response = await fetch('/api/stripe/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ priceId, returnPath: '/jersey' }),
+      });
+      const data = await response.json();
+
+      if (
+        response.status === 409 &&
+        (data?.code === 'ALREADY_UNLIMITED' || data?.code === 'ALREADY_LIFETIME_ALL_ACCESS')
+      ) {
+        await refreshCredits();
+        setShowUpgrade(false);
+        return;
+      }
+
+      if (!response.ok || !data?.url) {
+        throw new Error(data?.error || 'Unable to start checkout. Please try again.');
+      }
+
+      try {
+        if (window.top && window.top !== window.self) {
+          window.top.location.href = data.url;
+        } else {
+          window.location.href = data.url;
+        }
+      } catch {
+        window.location.href = data.url;
+      }
+    } catch (err) {
+      console.error('Checkout error:', err);
+      setCheckoutError(err?.message || 'Unable to start checkout. Please try again.');
+    } finally {
+      setCheckingOut(false);
+    }
   };
 
   const TABS = ["collar","colors","trim","pattern","logos"];
@@ -1195,6 +1261,8 @@ export default function JerseyCustomizer() {
                 <UserButton.UserProfilePage label="Manage Plan" url="plan" labelIcon={<PlanIcon />}>
                   <ManagePlanPage
                     isUnlimited={isUnlimited}
+                    isSubscriptionUnlimited={isSubscriptionUnlimited}
+                    isLifetimeAllAccess={isLifetimeAllAccess}
                     credits={credits}
                     paidCredits={paidCredits}
                     refreshCredits={refreshCredits}
@@ -1662,93 +1730,110 @@ export default function JerseyCustomizer() {
 
       {/* UPGRADE MODAL */}
       {showUpgrade && (
-        <div onClick={()=>setShowUpgrade(false)} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.78)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000 }}>
-          <div onClick={e=>e.stopPropagation()} style={{ background:"#161314", borderRadius:16, border:"1px solid rgba(255,255,255,0.1)", padding:"30px", width:460, maxWidth:"90vw", animation:"fadeIn 0.2s ease" }}>
-            {isUnlimited ? (
+        <div onClick={() => { setShowUpgrade(false); setCheckoutError(''); }} style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.78)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background:'#161314', borderRadius:16, border:'1px solid rgba(255,255,255,0.1)', padding:'30px', width:480, maxWidth:'90vw', maxHeight:'90vh', overflowY:'auto' }}>
+            {isLifetimeAllAccess ? (
               <>
-                <div style={{ textAlign:"center", marginBottom:20 }}>
+                <div style={{ textAlign:'center', marginBottom:20 }}>
                   <div style={{ fontSize:30, marginBottom:8 }}>✓</div>
-                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:24, letterSpacing:"0.05em", marginBottom:6, color:"#efff00" }}>YOU ALREADY HAVE UNLIMITED CREDITS</div>
-                  <div style={{ fontSize:12, color:"#9ca3af", lineHeight:1.7 }}>Your Unlimited Monthly plan is active, so all exports are watermark-free and no credits are consumed.</div>
+                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:24, letterSpacing:'0.05em', marginBottom:6, color:'#efff00' }}>LIFETIME ALL-ACCESS ACTIVE</div>
+                  <div style={{ fontSize:12, color:'#9ca3af', lineHeight:1.7 }}>You have permanent access to every current and future ProLine builder with unlimited watermark-free exports.</div>
                 </div>
-                <div style={{ background:"rgba(16,185,129,0.08)", border:"1px solid rgba(16,185,129,0.24)", borderRadius:10, padding:"12px 14px", marginBottom:16, fontSize:10, color:"#a7f3d0", lineHeight:1.55, textAlign:"center" }}>
-                  Purchase options will automatically return if the subscription ends or Stripe marks it unpaid or canceled.
+                <div style={{ background:'rgba(16,185,129,0.08)', border:'1px solid rgba(16,185,129,0.24)', borderRadius:10, padding:'12px 14px', marginBottom:16, fontSize:10, color:'#a7f3d0', lineHeight:1.55, textAlign:'center' }}>
+                  No credits are consumed and no recurring Builder payment is required.
                 </div>
-                <button onClick={()=>setShowUpgrade(false)} style={{ width:"100%", background:"linear-gradient(135deg,#efff00,#c8d900)", border:"none", borderRadius:8, padding:"13px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:14, letterSpacing:"0.06em", color:"#000", cursor:"pointer" }}>CLOSE</button>
+                <button onClick={() => { setShowUpgrade(false); setCheckoutError(''); }} style={{ width:'100%', background:'linear-gradient(135deg,#efff00,#c8d900)', border:'none', borderRadius:8, padding:'13px', fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:14, letterSpacing:'0.06em', color:'#000', cursor:'pointer' }}>CLOSE</button>
+              </>
+            ) : isSubscriptionUnlimited ? (
+              <>
+                <div style={{ textAlign:'center', marginBottom:20 }}>
+                  <div style={{ fontSize:26, marginBottom:8 }}>⚡</div>
+                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:24, letterSpacing:'0.05em', marginBottom:6, color:'#efff00' }}>UNLIMITED MONTHLY ACTIVE</div>
+                  <div style={{ fontSize:12, color:'#9ca3af', lineHeight:1.6 }}>You already have unlimited watermark-free exports. Upgrade once to make that access permanent across all current and future builders.</div>
+                </div>
+
+                <button onClick={() => { setSelectedPlan('NEXT_PUBLIC_STRIPE_PRICE_LIFETIME_ALL_ACCESS'); setCheckoutError(''); }} style={{ width:'100%', background:selectedPlan==='NEXT_PUBLIC_STRIPE_PRICE_LIFETIME_ALL_ACCESS'?'rgba(239,255,0,0.18)':'rgba(239,255,0,0.05)', border:selectedPlan==='NEXT_PUBLIC_STRIPE_PRICE_LIFETIME_ALL_ACCESS'?'2px solid #efff00':'1px solid rgba(239,255,0,0.28)', borderRadius:10, padding:'15px 16px', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:14, position:'relative' }}>
+                  <div style={{ position:'absolute', top:-10, left:16, background:'#efff00', color:'#000', fontSize:8, fontWeight:900, padding:'2px 8px', borderRadius:3, fontFamily:"'Barlow Condensed',sans-serif" }}>PERMANENT UPGRADE</div>
+                  <div style={{ textAlign:'left' }}>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:16, color:'#efff00', letterSpacing:'0.04em' }}>LIFETIME ALL-ACCESS</div>
+                    <div style={{ fontSize:10, color:'#9ca3af', marginTop:3, lineHeight:1.45 }}>All current + future builders · unlimited exports · no watermark</div>
+                  </div>
+                  <div style={{ textAlign:'right', flexShrink:0, marginLeft:12 }}>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:22, color:'#fff' }}>$49</div>
+                    <div style={{ fontSize:9, color:'#6b7280' }}>one time</div>
+                  </div>
+                </button>
+
+                <div style={{ fontSize:10, color:'#9ca3af', textAlign:'center', marginBottom:14, lineHeight:1.55 }}>After a successful Lifetime purchase, your monthly subscription will be scheduled to stop renewing.</div>
+
+                {checkoutError && <div style={{ marginBottom:12, padding:'9px 11px', borderRadius:8, border:'1px solid rgba(239,68,68,0.3)', background:'rgba(239,68,68,0.1)', color:'#fca5a5', fontSize:10, lineHeight:1.45 }}>{checkoutError}</div>}
+
+                <button onClick={startUpgradeCheckout} disabled={!selectedPlan || checkingOut} style={{ width:'100%', background:selectedPlan?'linear-gradient(135deg,#efff00,#c8d900)':'rgba(255,255,255,0.08)', border:'none', borderRadius:8, padding:'13px', fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:14, letterSpacing:'0.06em', color:selectedPlan?'#000':'#6b7280', cursor:selectedPlan&&!checkingOut?'pointer':'default', marginBottom:8 }}>{checkingOut ? 'LOADING...' : 'UPGRADE TO LIFETIME →'}</button>
+                <button onClick={() => { setShowUpgrade(false); setCheckoutError(''); }} style={{ width:'100%', background:'none', border:'none', fontSize:11, color:'#6b7280', cursor:'pointer', padding:'7px', fontFamily:"'Barlow Condensed',sans-serif" }}>Not now</button>
               </>
             ) : (
               <>
-                <div style={{ textAlign:"center", marginBottom:20 }}>
+                <div style={{ textAlign:'center', marginBottom:20 }}>
                   <div style={{ fontSize:26, marginBottom:8 }}>⚡</div>
-                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:24, letterSpacing:"0.05em", marginBottom:6 }}>UPGRADE YOUR PLAN</div>
-                  <div style={{ fontSize:12, color:"#9ca3af", lineHeight:1.6 }}>Remove the ProLine watermark and get more exports.</div>
+                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:24, letterSpacing:'0.05em', marginBottom:6 }}>UPGRADE YOUR PLAN</div>
+                  <div style={{ fontSize:12, color:'#9ca3af', lineHeight:1.6 }}>Choose unlimited access or add watermark-free export credits.</div>
                 </div>
 
-            {/* Subscription option */}
-            <button onClick={() => setSelectedPlan("NEXT_PUBLIC_STRIPE_PRICE_UNLIMITED")} style={{ width:"100%", background:selectedPlan==="NEXT_PUBLIC_STRIPE_PRICE_UNLIMITED"?"rgba(239,255,0,0.2)":"rgba(239,255,0,0.04)", border:selectedPlan==="NEXT_PUBLIC_STRIPE_PRICE_UNLIMITED"?"2px solid #efff00":"1px solid rgba(239,255,0,0.25)", borderRadius:10, padding:"14px 16px", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16, position:"relative" }}>
-              <div style={{ position:"absolute", top:-10, left:16, background:"#efff00", color:"#000", fontSize:8, fontWeight:800, padding:"2px 8px", borderRadius:3, fontFamily:"'Barlow Condensed',sans-serif", whiteSpace:"nowrap" }}>MOST POPULAR</div>
-              <div style={{ textAlign:"left" }}>
-                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:16, color:"#efff00", letterSpacing:"0.04em" }}>UNLIMITED MONTHLY</div>
-                <div style={{ fontSize:10, color:"#9ca3af", marginTop:2 }}>Unlimited watermark-free exports · cancel anytime</div>
-              </div>
-              <div style={{ textAlign:"right", flexShrink:0, marginLeft:12 }}>
-                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:22, color:"#fff" }}>$4.99</div>
-                <div style={{ fontSize:9, color:"#6b7280" }}>per month</div>
-              </div>
-            </button>
-
-            {/* Divider */}
-            <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:16 }}>
-              <div style={{ flex:1, height:1, background:"rgba(255,255,255,0.07)" }} />
-              <span style={{ fontSize:10, color:"#4b5563", fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:"0.08em" }}>OR BUY CREDITS</span>
-              <div style={{ flex:1, height:1, background:"rgba(255,255,255,0.07)" }} />
-            </div>
-
-            {/* Credit packs */}
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:9, marginBottom:10 }}>
-              {[{credits:5,price:"$4.99",per:"$1.00 ea",priceKey:"NEXT_PUBLIC_STRIPE_PRICE_5_CREDITS"},{credits:15,price:"$9.99",per:"$0.67 ea",priceKey:"NEXT_PUBLIC_STRIPE_PRICE_15_CREDITS"},{credits:50,price:"$24.99",per:"$0.50 ea",priceKey:"NEXT_PUBLIC_STRIPE_PRICE_50_CREDITS"}].map(plan => (
-                <button key={plan.credits} onClick={() => setSelectedPlan(plan.priceKey)} style={{ background:selectedPlan===plan.priceKey?"rgba(239,255,0,0.1)":"rgba(255,255,255,0.04)", border:selectedPlan===plan.priceKey?"1px solid rgba(239,255,0,0.5)":"1px solid rgba(255,255,255,0.08)", borderRadius:10, padding:"13px 6px", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:3, position:"relative" }}>
-                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:28, color:"#e2e8f0" }}>{plan.credits}</div>
-                  <div style={{ fontSize:9, color:"#9ca3af" }}>credits</div>
-                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800, fontSize:17, color:"#fff", marginTop:3 }}>{plan.price}</div>
-                  <div style={{ fontSize:9, color:"#6b7280" }}>{plan.per}</div>
+                <button onClick={() => { setSelectedPlan('NEXT_PUBLIC_STRIPE_PRICE_UNLIMITED'); setCheckoutError(''); }} style={{ width:'100%', background:selectedPlan==='NEXT_PUBLIC_STRIPE_PRICE_UNLIMITED'?'rgba(239,255,0,0.18)':'rgba(239,255,0,0.04)', border:selectedPlan==='NEXT_PUBLIC_STRIPE_PRICE_UNLIMITED'?'2px solid #efff00':'1px solid rgba(239,255,0,0.25)', borderRadius:10, padding:'14px 16px', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:12, position:'relative' }}>
+                  <div style={{ position:'absolute', top:-10, left:16, background:'#efff00', color:'#000', fontSize:8, fontWeight:900, padding:'2px 8px', borderRadius:3, fontFamily:"'Barlow Condensed',sans-serif" }}>FLEXIBLE</div>
+                  <div style={{ textAlign:'left' }}>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:16, color:'#efff00', letterSpacing:'0.04em' }}>UNLIMITED MONTHLY</div>
+                    <div style={{ fontSize:10, color:'#9ca3af', marginTop:2 }}>Unlimited watermark-free exports · cancel anytime</div>
+                  </div>
+                  <div style={{ textAlign:'right', flexShrink:0, marginLeft:12 }}>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:22, color:'#fff' }}>$4.99</div>
+                    <div style={{ fontSize:9, color:'#6b7280' }}>per month</div>
+                  </div>
                 </button>
-              ))}
-            </div>
-            <div style={{ fontSize:10, color:"#10b981", textAlign:"center", marginBottom:16, display:"flex", alignItems:"center", justifyContent:"center", gap:5 }}>
-              <span>✓</span> Purchased credits are always watermark-free · free credits include watermark
-            </div>
 
-            <button onClick={async () => {
-              if (!selectedPlan || checkingOut) return;
-              const PRICE_IDS = {
-                "NEXT_PUBLIC_STRIPE_PRICE_UNLIMITED":  process.env.NEXT_PUBLIC_STRIPE_PRICE_UNLIMITED,
-                "NEXT_PUBLIC_STRIPE_PRICE_5_CREDITS":  process.env.NEXT_PUBLIC_STRIPE_PRICE_5_CREDITS,
-                "NEXT_PUBLIC_STRIPE_PRICE_15_CREDITS": process.env.NEXT_PUBLIC_STRIPE_PRICE_15_CREDITS,
-                "NEXT_PUBLIC_STRIPE_PRICE_50_CREDITS": process.env.NEXT_PUBLIC_STRIPE_PRICE_50_CREDITS,
-              };
-              const priceId = PRICE_IDS[selectedPlan];
-              console.log('Checkout:', { selectedPlan, priceId });
-              if (!priceId) { console.error('No price ID found for', selectedPlan); return; }
-              setCheckingOut(true);
-              try {
-                const r = await fetch('/api/stripe/checkout', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({priceId,returnPath:'/jersey'})});
-                const d = await r.json();
-                console.log('Checkout response:', d);
-                if (d.url) window.location.href = d.url;
-                else console.error('No URL in response:', d);
-              } catch(err) {
-                console.error('Checkout error:', err);
-              } finally {
-                setCheckingOut(false);
-              }
-            }} style={{ width:"100%", background:selectedPlan?"linear-gradient(135deg,#efff00,#c8d900)":"rgba(255,255,255,0.08)", border:"none", borderRadius:8, padding:"13px", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:14, letterSpacing:"0.06em", color:selectedPlan?"#000":"#6b7280", cursor:selectedPlan?"pointer":"default", marginBottom:8, transition:"all 0.15s ease" }}>{checkingOut ? "LOADING..." : "CONTINUE TO CHECKOUT →"}</button>
-            <button onClick={()=>setShowUpgrade(false)} style={{ width:"100%", background:"none", border:"none", fontSize:11, color:"#6b7280", cursor:"pointer", padding:"7px", fontFamily:"'Barlow Condensed',sans-serif" }}>Maybe later</button>
-            <div style={{ textAlign:"center", marginTop:10, fontSize:11, color:"#4b5563", lineHeight:1.6 }}>
-              Not into credits? Want more control? Purchase the Photoshop template{" "}
-              <a href="https://www.prolinemockups.com/templates/p/proline-basketball-jersey-hanger" target="_blank" rel="noopener noreferrer" style={{ color:"#efff00", textDecoration:"underline", cursor:"pointer" }}>here</a>.
-            </div>
+                <button onClick={() => { setSelectedPlan('NEXT_PUBLIC_STRIPE_PRICE_LIFETIME_ALL_ACCESS'); setCheckoutError(''); }} style={{ width:'100%', background:selectedPlan==='NEXT_PUBLIC_STRIPE_PRICE_LIFETIME_ALL_ACCESS'?'rgba(239,255,0,0.18)':'rgba(239,255,0,0.05)', border:selectedPlan==='NEXT_PUBLIC_STRIPE_PRICE_LIFETIME_ALL_ACCESS'?'2px solid #efff00':'1px solid rgba(239,255,0,0.28)', borderRadius:10, padding:'14px 16px', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:16, position:'relative' }}>
+                  <div style={{ position:'absolute', top:-10, left:16, background:'#fff', color:'#000', fontSize:8, fontWeight:900, padding:'2px 8px', borderRadius:3, fontFamily:"'Barlow Condensed',sans-serif" }}>BEST VALUE</div>
+                  <div style={{ textAlign:'left' }}>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:16, color:'#efff00', letterSpacing:'0.04em' }}>LIFETIME ALL-ACCESS</div>
+                    <div style={{ fontSize:10, color:'#9ca3af', marginTop:2, lineHeight:1.45 }}>All current + future builders · unlimited exports · no watermark</div>
+                  </div>
+                  <div style={{ textAlign:'right', flexShrink:0, marginLeft:12 }}>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:22, color:'#fff' }}>$49</div>
+                    <div style={{ fontSize:9, color:'#6b7280' }}>one time</div>
+                  </div>
+                </button>
+
+                <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:16 }}>
+                  <div style={{ flex:1, height:1, background:'rgba(255,255,255,0.07)' }} />
+                  <span style={{ fontSize:10, color:'#4b5563', fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.08em' }}>OR BUY CREDITS</span>
+                  <div style={{ flex:1, height:1, background:'rgba(255,255,255,0.07)' }} />
+                </div>
+
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:9, marginBottom:10 }}>
+                  {[{credits:5,price:'$4.99',per:'$1.00 ea',priceKey:'NEXT_PUBLIC_STRIPE_PRICE_5_CREDITS'},{credits:15,price:'$9.99',per:'$0.67 ea',priceKey:'NEXT_PUBLIC_STRIPE_PRICE_15_CREDITS'},{credits:50,price:'$24.99',per:'$0.50 ea',priceKey:'NEXT_PUBLIC_STRIPE_PRICE_50_CREDITS'}].map(plan => (
+                    <button key={plan.credits} onClick={() => { setSelectedPlan(plan.priceKey); setCheckoutError(''); }} style={{ background:selectedPlan===plan.priceKey?'rgba(239,255,0,0.1)':'rgba(255,255,255,0.04)', border:selectedPlan===plan.priceKey?'1px solid rgba(239,255,0,0.5)':'1px solid rgba(255,255,255,0.08)', borderRadius:10, padding:'13px 6px', cursor:'pointer', display:'flex', flexDirection:'column', alignItems:'center', gap:3, position:'relative' }}>
+                      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:28, color:'#e2e8f0' }}>{plan.credits}</div>
+                      <div style={{ fontSize:9, color:'#9ca3af' }}>credits</div>
+                      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800, fontSize:17, color:'#fff', marginTop:3 }}>{plan.price}</div>
+                      <div style={{ fontSize:9, color:'#6b7280' }}>{plan.per}</div>
+                    </button>
+                  ))}
+                </div>
+                <div style={{ fontSize:10, color:'#10b981', textAlign:'center', marginBottom:16, display:'flex', alignItems:'center', justifyContent:'center', gap:5 }}>
+                  <span>✓</span> Purchased credits are always watermark-free · free credits include watermark
+                </div>
+
+                {checkoutError && <div style={{ marginBottom:12, padding:'9px 11px', borderRadius:8, border:'1px solid rgba(239,68,68,0.3)', background:'rgba(239,68,68,0.1)', color:'#fca5a5', fontSize:10, lineHeight:1.45 }}>{checkoutError}</div>}
+
+                <button onClick={startUpgradeCheckout} disabled={!selectedPlan || checkingOut} style={{ width:'100%', background:selectedPlan?'linear-gradient(135deg,#efff00,#c8d900)':'rgba(255,255,255,0.08)', border:'none', borderRadius:8, padding:'13px', fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:14, letterSpacing:'0.06em', color:selectedPlan?'#000':'#6b7280', cursor:selectedPlan&&!checkingOut?'pointer':'default', marginBottom:8 }}>{checkingOut ? 'LOADING...' : 'CONTINUE TO CHECKOUT →'}</button>
+                <button onClick={() => { setShowUpgrade(false); setCheckoutError(''); }} style={{ width:'100%', background:'none', border:'none', fontSize:11, color:'#6b7280', cursor:'pointer', padding:'7px', fontFamily:"'Barlow Condensed',sans-serif" }}>Maybe later</button>
               </>
+            )}
+
+            {!isLifetimeAllAccess && (
+              <div style={{ textAlign:'center', marginTop:10, fontSize:11, color:'#4b5563', lineHeight:1.6 }}>
+                Prefer the Photoshop template? <a href="https://www.prolinemockups.com/templates/p/proline-basketball-jersey-hanger" target="_blank" rel="noopener noreferrer" style={{ color:'#efff00', textDecoration:'underline', cursor:'pointer' }}>Get it here</a>.
+              </div>
             )}
           </div>
         </div>

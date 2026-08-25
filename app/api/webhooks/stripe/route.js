@@ -39,6 +39,79 @@ async function applyCreditPurchase(supabaseAdmin, event, userId, credits) {
   return Array.isArray(data) ? data[0] : data;
 }
 
+async function applyLifetimeAllAccess({
+  supabaseAdmin,
+  event,
+  session,
+  userId,
+  priceId,
+}) {
+  const { data, error } = await supabaseAdmin.rpc(
+    'process_lifetime_all_access_purchase',
+    {
+      p_event_id: event.id,
+      p_event_type: event.type,
+      p_user_id: userId,
+      p_customer_id: stripeId(session.customer),
+      p_checkout_session_id: session.id || null,
+      p_payment_intent_id: stripeId(session.payment_intent),
+      p_price_id: priceId,
+    }
+  );
+
+  if (error) throw error;
+  return Array.isArray(data) ? data[0] : data;
+}
+
+async function scheduleSupersededMonthlyCancellation(supabaseAdmin, userId) {
+  try {
+    const { data: user, error } = await supabaseAdmin
+      .from('users')
+      .select('stripe_subscription_id')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (error) throw error;
+
+    const subscriptionId = user?.stripe_subscription_id || null;
+    if (!subscriptionId) return { scheduled: false, reason: 'no_subscription' };
+
+    let subscription;
+    try {
+      subscription = await stripe.subscriptions.retrieve(subscriptionId);
+    } catch (err) {
+      if (err?.code === 'resource_missing' || err?.statusCode === 404) {
+        return { scheduled: false, reason: 'subscription_missing' };
+      }
+      throw err;
+    }
+
+    if (
+      subscription.status === 'canceled' ||
+      subscription.cancel_at_period_end === true
+    ) {
+      return { scheduled: false, reason: 'already_ending' };
+    }
+
+    await stripe.subscriptions.update(subscriptionId, {
+      cancel_at_period_end: true,
+      metadata: {
+        superseded_by: 'lifetime_all_access',
+      },
+    });
+
+    return { scheduled: true, subscriptionId };
+  } catch (err) {
+    // Lifetime fulfillment must never fail just because an older recurring plan
+    // could not be scheduled for cancellation. Log it so support can follow up.
+    console.warn('Could not schedule superseded Unlimited subscription cancellation:', {
+      userId,
+      message: err?.message,
+    });
+    return { scheduled: false, reason: 'error' };
+  }
+}
+
 async function applySubscriptionState({
   supabaseAdmin,
   event,
@@ -108,12 +181,34 @@ export async function POST(req) {
         session.payment_status === 'paid' ||
         session.payment_status === 'no_payment_required';
 
-      // A delayed payment can emit checkout.session.completed before the money
-      // actually clears. In that case we wait for async_payment_succeeded.
       if (!paymentReady && event.type === 'checkout.session.completed') {
         return Response.json({
           received: true,
           awaitingPayment: true,
+        });
+      }
+
+      if (priceId === process.env.STRIPE_PRICE_LIFETIME_ALL_ACCESS) {
+        const result = await applyLifetimeAllAccess({
+          supabaseAdmin,
+          event,
+          session,
+          userId,
+          priceId,
+        });
+
+        const cancellation = await scheduleSupersededMonthlyCancellation(
+          supabaseAdmin,
+          userId
+        );
+
+        return Response.json({
+          received: true,
+          lifetimeAllAccessPurchase: true,
+          processed: result?.processed === true,
+          alreadyProcessed: result?.alreadyProcessed === true,
+          lifetimeAllAccess: result?.lifetimeAllAccess === true,
+          supersededSubscriptionCancellationScheduled: cancellation?.scheduled === true,
         });
       }
 
@@ -145,8 +240,6 @@ export async function POST(req) {
           );
         }
 
-        // Read Stripe's current subscription state rather than assuming that a
-        // completed Checkout always means the subscription is active.
         const subscription = await stripe.subscriptions.retrieve(subscriptionId);
 
         const result = await applySubscriptionState({
@@ -180,6 +273,56 @@ export async function POST(req) {
       });
     }
 
+    // ── LIFETIME REFUND REVOCATION ────────────────────────────────────────────
+    if (event.type === 'charge.refunded') {
+      const charge = event.data.object;
+
+      // Only a FULL refund revokes Lifetime access. Partial goodwill refunds keep
+      // the entitlement intact.
+      if (Number(charge.amount_refunded || 0) < Number(charge.amount || 0)) {
+        return Response.json({ received: true, ignored: 'partial_refund' });
+      }
+
+      const paymentIntentId = stripeId(charge.payment_intent);
+      if (!paymentIntentId) {
+        return Response.json({ received: true, ignored: 'refund_without_payment_intent' });
+      }
+
+      // This Stripe account can contain non-Builder products. Match the payment
+      // intent to a Builder Lifetime purchase before claiming or mutating anything.
+      const { data: lifetimeUser, error: lookupError } = await supabaseAdmin
+        .from('users')
+        .select('id')
+        .eq('lifetime_stripe_payment_intent_id', paymentIntentId)
+        .maybeSingle();
+
+      if (lookupError) throw lookupError;
+      if (!lifetimeUser?.id) {
+        return Response.json({ received: true, ignored: 'non_builder_lifetime_refund' });
+      }
+
+      const { data, error } = await supabaseAdmin.rpc(
+        'process_lifetime_all_access_refund',
+        {
+          p_event_id: event.id,
+          p_event_type: event.type,
+          p_user_id: lifetimeUser.id,
+          p_customer_id: stripeId(charge.customer),
+        }
+      );
+
+      if (error) throw error;
+      const result = Array.isArray(data) ? data[0] : data;
+
+      return Response.json({
+        received: true,
+        lifetimeAllAccessRefund: true,
+        processed: result?.processed === true,
+        alreadyProcessed: result?.alreadyProcessed === true,
+        lifetimeAllAccess: result?.lifetimeAllAccess === true,
+      });
+    }
+
     // ── SUBSCRIPTION LIFECYCLE ────────────────────────────────────────────────
     if (
       event.type === 'customer.subscription.created' ||
@@ -199,9 +342,6 @@ export async function POST(req) {
 
       let effectiveStatus = subscription.status;
 
-      // Stripe webhook ordering is not guaranteed. For non-deleted events, read
-      // the subscription's CURRENT state so a late delivery does not revive a
-      // subscription that has already moved to a newer status.
       if (event.type !== 'customer.subscription.deleted') {
         try {
           const current = await stripe.subscriptions.retrieve(subscriptionId);
@@ -242,8 +382,6 @@ export async function POST(req) {
       ignored: 'unhandled_event',
     });
   } catch (err) {
-    // Deliberately return 500. Stripe will retry the webhook. If an RPC failed,
-    // Postgres rolls its transaction back, including the event-id claim.
     console.error('Stripe webhook processing error:', {
       eventId: event.id,
       eventType: event.type,

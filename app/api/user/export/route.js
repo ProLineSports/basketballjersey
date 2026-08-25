@@ -24,10 +24,9 @@ export async function POST() {
 
     const supabaseAdmin = getAdminClient();
 
-    // Make this endpoint safe even if it is the first authenticated API request
-    // a brand-new account makes, and synchronize Clerk identity details.
+    let accountUser;
     try {
-      await ensureBuilderUser(supabaseAdmin, userId);
+      ({ user: accountUser } = await ensureBuilderUser(supabaseAdmin, userId));
     } catch (ensureUserError) {
       console.error('Export user init error:', {
         userId,
@@ -37,8 +36,6 @@ export async function POST() {
       return Response.json({ error: 'Failed to initialize account' }, { status: 500 });
     }
 
-    // One Postgres transaction locks the user row, checks Unlimited, consumes
-    // paid-before-free, and records the transaction ledger entry.
     const { data, error } = await supabaseAdmin.rpc('consume_export_credit', {
       p_user_id: userId,
     });
@@ -61,16 +58,23 @@ export async function POST() {
       );
     }
 
+    const isLifetimeAllAccess = accountUser?.lifetime_all_access === true;
+    const isSubscriptionUnlimited = accountUser?.is_unlimited === true;
+
     if (result.allowed !== true) {
-      const isMissingUser = result.error === 'User not found';
+      const reason = result.reason || result.error;
+      const isMissingUser = reason === 'user_not_found' || result.error === 'User not found';
 
       return Response.json(
         {
           allowed: false,
-          error: result.error || 'No credits remaining',
-          freeCredits: Number(result.freeCredits || 0),
-          paidCredits: Number(result.paidCredits || 0),
-          isUnlimited: result.isUnlimited === true,
+          error: isMissingUser ? 'User not found' : 'No credits remaining',
+          reason,
+          freeCredits: Number(result.free_credits ?? result.freeCredits ?? 0),
+          paidCredits: Number(result.paid_credits ?? result.paidCredits ?? 0),
+          isUnlimited: result.is_unlimited === true || result.isUnlimited === true,
+          isSubscriptionUnlimited,
+          isLifetimeAllAccess,
         },
         {
           status: isMissingUser ? 404 : 402,
@@ -82,10 +86,13 @@ export async function POST() {
     return Response.json(
       {
         allowed: true,
-        hasWatermark: result.hasWatermark === true,
-        isUnlimited: result.isUnlimited === true,
-        freeCredits: Number(result.freeCredits || 0),
-        paidCredits: Number(result.paidCredits || 0),
+        hasWatermark: result.has_watermark === true || result.hasWatermark === true,
+        isUnlimited: result.is_unlimited === true || result.isUnlimited === true,
+        isSubscriptionUnlimited,
+        isLifetimeAllAccess,
+        freeCredits: Number(result.free_credits ?? result.freeCredits ?? 0),
+        paidCredits: Number(result.paid_credits ?? result.paidCredits ?? 0),
+        reason: result.reason || null,
       },
       {
         headers: { 'Cache-Control': 'no-store, max-age=0' },

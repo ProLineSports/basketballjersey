@@ -38,6 +38,7 @@ export async function POST(req) {
 
     const validPrices = [
       process.env.STRIPE_PRICE_UNLIMITED,
+      process.env.STRIPE_PRICE_LIFETIME_ALL_ACCESS,
       process.env.STRIPE_PRICE_5_CREDITS,
       process.env.STRIPE_PRICE_15_CREDITS,
       process.env.STRIPE_PRICE_50_CREDITS,
@@ -61,16 +62,31 @@ export async function POST(req) {
     const { data: user, error: userError } = await supabaseAdmin
       .from('users')
       .select(
-        'stripe_customer_id, is_unlimited, stripe_subscription_id, stripe_subscription_status'
+        'stripe_customer_id, is_unlimited, lifetime_all_access, stripe_subscription_id, stripe_subscription_status'
       )
       .eq('id', userId)
       .single();
 
     if (userError) throw userError;
 
-    // UI hiding is not sufficient. Prevent a direct API call from starting another
-    // checkout while an Unlimited entitlement is active.
-    if (user?.is_unlimited) {
+    const isLifetimeCheckout =
+      priceId === process.env.STRIPE_PRICE_LIFETIME_ALL_ACCESS;
+
+    // Lifetime All-Access is permanent, so there is nothing else this account
+    // should be able to buy through the Builder once it is active.
+    if (user?.lifetime_all_access) {
+      return Response.json(
+        {
+          error: 'Lifetime All-Access is already active',
+          code: 'ALREADY_LIFETIME_ALL_ACCESS',
+        },
+        { status: 409 }
+      );
+    }
+
+    // A monthly Unlimited customer may upgrade to Lifetime All-Access, but should
+    // not be able to buy credit packs or start a second monthly subscription.
+    if (user?.is_unlimited && !isLifetimeCheckout) {
       return Response.json(
         {
           error: 'Unlimited plan already active',
@@ -200,6 +216,11 @@ export async function POST(req) {
         clerk_user_id: userId,
         price_id: priceId,
         return_path: returnPath,
+        entitlement: isLifetimeCheckout
+          ? 'lifetime_all_access'
+          : isSubscription
+            ? 'unlimited_monthly'
+            : 'credit_pack',
       },
       ...(isSubscription
         ? {
