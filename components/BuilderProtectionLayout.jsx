@@ -258,6 +258,7 @@ export default function BuilderProtectionLayout({ children }) {
             padding: 32px 24px;
             background: #0b0b0b;
             color: #fff;
+            font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif;
             text-align: center;
           }
 
@@ -271,15 +272,22 @@ export default function BuilderProtectionLayout({ children }) {
 
           .proline-builder-mobile-gate h1 {
             margin: 0 0 12px;
-            font-size: clamp(1.65rem, 7vw, 2.25rem);
-            line-height: 1.1;
+            font-family: inherit;
+            font-size: clamp(1.65rem, 7vw, 2.1rem);
+            font-weight: 700;
+            line-height: 1;
+            letter-spacing: 0.035em;
+            text-transform: uppercase;
           }
 
           .proline-builder-mobile-gate p {
             margin: 0;
             color: rgba(255, 255, 255, 0.76);
+            font-family: inherit;
             font-size: 1rem;
-            line-height: 1.6;
+            font-weight: 500;
+            line-height: 1.5;
+            letter-spacing: 0.02em;
           }
         }
       `}</style>
