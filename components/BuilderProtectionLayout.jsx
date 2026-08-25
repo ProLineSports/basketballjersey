@@ -135,6 +135,45 @@ function installToastAutoDismiss() {
   };
 }
 
+function installHelmetHeaderPolish() {
+  const helmetTabs = new Set(['Presets', 'Colors', 'Finish', 'Decals']);
+
+  const scan = () => {
+    const elements = document.querySelectorAll('button, [role="tab"], a, span, div');
+    let helmetTitle = null;
+
+    for (const element of elements) {
+      if (element.childElementCount > 0) continue;
+      const text = (element.textContent || '').trim();
+
+      if (helmetTabs.has(text)) element.classList.add('proline-helmet-tab-label');
+      if (text === 'HELMET BUILDER') {
+        element.classList.add('proline-helmet-builder-title');
+        helmetTitle = element;
+      }
+    }
+
+    if (!helmetTitle) return;
+
+    let header = helmetTitle.parentElement;
+    for (let depth = 0; header && depth < 3; depth += 1, header = header.parentElement) {
+      const beta = [...header.querySelectorAll('span, div')].find(
+        (element) => element.childElementCount === 0 && (element.textContent || '').trim() === 'BETA'
+      );
+      if (beta) {
+        beta.classList.add('proline-helmet-beta-badge');
+        break;
+      }
+    }
+  };
+
+  const observer = new MutationObserver(scan);
+  observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+  scan();
+
+  return () => observer.disconnect();
+}
+
 export default function BuilderProtectionLayout({ children }) {
   // Default to protected so a slow account request can never flash a clean preview.
   const [showWatermark, setShowWatermark] = useState(true);
@@ -163,6 +202,7 @@ export default function BuilderProtectionLayout({ children }) {
   }, []);
 
   useEffect(() => installToastAutoDismiss(), []);
+  useEffect(() => installHelmetHeaderPolish(), []);
   useEffect(() => (showWatermark ? installWatermarks() : undefined), [showWatermark]);
 
   return (
@@ -170,6 +210,18 @@ export default function BuilderProtectionLayout({ children }) {
       <style jsx global>{`
         .proline-builder-mobile-gate {
           display: none;
+        }
+
+        .proline-helmet-tab-label {
+          text-transform: uppercase !important;
+        }
+
+        .proline-helmet-builder-title {
+          font-weight: 700 !important;
+        }
+
+        .proline-helmet-beta-badge {
+          display: none !important;
         }
 
         .${WATERMARK_CLASS} {
