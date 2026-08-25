@@ -135,34 +135,37 @@ function installToastAutoDismiss() {
   };
 }
 
-function installHelmetHeaderPolish() {
+function installBuilderHeaderPolish() {
   const helmetTabs = new Set(['Presets', 'Colors', 'Finish', 'Decals']);
+  const builderTitles = new Set(['HELMET BUILDER', 'JERSEY BUILDER']);
 
   const scan = () => {
     const elements = document.querySelectorAll('button, [role="tab"], a, span, div');
-    let helmetTitle = null;
+    const titles = [];
 
     for (const element of elements) {
       if (element.childElementCount > 0) continue;
       const text = (element.textContent || '').trim();
 
       if (helmetTabs.has(text)) element.classList.add('proline-helmet-tab-label');
-      if (text === 'HELMET BUILDER') {
-        element.classList.add('proline-helmet-builder-title');
-        helmetTitle = element;
+      if (builderTitles.has(text.toUpperCase())) {
+        element.classList.add('proline-builder-title');
+        titles.push(element);
       }
     }
 
-    if (!helmetTitle) return;
-
-    let header = helmetTitle.parentElement;
-    for (let depth = 0; header && depth < 3; depth += 1, header = header.parentElement) {
-      const beta = [...header.querySelectorAll('span, div')].find(
-        (element) => element.childElementCount === 0 && (element.textContent || '').trim() === 'BETA'
-      );
-      if (beta) {
-        beta.classList.add('proline-helmet-beta-badge');
-        break;
+    for (const title of titles) {
+      let header = title.parentElement;
+      for (let depth = 0; header && depth < 3; depth += 1, header = header.parentElement) {
+        const beta = [...header.querySelectorAll('span, div')].find(
+          (element) =>
+            element.childElementCount === 0 &&
+            (element.textContent || '').trim().toUpperCase() === 'BETA'
+        );
+        if (beta) {
+          beta.classList.add('proline-builder-beta-badge');
+          break;
+        }
       }
     }
   };
@@ -202,7 +205,7 @@ export default function BuilderProtectionLayout({ children }) {
   }, []);
 
   useEffect(() => installToastAutoDismiss(), []);
-  useEffect(() => installHelmetHeaderPolish(), []);
+  useEffect(() => installBuilderHeaderPolish(), []);
   useEffect(() => (showWatermark ? installWatermarks() : undefined), [showWatermark]);
 
   return (
@@ -216,11 +219,15 @@ export default function BuilderProtectionLayout({ children }) {
           text-transform: uppercase !important;
         }
 
-        .proline-helmet-builder-title {
+        .proline-builder-title {
+          font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif !important;
+          font-size: 15px !important;
           font-weight: 700 !important;
+          line-height: 1 !important;
+          letter-spacing: 0.035em !important;
         }
 
-        .proline-helmet-beta-badge {
+        .proline-builder-beta-badge {
           display: none !important;
         }
 
