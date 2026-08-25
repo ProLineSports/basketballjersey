@@ -1273,6 +1273,13 @@ function warpCanvasArc(sourceCanvas, arcAmountPx = 0) {
 
 
 function installSideLogoSurfaceProjection(material, uniforms, cacheKey) {
+  // Median-plane clipping is only needed by left/right side logos. Rear stickers
+  // and bumper artwork use this same shader without supplying those uniforms, so
+  // give them stable neutral values instead of placing `undefined` entries in
+  // Three.js's uniform upload table.
+  const medianOriginUniform = uniforms.medianOrigin || { value:new THREE.Vector3(0, 0, 0) };
+  const medianNormalUniform = uniforms.medianNormal || { value:new THREE.Vector3(1, 0, 0) };
+  const medianSideUniform = uniforms.medianSide || { value:0 };
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uSideLogoCenter = uniforms.center;
     shader.uniforms.uSideLogoRight = uniforms.right;
@@ -1282,9 +1289,9 @@ function installSideLogoSurfaceProjection(material, uniforms, cacheKey) {
     shader.uniforms.uSideLogoNormal = uniforms.normal;
     shader.uniforms.uSideLogoDepth = uniforms.depth;
     shader.uniforms.uSideLogoLift = uniforms.lift;
-    shader.uniforms.uSideLogoMedianOrigin = uniforms.medianOrigin;
-    shader.uniforms.uSideLogoMedianNormal = uniforms.medianNormal;
-    shader.uniforms.uSideLogoMedianSide = uniforms.medianSide;
+    shader.uniforms.uSideLogoMedianOrigin = medianOriginUniform;
+    shader.uniforms.uSideLogoMedianNormal = medianNormalUniform;
+    shader.uniforms.uSideLogoMedianSide = medianSideUniform;
 
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -6499,13 +6506,18 @@ export default function HelmetBuilder() {
       );
 
       const hits = raycaster.intersectObjects(shellMeshes, false);
-      if (!hits.length) return null;
 
       const modelInverse = new THREE.Matrix4().copy(model.matrixWorld).invert();
-      return hits.find(hit => {
+      const rearHit = hits.find(hit => {
         const local = hit.point.clone().applyMatrix4(modelInverse);
         return local.z <= boundsModel.centerZ;
-      }) || null;
+      });
+      if (rearHit) return rearHit;
+
+      // A requested sticker center can land over a vent or the shell/bumper gap.
+      // The filled decal carrier still has enough nearby surface to draw on, so use
+      // the requested rear-plane point and the known rear normal as a stable center.
+      return { point:targetWorld, face:null, object:shellMeshes[0] };
     };
 
     const getPack = (slot, image) => {
@@ -6598,11 +6610,11 @@ export default function HelmetBuilder() {
         transparent:true,
         alphaTest:0.01,
         opacity:0.22,
-        // FrontSide prevents a rear sticker from ever showing through the opposite
-        // side of the helmet when we intentionally render it above shell hardware.
-        side:THREE.FrontSide,
+        // DoubleSide tolerates either winding on an exported carrier surface. The
+        // projection shader's normal-facing test prevents opposite-side bleed-through.
+        side:THREE.DoubleSide,
         depthWrite:false,
-        depthTest:false,
+        depthTest:true,
         roughness:0.95,
         metalness:0,
         polygonOffset:true,
@@ -6621,12 +6633,11 @@ export default function HelmetBuilder() {
         transparent:true,
         alphaTest:0.01,
         opacity:1,
-        side:THREE.FrontSide,
-        // Rear stickers are a top vinyl layer. Drawing after the shell hardware lets
-        // them cover screws exactly where the artwork overlaps, while FrontSide culling
-        // prevents the carrier from bleeding through the far side of the helmet.
+        side:THREE.DoubleSide,
+        // Rear stickers are a top vinyl layer. The normal-facing projection test keeps
+        // the artwork on the rear even when the exported carrier winding is reversed.
         depthWrite:false,
-        depthTest:false,
+        depthTest:true,
         polygonOffset:true,
         polygonOffsetFactor:-2,
         polygonOffsetUnits:-2,
