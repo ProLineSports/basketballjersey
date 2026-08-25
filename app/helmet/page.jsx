@@ -1352,14 +1352,19 @@ diffuseColor.a *= sideLogoSample.a;
   material.needsUpdate = true;
 }
 
-function createCarrierSurfaceLogoMeshes(scene, sourceMeshes, material, side, layerName, renderOrder) {
+function createCarrierSurfaceLogoMeshes(scene, sourceMeshes, material, side, layerName, renderOrder, options = {}) {
+  const { shareGeometry = false } = options;
   const meshes = [];
   sourceMeshes.forEach((source, index) => {
-    const geometry = source.geometry.clone();
+    // Rear decals only need another draw of the carrier surface. Sharing its immutable
+    // BufferGeometry avoids uploading a complete helmet-sized vertex/index buffer for
+    // every decal layer (and doing it again on every placement slider update).
+    const geometry = shareGeometry ? source.geometry : source.geometry.clone();
     const overlay = new THREE.Mesh(geometry, material);
     overlay.name = `SideLogo_${side}_${layerName}_${index}`;
     overlay.userData.sideLogoSide = side;
     overlay.userData.sideLogoArtwork = true;
+    overlay.userData.sharedCarrierGeometry = shareGeometry;
     overlay.renderOrder = renderOrder;
     overlay.castShadow = false;
     overlay.receiveShadow = false;
@@ -6460,7 +6465,12 @@ export default function HelmetBuilder() {
     if (!shellMeshes.length || !boundsWorld || !boundsModel) return;
 
     const cleanup = () => {
-      rearStickerMeshesRef.current.forEach(mesh => { mesh.parent?.remove(mesh); mesh.geometry?.dispose?.(); });
+      rearStickerMeshesRef.current.forEach(mesh => {
+        mesh.parent?.remove(mesh);
+        // Shared carrier geometry belongs to the loaded model and must remain alive.
+        // Hit proxies and selection helpers still own and dispose their geometry.
+        if (!mesh.userData?.sharedCarrierGeometry) mesh.geometry?.dispose?.();
+      });
       rearStickerMaterialsRef.current.forEach(mat => { mat.userData?.ownedTexture?.dispose?.(); mat.dispose?.(); });
       ['rear-flag','rear-warning','rear-custom'].forEach(id => { delete editableDecalWorldFrameRef.current[id]; });
       rearStickerMeshesRef.current = [];
@@ -6509,8 +6519,10 @@ export default function HelmetBuilder() {
 
         const pack = createSideLogoTexturePack(image, {
           strokeEnabled:false,
-          textureWidth:Math.min(3072, rendererRef.current?.capabilities?.maxTextureSize || 3072),
-          textureHeight:Math.min(1536, rendererRef.current?.capabilities?.maxTextureSize || 1536),
+          // Rear stickers are small in the final frame. The former 3072x1536 pair
+          // consumed tens of MB per decal (more with mipmaps) without visible benefit.
+          textureWidth:Math.min(1024, rendererRef.current?.capabilities?.maxTextureSize || 1024),
+          textureHeight:Math.min(512, rendererRef.current?.capabilities?.maxTextureSize || 512),
         });
         cache = { key, pack };
         rearStickerPackCacheRef.current[slot] = cache;
@@ -6635,7 +6647,8 @@ export default function HelmetBuilder() {
         shadowMat,
         `rear-${slot}`,
         'Shadow',
-        44
+        44,
+        { shareGeometry:true }
       );
       const mainMeshes = createCarrierSurfaceLogoMeshes(
         scene,
@@ -6643,7 +6656,8 @@ export default function HelmetBuilder() {
         mainMat,
         `rear-${slot}`,
         'Artwork',
-        45
+        45,
+        { shareGeometry:true }
       );
 
       shadowMeshes.forEach(mesh => {
