@@ -5254,7 +5254,7 @@ export default function HelmetBuilder() {
           scene,
           decalSurfaceObjectsRef.current,
           stripeUniformsRef.current,
-          { normalLift: 0.00042, renderOrder: 28, namePrefix: 'HelmetStripeCarrier', subdivisionLevels: 1 }
+          { normalLift: 0.00055, renderOrder: 28, namePrefix: 'HelmetStripeCarrier', subdivisionLevels: 1 }
         );
         stripeCarrierOverlayMeshesRef.current = stripeCarrier.overlays;
         stripeCarrierOverlayMaterialsRef.current = stripeCarrier.materials;
@@ -5265,7 +5265,7 @@ export default function HelmetBuilder() {
           scene,
           shellRoots,
           stripeUniformsRef.current,
-          { normalLift: 0.00042, renderOrder: 28, namePrefix: 'HelmetStripeFallback', subdivisionLevels: 1 }
+          { normalLift: 0.00055, renderOrder: 28, namePrefix: 'HelmetStripeFallback', subdivisionLevels: 1 }
         );
         stripeCarrierOverlayMeshesRef.current = stripeFallback.overlays;
         stripeCarrierOverlayMaterialsRef.current = stripeFallback.materials;
@@ -6043,8 +6043,8 @@ export default function HelmetBuilder() {
         right: { value: frameRight },
         up: { value: frameUp },
         normal: { value: worldNormal },
-        width: { value: baseWidth * 1.018 },
-        height: { value: baseHeight * 1.018 },
+        width: { value: baseWidth * 1.03 },
+        height: { value: baseHeight * 1.03 },
         depth: { value: projectionDepth },
         lift: { value: physicalDepth * 0.20 },
         medianOrigin: { value: medianOriginWorld },
@@ -6059,7 +6059,7 @@ export default function HelmetBuilder() {
         width: { value: baseWidth },
         height: { value: baseHeight },
         depth: { value: projectionDepth },
-        lift: { value: physicalDepth * 0.55 },
+        lift: { value: physicalDepth * 0.70 },
         medianOrigin: { value: medianOriginWorld },
         medianNormal: { value: medianNormalWorld },
         medianSide: { value: medianSideSign },
@@ -6070,7 +6070,7 @@ export default function HelmetBuilder() {
         map: pack.rimTexture,
         transparent: true,
         alphaTest: 0.01,
-        opacity: 0.36,
+        opacity: 0.43,
         side: THREE.DoubleSide,
         depthWrite: false,
         depthTest: true,
