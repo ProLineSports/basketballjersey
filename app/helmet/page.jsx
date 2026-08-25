@@ -1247,12 +1247,7 @@ function createSideLogoTexturePack(image, options = {}) {
   rimTexture.needsUpdate = true;
 
   return {
-    // The image is already contained at its intrinsic aspect ratio inside this
-    // texture canvas. Size the projected carrier to the canvas (not the image)
-    // or the image aspect gets applied a second time, squashing wide artwork
-    // and stretching tall artwork. This keeps every consumer of this shared
-    // decal texture path aspect-correct without changing user-controlled scale.
-    aspect: canvasWidth / Math.max(1, canvasHeight),
+    aspect: image.naturalWidth / Math.max(1, image.naturalHeight),
     mainTexture,
     rimTexture,
   };
@@ -6006,6 +6001,16 @@ export default function HelmetBuilder() {
       const frame = getSideFrame(side);
       if (!frame) return;
 
+      const nativeAspect = image.naturalWidth / Math.max(1, image.naturalHeight);
+      const projectionAspect = THREE.MathUtils.clamp(nativeAspect, 0.55, 2.6);
+      const maxTextureDimension = 1024;
+      const textureWidth = projectionAspect >= 1
+        ? maxTextureDimension
+        : Math.max(1, Math.round(maxTextureDimension * projectionAspect));
+      const textureHeight = projectionAspect >= 1
+        ? Math.max(1, Math.round(maxTextureDimension / projectionAspect))
+        : maxTextureDimension;
+
       const pack = createSideLogoTexturePack(image, {
         mirror: side === 'left' ? sideLogoLeftMirror : sideLogoRightMirror,
         rotate180: side === 'left' ? sideLogoLeftRotate180 : sideLogoRightRotate180,
@@ -6013,6 +6018,11 @@ export default function HelmetBuilder() {
         strokeColor: sideLogoStrokeColor,
         strokeThickness: sideLogoStrokeThickness,
         strokeOpacity: sideLogoStrokeOpacity,
+        // Match the side-logo texture canvas to the existing projection carrier.
+        // The source image remains intrinsically proportioned inside that canvas,
+        // so the final surface projection neither squashes nor stretches it.
+        textureWidth,
+        textureHeight,
       });
       if (!pack) return;
 
