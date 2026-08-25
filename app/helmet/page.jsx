@@ -3946,7 +3946,7 @@ export default function HelmetBuilder() {
   const [checkingOut, setCheckingOut]     = useState(false);
   const [checkoutError, setCheckoutError] = useState('');
 
-  // ── SAVED DESIGNS (settings-only V1) ──────────────────────────────────────
+  // ── SAVED DESIGNS (settings + private uploaded artwork) ───────────────────
   const [showDesignsModal, setShowDesignsModal] = useState(false);
   const [savedDesigns, setSavedDesigns] = useState([]);
   const [savedDesignCount, setSavedDesignCount] = useState(0);
@@ -3959,6 +3959,18 @@ export default function HelmetBuilder() {
   const [loadedDesignId, setLoadedDesignId] = useState(null);
   const [loadedDesignName, setLoadedDesignName] = useState('');
   const [designNameDialog, setDesignNameDialog] = useState(null);
+  const [designAssets, setDesignAssets] = useState({});
+  const [savedDesignUploadStatus, setSavedDesignUploadStatus] = useState('');
+  const designAssetLoadTokenRef = useRef(0);
+
+  const clearPersistedDesignAsset = useCallback((slot) => {
+    setDesignAssets(current => {
+      if (!current[slot]) return current;
+      const next = { ...current };
+      delete next[slot];
+      return next;
+    });
+  }, []);
 
   const applyCreditState = useCallback((data) => {
     if (!data) return;
@@ -4250,25 +4262,32 @@ export default function HelmetBuilder() {
     setWrapTransparentBackground(false);
     setWrapProjectionMode('panoramic');
     setWrapFlipY(false);
+    clearPersistedDesignAsset('wrap');
     resetWrapTransform();
     setWrapRevision(r => r + 1);
-  }, [resetWrapTransform]);
+  }, [clearPersistedDesignAsset, resetWrapTransform]);
 
-  const loadWrapFromSource = useCallback(({ src, fileName = 'helmet-wrap.png', scale = 1, scaleX = 1, scaleY = 1, rotation = 0, offsetX = 0, offsetY = 0, opacity = 1, transparentBackground = false, projection = 'panoramic', flipY = false }) => {
+  const loadWrapFromSource = useCallback(({ src, fileName = 'helmet-wrap.png', scale = 1, scaleX = 1, scaleY = 1, rotation = 0, offsetX = 0, offsetY = 0, opacity = 1, transparentBackground = false, projection = 'panoramic', flipY = false, enabled = true, presetOwned = true, crossOrigin = null, ownedObjectUrl = false, loadToken = null }) => {
     if (!src) return;
 
     const img = new Image();
+    if (crossOrigin) img.crossOrigin = crossOrigin;
     img.onload = () => {
-      if (wrapObjectUrlRef.current) {
-        URL.revokeObjectURL(wrapObjectUrlRef.current);
-        wrapObjectUrlRef.current = null;
+      if (loadToken != null && designAssetLoadTokenRef.current !== loadToken) {
+        if (ownedObjectUrl) URL.revokeObjectURL(src);
+        return;
       }
-      presetOwnedWrapRef.current = true;
+      if (wrapObjectUrlRef.current && wrapObjectUrlRef.current !== src) {
+        URL.revokeObjectURL(wrapObjectUrlRef.current);
+      }
+      wrapObjectUrlRef.current = ownedObjectUrl ? src : null;
+      presetOwnedWrapRef.current = !!presetOwned;
+      if (presetOwned) clearPersistedDesignAsset('wrap');
       wrapImageRef.current = img;
       setWrapPreviewUrl(src);
       setWrapFileName(fileName);
       setWrapError('');
-      setWrapEnabled(true);
+      setWrapEnabled(!!enabled);
       setWrapScale(scale);
       setWrapScaleX(scaleX);
       setWrapScaleY(scaleY);
@@ -4285,7 +4304,7 @@ export default function HelmetBuilder() {
       setWrapError('That wrap design could not be loaded.');
     };
     img.src = src;
-  }, []);
+  }, [clearPersistedDesignAsset]);
 
   const handleWrapUpload = useCallback((event) => {
     const file = event.target.files?.[0];
@@ -4310,6 +4329,7 @@ export default function HelmetBuilder() {
       if (wrapObjectUrlRef.current) URL.revokeObjectURL(wrapObjectUrlRef.current);
       wrapObjectUrlRef.current = objectUrl;
       presetOwnedWrapRef.current = false;
+      clearPersistedDesignAsset('wrap');
       wrapImageRef.current = img;
       setWrapPreviewUrl(objectUrl);
       setWrapFileName(file.name);
@@ -4325,7 +4345,7 @@ export default function HelmetBuilder() {
       setWrapError('That image could not be read. Please try another PNG or JPEG.');
     };
     img.src = objectUrl;
-  }, [resetWrapTransform]);
+  }, [clearPersistedDesignAsset, resetWrapTransform]);
 
   // Revoke browser object URLs and dispose the generated texture when leaving the page.
   useEffect(() => () => {
@@ -4355,25 +4375,32 @@ export default function HelmetBuilder() {
     setHelmetStripeDesignFileName('');
     setHelmetStripeDesignError('');
     setHelmetStripeDesignEnabled(false);
+    clearPersistedDesignAsset('stripeDesign');
     resetStripeDesignTransform();
     setHelmetStripeDesignRevision(r => r + 1);
-  }, [resetStripeDesignTransform]);
+  }, [clearPersistedDesignAsset, resetStripeDesignTransform]);
 
-  const loadStripeDesignFromSource = useCallback(({ src, fileName = 'stripe-design.png', scale = 1, scaleX = 1, scaleY = 1, stripeWidth = null, stripeLength = null, rotation = 0, offsetX = 0, offsetY = 0, opacity = 1, canvasAspect = 1 / 3 }) => {
+  const loadStripeDesignFromSource = useCallback(({ src, fileName = 'stripe-design.png', scale = 1, scaleX = 1, scaleY = 1, stripeWidth = null, stripeLength = null, rotation = 0, offsetX = 0, offsetY = 0, opacity = 1, canvasAspect = 1 / 3, enabled = true, crossOrigin = null, ownedObjectUrl = false, loadToken = null }) => {
     if (!src) return;
 
     const img = new Image();
+    if (crossOrigin) img.crossOrigin = crossOrigin;
     img.onload = () => {
-      if (stripeDesignObjectUrlRef.current) {
-        URL.revokeObjectURL(stripeDesignObjectUrlRef.current);
-        stripeDesignObjectUrlRef.current = null;
+      if (loadToken != null && designAssetLoadTokenRef.current !== loadToken) {
+        if (ownedObjectUrl) URL.revokeObjectURL(src);
+        return;
       }
+      if (stripeDesignObjectUrlRef.current && stripeDesignObjectUrlRef.current !== src) {
+        URL.revokeObjectURL(stripeDesignObjectUrlRef.current);
+      }
+      stripeDesignObjectUrlRef.current = ownedObjectUrl ? src : null;
+      if (!ownedObjectUrl && typeof src === 'string' && src.startsWith('/')) clearPersistedDesignAsset('stripeDesign');
       stripeDesignImageRef.current = img;
       stripeDesignCanvasAspectRef.current = Math.max(0.2, Math.min(0.85, Number(canvasAspect) || (1 / 3)));
       setHelmetStripeDesignPreviewUrl(src);
       setHelmetStripeDesignFileName(fileName);
       setHelmetStripeDesignError('');
-      setHelmetStripeDesignEnabled(true);
+      setHelmetStripeDesignEnabled(!!enabled);
       setHelmetStripeDesignScale(scale);
       setHelmetStripeDesignScaleX(scaleX);
       setHelmetStripeDesignScaleY(scaleY);
@@ -4389,7 +4416,7 @@ export default function HelmetBuilder() {
       setHelmetStripeDesignError('That stripe design could not be loaded.');
     };
     img.src = src;
-  }, []);
+  }, [clearPersistedDesignAsset]);
 
   const handleStripeDesignUpload = useCallback((event) => {
     const file = event.target.files?.[0];
@@ -4408,6 +4435,7 @@ export default function HelmetBuilder() {
       stripeDesignObjectUrlRef.current = objectUrl;
       stripeDesignImageRef.current = img;
       stripeDesignCanvasAspectRef.current = 1 / 3;
+      clearPersistedDesignAsset('stripeDesign');
       setHelmetStripeDesignPreviewUrl(objectUrl);
       setHelmetStripeDesignFileName(file.name);
       setHelmetStripeDesignError('');
@@ -4420,7 +4448,7 @@ export default function HelmetBuilder() {
       setHelmetStripeDesignError('That image could not be read. Please try another PNG or JPEG.');
     };
     img.src = objectUrl;
-  }, [resetStripeDesignTransform]);
+  }, [clearPersistedDesignAsset, resetStripeDesignTransform]);
 
   useEffect(() => () => {
     if (stripeDesignObjectUrlRef.current) URL.revokeObjectURL(stripeDesignObjectUrlRef.current);
@@ -4487,6 +4515,7 @@ export default function HelmetBuilder() {
 
       rearCustomObjectUrlRef.current = objectUrl;
       rearCustomImageRef.current = img;
+      clearPersistedDesignAsset('rearCustom');
       setRearCustomPreviewUrl(objectUrl);
       setRearCustomFileName(file.name);
       setRearCustomEnabled(true);
@@ -4501,7 +4530,7 @@ export default function HelmetBuilder() {
     };
 
     img.src = objectUrl;
-  }, [clearEditableDecalUndo]);
+  }, [clearEditableDecalUndo, clearPersistedDesignAsset]);
 
   const removeRearCustomSticker = useCallback(() => {
     if (rearCustomObjectUrlRef.current) {
@@ -4512,11 +4541,12 @@ export default function HelmetBuilder() {
     setRearCustomPreviewUrl(null);
     setRearCustomFileName('');
     setRearCustomEnabled(false);
+    clearPersistedDesignAsset('rearCustom');
     clearEditableDecalUndo('rear-custom');
     if (selectedEditableDecalRef.current === 'rear-custom') { selectedEditableDecalRef.current=null; setSelectedEditableDecal(null); }
     setRearStickerError('');
     setRearStickerRevision(v => v + 1);
-  }, [clearEditableDecalUndo]);
+  }, [clearEditableDecalUndo, clearPersistedDesignAsset]);
 
   useEffect(() => () => {
     if (rearCustomObjectUrlRef.current) {
@@ -4544,6 +4574,7 @@ export default function HelmetBuilder() {
       if (target.urlRef.current) URL.revokeObjectURL(target.urlRef.current);
       target.urlRef.current = objectUrl;
       target.ref.current = img;
+      clearPersistedDesignAsset(slot === 'shared' ? 'sideLogoShared' : slot === 'left' ? 'sideLogoLeft' : 'sideLogoRight');
       target.setPreview(objectUrl);
       target.setName(file.name);
       if (slot === 'shared') {
@@ -4561,7 +4592,7 @@ export default function HelmetBuilder() {
       setSideLogoError('That side logo file could not be read. Please try another PNG or JPEG.');
     };
     img.src = objectUrl;
-  }, [clearSideLogoUndoHistory]);
+  }, [clearPersistedDesignAsset, clearSideLogoUndoHistory]);
 
   const handleSharedSideLogoUpload = useCallback((event) => {
     const file = event.target.files?.[0];
@@ -4596,9 +4627,10 @@ export default function HelmetBuilder() {
     target.ref.current = null;
     target.setPreview(null);
     target.setName('');
+    clearPersistedDesignAsset(slot === 'shared' ? 'sideLogoShared' : slot === 'left' ? 'sideLogoLeft' : 'sideLogoRight');
     clearSideLogoUndoHistory();
     setSideLogoRevision(v => v + 1);
-  }, [clearSideLogoUndoHistory]);
+  }, [clearPersistedDesignAsset, clearSideLogoUndoHistory]);
 
   useEffect(() => () => {
     [sideLogoSharedObjectUrlRef, sideLogoLeftObjectUrlRef, sideLogoRightObjectUrlRef].forEach(ref => {
@@ -4621,6 +4653,7 @@ export default function HelmetBuilder() {
       if (target.urlRef.current) URL.revokeObjectURL(target.urlRef.current);
       target.urlRef.current = objectUrl;
       target.ref.current = img;
+      clearPersistedDesignAsset(slot === 'front' ? 'bumperFront' : 'bumperRear');
       target.setPreview(objectUrl);
       target.setName(file.name);
       clearEditableDecalUndo(`bumper-${slot}`);
@@ -4632,7 +4665,7 @@ export default function HelmetBuilder() {
       setBumperLogoError('That bumper logo could not be read. Please try another PNG or JPEG.');
     };
     img.src = objectUrl;
-  }, [clearEditableDecalUndo]);
+  }, [clearEditableDecalUndo, clearPersistedDesignAsset]);
 
   const handleFrontBumperLogoUpload = useCallback((event) => {
     const file = event.target.files?.[0];
@@ -4657,10 +4690,30 @@ export default function HelmetBuilder() {
     target.ref.current = null;
     target.setPreview(null);
     target.setName('');
+    clearPersistedDesignAsset(slot === 'front' ? 'bumperFront' : 'bumperRear');
     clearEditableDecalUndo(`bumper-${slot}`);
     if (selectedEditableDecalRef.current === `bumper-${slot}`) { selectedEditableDecalRef.current=null; setSelectedEditableDecal(null); }
     setBumperLogoRevision(v => v + 1);
-  }, [clearEditableDecalUndo]);
+  }, [clearEditableDecalUndo, clearPersistedDesignAsset]);
+
+  useEffect(() => {
+    if (!isLoaded || isSignedIn) return;
+    designAssetLoadTokenRef.current += 1;
+    if (wrapObjectUrlRef.current) removeWrap();
+    if (stripeDesignObjectUrlRef.current) removeStripeDesign();
+    removeSideLogoUpload('shared');
+    removeSideLogoUpload('left');
+    removeSideLogoUpload('right');
+    removeRearCustomSticker();
+    removeBumperLogo('front');
+    removeBumperLogo('rear');
+    setDesignAssets({});
+    setLoadedDesignId(null);
+    setLoadedDesignName('');
+  }, [
+    isLoaded, isSignedIn, removeWrap, removeStripeDesign, removeSideLogoUpload,
+    removeRearCustomSticker, removeBumperLogo,
+  ]);
 
   useEffect(() => () => {
     [bumperLogoFrontObjectUrlRef, bumperLogoRearObjectUrlRef].forEach(ref => {
@@ -7777,7 +7830,7 @@ export default function HelmetBuilder() {
     debugMode
   ]);
 
-  const buildHelmetDesignSnapshot = useCallback(() => {
+  const buildHelmetDesignSnapshot = useCallback((assetManifest = designAssets) => {
     const camera = cameraRef.current;
     const controls = controlsRef.current;
     const builtInWrapSource = presetOwnedWrapRef.current && typeof wrapPreviewUrl === 'string' && wrapPreviewUrl.startsWith('/')
@@ -7786,17 +7839,10 @@ export default function HelmetBuilder() {
     const builtInStripeSource = !stripeDesignObjectUrlRef.current && typeof helmetStripeDesignPreviewUrl === 'string' && helmetStripeDesignPreviewUrl.startsWith('/')
       ? helmetStripeDesignPreviewUrl
       : null;
-    const excludedUploadedAssets = [];
-
-    if (wrapImageRef.current && !builtInWrapSource) excludedUploadedAssets.push('full helmet wrap');
-    if (stripeDesignImageRef.current && !builtInStripeSource) excludedUploadedAssets.push('custom stripe design');
-    if (sideLogoSharedImageRef.current || sideLogoLeftImageRef.current || sideLogoRightImageRef.current) excludedUploadedAssets.push('side logo decal');
-    if (rearCustomImageRef.current) excludedUploadedAssets.push('custom rear sticker');
-    if (bumperLogoFrontImageRef.current || bumperLogoRearImageRef.current) excludedUploadedAssets.push('bumper logo');
-
     return {
-      version: 1,
+      version: 2,
       builderType: 'helmet',
+      assets: { ...assetManifest },
       preset: {
         selectedId: selectedNflPresetId,
         activeId: activeNflPresetId,
@@ -7814,9 +7860,9 @@ export default function HelmetBuilder() {
         carbonFiberSize,
       },
       wrap: {
-        enabled: !!(wrapEnabled && builtInWrapSource),
+        enabled: !!wrapEnabled,
         builtInSource: builtInWrapSource,
-        fileName: builtInWrapSource ? wrapFileName : '',
+        fileName: wrapFileName || '',
         scale: wrapScale,
         scaleX: wrapScaleX,
         scaleY: wrapScaleY,
@@ -7839,9 +7885,9 @@ export default function HelmetBuilder() {
         pipingColor: helmetStripePipingColor,
         finish: decalFinish,
         design: {
-          enabled: !!(helmetStripeDesignEnabled && builtInStripeSource),
+          enabled: !!helmetStripeDesignEnabled,
           builtInSource: builtInStripeSource,
-          fileName: builtInStripeSource ? helmetStripeDesignFileName : '',
+          fileName: helmetStripeDesignFileName || '',
           scale: helmetStripeDesignScale,
           scaleX: helmetStripeDesignScaleX,
           scaleY: helmetStripeDesignScaleY,
@@ -7876,7 +7922,7 @@ export default function HelmetBuilder() {
       rearDecals: {
         flag: { enabled: rearFlagEnabled, scale: rearFlagScale, rotation: rearFlagRotation, across: rearFlagAcross, vertical: rearFlagVertical, locked: rearFlagLocked },
         warning: { enabled: rearWarningEnabled, color: rearWarningColor, scale: rearWarningScale, rotation: rearWarningRotation, across: rearWarningAcross, vertical: rearWarningVertical, locked: rearWarningLocked },
-        custom: { enabled: false, scale: rearCustomScale, rotation: rearCustomRotation, across: rearCustomAcross, vertical: rearCustomVertical, locked: rearCustomLocked },
+        custom: { enabled: rearCustomEnabled, scale: rearCustomScale, rotation: rearCustomRotation, across: rearCustomAcross, vertical: rearCustomVertical, locked: rearCustomLocked },
       },
       bumperLogos: {
         finish: bumperLogoFinish,
@@ -7906,7 +7952,6 @@ export default function HelmetBuilder() {
         resolution: exportResolution,
         supersample: exportSupersample,
       },
-      excludedUploadedAssets,
     };
   }, [
     selectedNflPresetId, activeNflPresetId, colors, finish, facemaskFinish, visorOn,
@@ -7926,7 +7971,7 @@ export default function HelmetBuilder() {
     sideLogoStrokeOpacity, sideLogoLocked, rearFlagEnabled, rearFlagScale,
     rearFlagRotation, rearFlagAcross, rearFlagVertical, rearFlagLocked,
     rearWarningEnabled, rearWarningColor, rearWarningScale, rearWarningRotation,
-    rearWarningAcross, rearWarningVertical, rearWarningLocked, rearCustomScale,
+    rearWarningAcross, rearWarningVertical, rearWarningLocked, rearCustomEnabled, rearCustomScale,
     rearCustomRotation, rearCustomAcross, rearCustomVertical, rearCustomLocked,
     bumperLogoFinish, bumperLogoFrontScale, bumperLogoFrontRotation,
     bumperLogoFrontAcross, bumperLogoFrontVertical, bumperLogoFrontLocked,
@@ -7934,14 +7979,72 @@ export default function HelmetBuilder() {
     bumperLogoRearVertical, bumperLogoRearCurve, bumperLogoRearLocked,
     viewportBgColor, transparentBg, hdriPreset, hdriIntensity, sceneExposure,
     studioLightStrength, rimLightColor, showShadows, shadowOpacity, shadowSoftness,
-    sparkleRotating, activeViewPreset, exportResolution, exportSupersample,
+    sparkleRotating, activeViewPreset, exportResolution, exportSupersample, designAssets,
   ]);
 
-  const restoreHelmetDesignSnapshot = useCallback((rawDesignData) => {
+  const loadPrivateArtworkBlob = useCallback(async (src, fileName, onReady, loadToken = null) => {
+    try {
+      const response = await fetch(src, { cache:'no-store' });
+      if (!response.ok) throw new Error('Private artwork download failed.');
+      const blob = await response.blob();
+      if (loadToken != null && designAssetLoadTokenRef.current !== loadToken) return;
+      const objectUrl = URL.createObjectURL(blob);
+      onReady(objectUrl, blob);
+    } catch {
+      setSavedDesignNotice(`The helmet settings loaded, but ${fileName || 'one saved artwork file'} could not be downloaded. Try loading the design again.`);
+    }
+  }, []);
+
+  const loadSavedArtworkImage = useCallback((slot, src, fileName, loadToken = null) => {
+    if (!src) return;
+    const targets = {
+      sideLogoShared: { imageRef:sideLogoSharedImageRef, objectUrlRef:sideLogoSharedObjectUrlRef, setPreview:setSideLogoSharedPreviewUrl, setName:setSideLogoSharedFileName, revise:() => setSideLogoRevision(value => value + 1) },
+      sideLogoLeft: { imageRef:sideLogoLeftImageRef, objectUrlRef:sideLogoLeftObjectUrlRef, setPreview:setSideLogoLeftPreviewUrl, setName:setSideLogoLeftFileName, revise:() => setSideLogoRevision(value => value + 1) },
+      sideLogoRight: { imageRef:sideLogoRightImageRef, objectUrlRef:sideLogoRightObjectUrlRef, setPreview:setSideLogoRightPreviewUrl, setName:setSideLogoRightFileName, revise:() => setSideLogoRevision(value => value + 1) },
+      rearCustom: { imageRef:rearCustomImageRef, objectUrlRef:rearCustomObjectUrlRef, setPreview:setRearCustomPreviewUrl, setName:setRearCustomFileName, revise:() => setRearStickerRevision(value => value + 1) },
+      bumperFront: { imageRef:bumperLogoFrontImageRef, objectUrlRef:bumperLogoFrontObjectUrlRef, setPreview:setBumperLogoFrontPreviewUrl, setName:setBumperLogoFrontFileName, revise:() => setBumperLogoRevision(value => value + 1) },
+      bumperRear: { imageRef:bumperLogoRearImageRef, objectUrlRef:bumperLogoRearObjectUrlRef, setPreview:setBumperLogoRearPreviewUrl, setName:setBumperLogoRearFileName, revise:() => setBumperLogoRevision(value => value + 1) },
+    };
+    const target = targets[slot];
+    if (!target) return;
+
+    loadPrivateArtworkBlob(src, fileName, objectUrl => {
+      const img = new Image();
+      img.onload = () => {
+        if (loadToken != null && designAssetLoadTokenRef.current !== loadToken) {
+          URL.revokeObjectURL(objectUrl);
+          return;
+        }
+        if (target.objectUrlRef.current) URL.revokeObjectURL(target.objectUrlRef.current);
+        target.objectUrlRef.current = objectUrl;
+        target.imageRef.current = img;
+        target.setPreview(objectUrl);
+        target.setName(fileName || 'saved-artwork.png');
+        target.revise();
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(objectUrl);
+        setSavedDesignNotice(`The helmet settings loaded, but ${fileName || 'one saved artwork file'} could not be decoded. Try loading the design again.`);
+      };
+      img.src = objectUrl;
+    }, loadToken);
+  }, [loadPrivateArtworkBlob]);
+
+  const restoreHelmetDesignSnapshot = useCallback((rawDesignData, assetUrls = {}) => {
     const snapshot = rawDesignData?.settings || rawDesignData;
-    if (!snapshot || snapshot.builderType !== 'helmet' || snapshot.version !== 1) {
+    if (!snapshot || snapshot.builderType !== 'helmet' || ![1, 2].includes(snapshot.version)) {
       throw new Error('This saved design is not compatible with the current Helmet Builder.');
     }
+    const loadToken = designAssetLoadTokenRef.current + 1;
+    designAssetLoadTokenRef.current = loadToken;
+
+    const assetManifest = snapshot.version >= 2 && snapshot.assets && typeof snapshot.assets === 'object'
+      ? snapshot.assets
+      : {};
+    const getSavedAssetUrl = (slot) => {
+      const path = assetManifest[slot]?.path;
+      return path ? assetUrls[path] || null : null;
+    };
 
     const parts = snapshot.parts || {};
     const savedColors = parts.colors && typeof parts.colors === 'object' ? parts.colors : {};
@@ -7968,7 +8071,9 @@ export default function HelmetBuilder() {
     const safeWrapSource = typeof wrap.builtInSource === 'string' && wrap.builtInSource.startsWith('/') && !wrap.builtInSource.startsWith('//')
       ? wrap.builtInSource
       : null;
-    if (safeWrapSource && wrap.enabled) {
+    const savedWrapUrl = getSavedAssetUrl('wrap');
+    removeWrap();
+    if (safeWrapSource) {
       loadWrapFromSource({
         src: safeWrapSource,
         fileName: wrap.fileName || 'helmet-wrap.png',
@@ -7982,9 +8087,32 @@ export default function HelmetBuilder() {
         transparentBackground: !!wrap.transparentBackground,
         projection: wrap.projectionMode || 'panoramic',
         flipY: !!wrap.flipY,
+        enabled: !!wrap.enabled,
+        loadToken,
       });
+    } else if (savedWrapUrl) {
+      const fileName = assetManifest.wrap?.fileName || wrap.fileName || 'helmet-wrap.png';
+      loadPrivateArtworkBlob(savedWrapUrl, fileName, objectUrl => {
+        loadWrapFromSource({
+          src: objectUrl,
+          fileName,
+          scale: wrap.scale ?? 1,
+          scaleX: wrap.scaleX ?? 1,
+          scaleY: wrap.scaleY ?? 1,
+          rotation: wrap.rotation ?? 0,
+          offsetX: wrap.offsetX ?? 0,
+          offsetY: wrap.offsetY ?? 0,
+          opacity: wrap.opacity ?? 1,
+          transparentBackground: !!wrap.transparentBackground,
+          projection: wrap.projectionMode || 'panoramic',
+          flipY: !!wrap.flipY,
+          enabled: !!wrap.enabled,
+          presetOwned: false,
+          ownedObjectUrl: true,
+          loadToken,
+        });
+      }, loadToken);
     } else {
-      removeWrap();
       setWrapScale(wrap.scale ?? 1);
       setWrapScaleX(wrap.scaleX ?? 1);
       setWrapScaleY(wrap.scaleY ?? 1);
@@ -8002,6 +8130,8 @@ export default function HelmetBuilder() {
     const safeStripeSource = typeof stripeDesign.builtInSource === 'string' && stripeDesign.builtInSource.startsWith('/') && !stripeDesign.builtInSource.startsWith('//')
       ? stripeDesign.builtInSource
       : null;
+    const savedStripeUrl = getSavedAssetUrl('stripeDesign');
+    removeStripeDesign();
     setHelmetStripesEnabled(!!stripes.enabled);
     setHelmetStripePreset(stripes.preset || 'threeEqual');
     setHelmetStripeWidth(stripes.width ?? 2);
@@ -8011,7 +8141,7 @@ export default function HelmetBuilder() {
     setHelmetStripeCenterColor(stripes.centerColor || '#fcfcfc');
     setHelmetStripePipingColor(stripes.pipingColor || '#151515');
     setDecalFinish(stripes.finish || 'gloss');
-    if (safeStripeSource && stripeDesign.enabled) {
+    if (safeStripeSource) {
       loadStripeDesignFromSource({
         src: safeStripeSource,
         fileName: stripeDesign.fileName || 'stripe-design.png',
@@ -8025,9 +8155,31 @@ export default function HelmetBuilder() {
         offsetY: stripeDesign.offsetY ?? 0,
         opacity: stripeDesign.opacity ?? 1,
         canvasAspect: stripeDesign.canvasAspect ?? (1 / 3),
+        enabled: !!stripeDesign.enabled,
+        loadToken,
       });
+    } else if (savedStripeUrl) {
+      const fileName = assetManifest.stripeDesign?.fileName || stripeDesign.fileName || 'stripe-design.png';
+      loadPrivateArtworkBlob(savedStripeUrl, fileName, objectUrl => {
+        loadStripeDesignFromSource({
+          src: objectUrl,
+          fileName,
+          scale: stripeDesign.scale ?? 1,
+          scaleX: stripeDesign.scaleX ?? 1,
+          scaleY: stripeDesign.scaleY ?? 1,
+          stripeWidth: stripes.width ?? 2,
+          stripeLength: stripes.length ?? 1,
+          rotation: stripeDesign.rotation ?? 0,
+          offsetX: stripeDesign.offsetX ?? 0,
+          offsetY: stripeDesign.offsetY ?? 0,
+          opacity: stripeDesign.opacity ?? 1,
+          canvasAspect: stripeDesign.canvasAspect ?? (1 / 3),
+          enabled: !!stripeDesign.enabled,
+          ownedObjectUrl: true,
+          loadToken,
+        });
+      }, loadToken);
     } else {
-      removeStripeDesign();
       setHelmetStripeDesignScale(stripeDesign.scale ?? 1);
       setHelmetStripeDesignScaleX(stripeDesign.scaleX ?? 1);
       setHelmetStripeDesignScaleY(stripeDesign.scaleY ?? 1);
@@ -8037,14 +8189,19 @@ export default function HelmetBuilder() {
       setHelmetStripeDesignOpacity(stripeDesign.opacity ?? 1);
     }
 
-    // V1 intentionally restores settings only. Any current browser-local uploaded
-    // artwork is removed so a loaded design never silently displays the wrong files.
+    // Clear browser-local artwork before attaching the private signed URLs belonging
+    // to the selected design. This prevents assets from different designs mixing.
     removeSideLogoUpload('shared');
     removeSideLogoUpload('left');
     removeSideLogoUpload('right');
     removeRearCustomSticker();
     removeBumperLogo('front');
     removeBumperLogo('rear');
+
+    ['sideLogoShared', 'sideLogoLeft', 'sideLogoRight', 'rearCustom', 'bumperFront', 'bumperRear'].forEach(slot => {
+      const url = getSavedAssetUrl(slot);
+      if (url) loadSavedArtworkImage(slot, url, assetManifest[slot]?.fileName, loadToken);
+    });
 
     const sideLogos = snapshot.sideLogos || {};
     setSideLogoIndependent(!!sideLogos.independent);
@@ -8084,7 +8241,7 @@ export default function HelmetBuilder() {
     setRearWarningAcross(warning.across ?? 58);
     setRearWarningVertical(warning.vertical ?? -38);
     setRearWarningLocked(!!warning.locked);
-    setRearCustomEnabled(false);
+    setRearCustomEnabled(!!(custom.enabled && getSavedAssetUrl('rearCustom')));
     setRearCustomScale(custom.scale ?? 5.4);
     setRearCustomRotation(custom.rotation ?? 0);
     setRearCustomAcross(custom.across ?? 0);
@@ -8149,11 +8306,15 @@ export default function HelmetBuilder() {
     }
     setActiveViewPreset(cameraSettings.activeViewPreset || 'sideA');
 
-    return Array.isArray(snapshot.excludedUploadedAssets) ? snapshot.excludedUploadedAssets : [];
+    setDesignAssets(assetManifest);
+
+    return snapshot.version === 1 && Array.isArray(snapshot.excludedUploadedAssets)
+      ? snapshot.excludedUploadedAssets
+      : [];
   }, [
     loadWrapFromSource, removeWrap, loadStripeDesignFromSource, removeStripeDesign,
     removeSideLogoUpload, removeRearCustomSticker, removeBumperLogo,
-    clearSideLogoUndoHistory, applyViewPreset,
+    clearSideLogoUndoHistory, applyViewPreset, loadSavedArtworkImage, loadPrivateArtworkBlob,
   ]);
 
   const requestDesignApi = useCallback(async (path, options = {}) => {
@@ -8162,6 +8323,72 @@ export default function HelmetBuilder() {
     if (!response.ok) throw new Error(data?.error || 'Saved design request failed. Please try again.');
     return data;
   }, []);
+
+  const cleanupUncommittedAssets = useCallback(async (paths) => {
+    await Promise.allSettled((paths || []).map(path => requestDesignApi('/api/designs/upload-asset', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path }),
+    })));
+  }, [requestDesignApi]);
+
+  const persistCurrentArtwork = useCallback(async () => {
+    const candidates = [
+      { slot:'wrap', image:wrapImageRef.current, objectUrl:wrapObjectUrlRef.current, fileName:wrapFileName, builtIn:presetOwnedWrapRef.current },
+      { slot:'stripeDesign', image:stripeDesignImageRef.current, objectUrl:stripeDesignObjectUrlRef.current, fileName:helmetStripeDesignFileName, builtIn:!stripeDesignObjectUrlRef.current && typeof helmetStripeDesignPreviewUrl === 'string' && helmetStripeDesignPreviewUrl.startsWith('/') },
+      { slot:'sideLogoShared', image:sideLogoSharedImageRef.current, objectUrl:sideLogoSharedObjectUrlRef.current, fileName:sideLogoSharedFileName },
+      { slot:'sideLogoLeft', image:sideLogoLeftImageRef.current, objectUrl:sideLogoLeftObjectUrlRef.current, fileName:sideLogoLeftFileName },
+      { slot:'sideLogoRight', image:sideLogoRightImageRef.current, objectUrl:sideLogoRightObjectUrlRef.current, fileName:sideLogoRightFileName },
+      { slot:'rearCustom', image:rearCustomImageRef.current, objectUrl:rearCustomObjectUrlRef.current, fileName:rearCustomFileName },
+      { slot:'bumperFront', image:bumperLogoFrontImageRef.current, objectUrl:bumperLogoFrontObjectUrlRef.current, fileName:bumperLogoFrontFileName },
+      { slot:'bumperRear', image:bumperLogoRearImageRef.current, objectUrl:bumperLogoRearObjectUrlRef.current, fileName:bumperLogoRearFileName },
+    ].filter(candidate => candidate.image && !candidate.builtIn);
+
+    const nextManifest = { ...designAssets };
+    const newlyUploadedPaths = [];
+    try {
+      for (let index = 0; index < candidates.length; index += 1) {
+        const candidate = candidates[index];
+        const existing = designAssets[candidate.slot];
+        if (existing?.path) {
+          nextManifest[candidate.slot] = existing;
+          continue;
+        }
+        if (!candidate.objectUrl) continue;
+
+        setSavedDesignUploadStatus(`Uploading artwork ${index + 1} of ${candidates.length}...`);
+        const blobResponse = await fetch(candidate.objectUrl);
+        if (!blobResponse.ok) throw new Error(`Could not prepare ${candidate.fileName || 'uploaded artwork'} for saving.`);
+        const blob = await blobResponse.blob();
+        const fallbackExtension = blob.type === 'image/jpeg' ? 'jpg' : blob.type === 'image/webp' ? 'webp' : 'png';
+        const safeFileName = candidate.fileName || `${candidate.slot}.${fallbackExtension}`;
+        const file = new File([blob], safeFileName, { type: blob.type || 'image/png' });
+        const formData = new FormData();
+        formData.append('file', file);
+        const uploaded = await requestDesignApi('/api/designs/upload-asset', {
+          method: 'POST',
+          body: formData,
+        });
+        newlyUploadedPaths.push(uploaded.path);
+        nextManifest[candidate.slot] = {
+          path: uploaded.path,
+          fileName: safeFileName,
+          mimeType: file.type,
+          size: file.size,
+        };
+      }
+
+      return { manifest: nextManifest, newlyUploadedPaths };
+    } catch (error) {
+      await cleanupUncommittedAssets(newlyUploadedPaths);
+      throw error;
+    }
+  }, [
+    designAssets, wrapFileName, helmetStripeDesignFileName, helmetStripeDesignPreviewUrl,
+    sideLogoSharedFileName, sideLogoLeftFileName, sideLogoRightFileName,
+    rearCustomFileName, bumperLogoFrontFileName, bumperLogoRearFileName,
+    requestDesignApi, cleanupUncommittedAssets,
+  ]);
 
   const refreshSavedDesigns = useCallback(async () => {
     if (!isSignedIn) return;
@@ -8211,6 +8438,7 @@ export default function HelmetBuilder() {
     const action = designNameDialog;
     setSavedDesignBusyId(action.id || action.mode);
     setSavedDesignError('');
+    let newlyUploadedPaths = [];
     try {
       if (action.mode === 'rename') {
         await requestDesignApi('/api/designs/rename', {
@@ -8221,36 +8449,48 @@ export default function HelmetBuilder() {
         setSavedDesignNotice(`Renamed to “${name}”.`);
       } else {
         let designData;
+        let assetPaths = [];
+        let persistedManifest = null;
         if (action.mode === 'duplicate') {
           const loaded = await requestDesignApi('/api/designs/load', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ id: action.id }),
           });
           designData = loaded.design?.design_data;
+          assetPaths = Object.values(designData?.assets || {}).map(asset => asset?.path).filter(Boolean);
         } else {
-          designData = buildHelmetDesignSnapshot();
+          const persisted = await persistCurrentArtwork();
+          persistedManifest = persisted.manifest;
+          newlyUploadedPaths = persisted.newlyUploadedPaths;
+          designData = buildHelmetDesignSnapshot(persistedManifest);
+          assetPaths = Object.values(persistedManifest).map(asset => asset.path).filter(Boolean);
         }
 
+        setSavedDesignUploadStatus('Saving design...');
         const saved = await requestDesignApi('/api/designs/save', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ builderType: 'helmet', name, designData, assetPaths: [] }),
+          body: JSON.stringify({ builderType: 'helmet', name, designData, assetPaths }),
         });
+        newlyUploadedPaths = [];
         if (action.mode === 'save') {
           setLoadedDesignId(saved.design?.id || null);
           setLoadedDesignName(name);
+          setDesignAssets(persistedManifest || {});
         }
         setSavedDesignNotice(action.mode === 'duplicate' ? `Duplicated as “${name}”.` : `Saved “${name}”.`);
       }
       setDesignNameDialog(null);
       await refreshSavedDesigns();
     } catch (error) {
+      if (newlyUploadedPaths.length) await cleanupUncommittedAssets(newlyUploadedPaths);
       setSavedDesignError(error?.message || 'Could not save this design.');
     } finally {
+      setSavedDesignUploadStatus('');
       setSavedDesignBusyId(null);
     }
   }, [
     designNameDialog, savedDesignBusyId, requestDesignApi, buildHelmetDesignSnapshot,
-    loadedDesignId, refreshSavedDesigns,
+    persistCurrentArtwork, cleanupUncommittedAssets, loadedDesignId, refreshSavedDesigns,
   ]);
 
   const loadSavedDesign = useCallback(async (design) => {
@@ -8262,7 +8502,7 @@ export default function HelmetBuilder() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: design.id }),
       });
-      const excluded = restoreHelmetDesignSnapshot(data.design?.design_data);
+      const excluded = restoreHelmetDesignSnapshot(data.design?.design_data, data.assetUrls || {});
       setLoadedDesignId(design.id);
       setLoadedDesignName(data.design?.name || design.name || 'Saved design');
       setShowDesignsModal(false);
@@ -8290,6 +8530,7 @@ export default function HelmetBuilder() {
       if (loadedDesignId === design.id) {
         setLoadedDesignId(null);
         setLoadedDesignName('');
+        setDesignAssets({});
       }
       setSavedDesignNotice(`Deleted “${design.name}”.`);
       await refreshSavedDesigns();
@@ -8665,7 +8906,7 @@ export default function HelmetBuilder() {
                         </div>
                       ) : selectedNflPreset.stripe.customRequired ? (
                         <div style={{ marginTop:7, fontSize:8, color:'#8b7351', lineHeight:1.4 }}>
-                          This team's primary stripe requires custom artwork, so the preset loads the approved base without that stripe.
+                          This team&apos;s primary stripe requires custom artwork, so the preset loads the approved base without that stripe.
                         </div>
                       ) : null}
                     </div>
@@ -9787,7 +10028,7 @@ export default function HelmetBuilder() {
 
             <div style={{ padding:'14px 20px 18px', overflowY:'auto' }}>
               <div style={{ marginBottom:12, padding:'9px 11px', borderRadius:8, background:'rgba(239,255,0,0.045)', border:'1px solid rgba(239,255,0,0.14)', color:'#9ca3af', fontSize:9, lineHeight:1.5 }}>
-                This first version saves helmet settings and built-in preset artwork. Uploaded wraps, decals, stripes, and bumper logos must be uploaded again after loading.
+                Uploaded wraps, stripe artwork, side logos, rear stickers, and bumper logos are saved privately with the design. Storage allowance: {savedDesignPlan === 'lifetime' ? '250 MB' : savedDesignPlan === 'unlimited' ? '100 MB' : savedDesignPlan === 'paid_credits' ? '25 MB' : '10 MB'}.
               </div>
 
               {savedDesignError && (
@@ -9855,11 +10096,12 @@ export default function HelmetBuilder() {
               style={{ width:'100%', boxSizing:'border-box', background:'rgba(255,255,255,0.055)', border:'1px solid rgba(255,255,255,0.15)', borderRadius:8, padding:'11px 12px', outline:'none', color:'#f3f4f6', fontSize:12, fontFamily:"'Barlow',sans-serif", marginBottom:9 }}
             />
             {savedDesignError && <div style={{ marginBottom:10, color:'#fca5a5', fontSize:9, lineHeight:1.45 }}>{savedDesignError}</div>}
+            {savedDesignUploadStatus && <div style={{ marginBottom:10, color:'#efff00', fontSize:9, lineHeight:1.45 }}>{savedDesignUploadStatus}</div>}
             <div style={{ color:'#4b5563', fontSize:8, marginBottom:14 }}>{designNameDialog.name.length}/80 characters</div>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1.35fr', gap:8 }}>
               <button type="button" onClick={() => { setDesignNameDialog(null); setSavedDesignError(''); }} disabled={!!savedDesignBusyId} style={{ background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.10)', borderRadius:7, padding:'10px', color:'#9ca3af', cursor:savedDesignBusyId?'default':'pointer', fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800, fontSize:11 }}>CANCEL</button>
               <button type="submit" disabled={!!savedDesignBusyId || !designNameDialog.name.trim()} style={{ background:'linear-gradient(135deg,#efff00,#c8d900)', border:'none', borderRadius:7, padding:'10px', color:'#000', cursor:savedDesignBusyId||!designNameDialog.name.trim()?'default':'pointer', opacity:savedDesignBusyId||!designNameDialog.name.trim()?0.45:1, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:11, letterSpacing:'0.05em' }}>
-                {savedDesignBusyId ? 'WORKING...' : designNameDialog.mode === 'rename' ? 'SAVE NAME' : designNameDialog.mode === 'duplicate' ? 'CREATE COPY' : 'SAVE DESIGN'}
+                {savedDesignUploadStatus ? 'SAVING ARTWORK...' : savedDesignBusyId ? 'WORKING...' : designNameDialog.mode === 'rename' ? 'SAVE NAME' : designNameDialog.mode === 'duplicate' ? 'CREATE COPY' : 'SAVE DESIGN'}
               </button>
             </div>
           </form>
