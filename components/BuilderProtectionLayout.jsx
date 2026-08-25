@@ -174,13 +174,17 @@ export default function BuilderProtectionLayout({ children }) {
 
         .${WATERMARK_CLASS} {
           position: absolute;
-          inset: 0;
-          z-index: 20;
+          inset: -35%;
+          z-index: 1;
           pointer-events: none;
           overflow: hidden;
-          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='360' height='220' viewBox='0 0 360 220'%3E%3Cg transform='rotate(-28 180 110)'%3E%3Ctext x='180' y='110' text-anchor='middle' dominant-baseline='middle' fill='white' fill-opacity='.22' stroke='black' stroke-opacity='.10' stroke-width='1' font-family='Arial,sans-serif' font-size='24' font-weight='700' letter-spacing='2'%3EPROLINEMOCKUPS.COM%3C/text%3E%3C/g%3E%3C/svg%3E");
+          opacity: 0.1;
+          transform: rotate(-24deg);
+          transform-origin: center;
+          background-image: url('/images/proline-watermark.png');
           background-repeat: repeat;
-          background-size: 360px 220px;
+          background-position: center;
+          background-size: 300px auto;
         }
 
         @media (max-width: ${MOBILE_BREAKPOINT}px) {
