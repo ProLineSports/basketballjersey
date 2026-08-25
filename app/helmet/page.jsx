@@ -3946,6 +3946,20 @@ export default function HelmetBuilder() {
   const [checkingOut, setCheckingOut]     = useState(false);
   const [checkoutError, setCheckoutError] = useState('');
 
+  // ── SAVED DESIGNS (settings-only V1) ──────────────────────────────────────
+  const [showDesignsModal, setShowDesignsModal] = useState(false);
+  const [savedDesigns, setSavedDesigns] = useState([]);
+  const [savedDesignCount, setSavedDesignCount] = useState(0);
+  const [savedDesignLimit, setSavedDesignLimit] = useState(3);
+  const [savedDesignPlan, setSavedDesignPlan] = useState('free');
+  const [savedDesignsLoading, setSavedDesignsLoading] = useState(false);
+  const [savedDesignBusyId, setSavedDesignBusyId] = useState(null);
+  const [savedDesignError, setSavedDesignError] = useState('');
+  const [savedDesignNotice, setSavedDesignNotice] = useState('');
+  const [loadedDesignId, setLoadedDesignId] = useState(null);
+  const [loadedDesignName, setLoadedDesignName] = useState('');
+  const [designNameDialog, setDesignNameDialog] = useState(null);
+
   const applyCreditState = useCallback((data) => {
     if (!data) return;
     setCredits(data.totalCredits || 0);
@@ -7763,6 +7777,529 @@ export default function HelmetBuilder() {
     debugMode
   ]);
 
+  const buildHelmetDesignSnapshot = useCallback(() => {
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
+    const builtInWrapSource = presetOwnedWrapRef.current && typeof wrapPreviewUrl === 'string' && wrapPreviewUrl.startsWith('/')
+      ? wrapPreviewUrl
+      : null;
+    const builtInStripeSource = !stripeDesignObjectUrlRef.current && typeof helmetStripeDesignPreviewUrl === 'string' && helmetStripeDesignPreviewUrl.startsWith('/')
+      ? helmetStripeDesignPreviewUrl
+      : null;
+    const excludedUploadedAssets = [];
+
+    if (wrapImageRef.current && !builtInWrapSource) excludedUploadedAssets.push('full helmet wrap');
+    if (stripeDesignImageRef.current && !builtInStripeSource) excludedUploadedAssets.push('custom stripe design');
+    if (sideLogoSharedImageRef.current || sideLogoLeftImageRef.current || sideLogoRightImageRef.current) excludedUploadedAssets.push('side logo decal');
+    if (rearCustomImageRef.current) excludedUploadedAssets.push('custom rear sticker');
+    if (bumperLogoFrontImageRef.current || bumperLogoRearImageRef.current) excludedUploadedAssets.push('bumper logo');
+
+    return {
+      version: 1,
+      builderType: 'helmet',
+      preset: {
+        selectedId: selectedNflPresetId,
+        activeId: activeNflPresetId,
+      },
+      parts: {
+        colors: { ...colors },
+        shellFinish: finish,
+        facemaskFinish,
+        visorOn,
+        glitter,
+        glitterSize,
+        glitterColor,
+        satinMetallic,
+        satinTexture,
+        carbonFiberSize,
+      },
+      wrap: {
+        enabled: !!(wrapEnabled && builtInWrapSource),
+        builtInSource: builtInWrapSource,
+        fileName: builtInWrapSource ? wrapFileName : '',
+        scale: wrapScale,
+        scaleX: wrapScaleX,
+        scaleY: wrapScaleY,
+        rotation: wrapRotation,
+        offsetX: wrapOffsetX,
+        offsetY: wrapOffsetY,
+        opacity: wrapOpacity,
+        transparentBackground: wrapTransparentBackground,
+        projectionMode: wrapProjectionMode,
+        flipY: wrapFlipY,
+      },
+      stripes: {
+        enabled: helmetStripesEnabled,
+        preset: helmetStripePreset,
+        width: helmetStripeWidth,
+        length: helmetStripeLength,
+        singleColor: helmetStripeSingleColor,
+        outerColor: helmetStripeOuterColor,
+        centerColor: helmetStripeCenterColor,
+        pipingColor: helmetStripePipingColor,
+        finish: decalFinish,
+        design: {
+          enabled: !!(helmetStripeDesignEnabled && builtInStripeSource),
+          builtInSource: builtInStripeSource,
+          fileName: builtInStripeSource ? helmetStripeDesignFileName : '',
+          scale: helmetStripeDesignScale,
+          scaleX: helmetStripeDesignScaleX,
+          scaleY: helmetStripeDesignScaleY,
+          rotation: helmetStripeDesignRotation,
+          offsetX: helmetStripeDesignOffsetX,
+          offsetY: helmetStripeDesignOffsetY,
+          opacity: helmetStripeDesignOpacity,
+          canvasAspect: stripeDesignCanvasAspectRef.current,
+        },
+      },
+      sideLogos: {
+        independent: sideLogoIndependent,
+        leftVisible: sideLogoLeftVisible,
+        rightVisible: sideLogoRightVisible,
+        leftMirror: sideLogoLeftMirror,
+        rightMirror: sideLogoRightMirror,
+        leftRotate180: sideLogoLeftRotate180,
+        rightRotate180: sideLogoRightRotate180,
+        scale: sideLogoScale,
+        frontBack: sideLogoFrontBack,
+        upDown: sideLogoUpDown,
+        strokeEnabled: sideLogoStrokeEnabled,
+        strokeColor: sideLogoStrokeColor,
+        strokeThickness: sideLogoStrokeThickness,
+        strokeOpacity: sideLogoStrokeOpacity,
+        locked: sideLogoLocked,
+        placements: {
+          left: { ...sideLogoPlacementRef.current.left },
+          right: { ...sideLogoPlacementRef.current.right },
+        },
+      },
+      rearDecals: {
+        flag: { enabled: rearFlagEnabled, scale: rearFlagScale, rotation: rearFlagRotation, across: rearFlagAcross, vertical: rearFlagVertical, locked: rearFlagLocked },
+        warning: { enabled: rearWarningEnabled, color: rearWarningColor, scale: rearWarningScale, rotation: rearWarningRotation, across: rearWarningAcross, vertical: rearWarningVertical, locked: rearWarningLocked },
+        custom: { enabled: false, scale: rearCustomScale, rotation: rearCustomRotation, across: rearCustomAcross, vertical: rearCustomVertical, locked: rearCustomLocked },
+      },
+      bumperLogos: {
+        finish: bumperLogoFinish,
+        front: { scale: bumperLogoFrontScale, rotation: bumperLogoFrontRotation, across: bumperLogoFrontAcross, vertical: bumperLogoFrontVertical, locked: bumperLogoFrontLocked },
+        rear: { scale: bumperLogoRearScale, rotation: bumperLogoRearRotation, across: bumperLogoRearAcross, vertical: bumperLogoRearVertical, curve: bumperLogoRearCurve, locked: bumperLogoRearLocked },
+      },
+      studio: {
+        viewportBgColor,
+        transparentBg,
+        hdriPreset,
+        hdriIntensity,
+        sceneExposure,
+        studioLightStrength,
+        rimLightColor,
+        showShadows,
+        shadowOpacity,
+        shadowSoftness,
+        sparkleRotating,
+      },
+      camera: {
+        activeViewPreset,
+        position: camera ? camera.position.toArray() : null,
+        up: camera ? camera.up.toArray() : null,
+        target: controls ? controls.target.toArray() : null,
+      },
+      export: {
+        resolution: exportResolution,
+        supersample: exportSupersample,
+      },
+      excludedUploadedAssets,
+    };
+  }, [
+    selectedNflPresetId, activeNflPresetId, colors, finish, facemaskFinish, visorOn,
+    glitter, glitterSize, glitterColor, satinMetallic, satinTexture, carbonFiberSize,
+    wrapEnabled, wrapPreviewUrl, wrapFileName, wrapScale, wrapScaleX, wrapScaleY,
+    wrapRotation, wrapOffsetX, wrapOffsetY, wrapOpacity, wrapTransparentBackground,
+    wrapProjectionMode, wrapFlipY, helmetStripesEnabled, helmetStripePreset,
+    helmetStripeWidth, helmetStripeLength, helmetStripeSingleColor,
+    helmetStripeOuterColor, helmetStripeCenterColor, helmetStripePipingColor,
+    decalFinish, helmetStripeDesignEnabled, helmetStripeDesignPreviewUrl,
+    helmetStripeDesignFileName, helmetStripeDesignScale, helmetStripeDesignScaleX,
+    helmetStripeDesignScaleY, helmetStripeDesignRotation, helmetStripeDesignOffsetX,
+    helmetStripeDesignOffsetY, helmetStripeDesignOpacity, sideLogoIndependent,
+    sideLogoLeftVisible, sideLogoRightVisible, sideLogoLeftMirror, sideLogoRightMirror,
+    sideLogoLeftRotate180, sideLogoRightRotate180, sideLogoScale, sideLogoFrontBack,
+    sideLogoUpDown, sideLogoStrokeEnabled, sideLogoStrokeColor, sideLogoStrokeThickness,
+    sideLogoStrokeOpacity, sideLogoLocked, rearFlagEnabled, rearFlagScale,
+    rearFlagRotation, rearFlagAcross, rearFlagVertical, rearFlagLocked,
+    rearWarningEnabled, rearWarningColor, rearWarningScale, rearWarningRotation,
+    rearWarningAcross, rearWarningVertical, rearWarningLocked, rearCustomScale,
+    rearCustomRotation, rearCustomAcross, rearCustomVertical, rearCustomLocked,
+    bumperLogoFinish, bumperLogoFrontScale, bumperLogoFrontRotation,
+    bumperLogoFrontAcross, bumperLogoFrontVertical, bumperLogoFrontLocked,
+    bumperLogoRearScale, bumperLogoRearRotation, bumperLogoRearAcross,
+    bumperLogoRearVertical, bumperLogoRearCurve, bumperLogoRearLocked,
+    viewportBgColor, transparentBg, hdriPreset, hdriIntensity, sceneExposure,
+    studioLightStrength, rimLightColor, showShadows, shadowOpacity, shadowSoftness,
+    sparkleRotating, activeViewPreset, exportResolution, exportSupersample,
+  ]);
+
+  const restoreHelmetDesignSnapshot = useCallback((rawDesignData) => {
+    const snapshot = rawDesignData?.settings || rawDesignData;
+    if (!snapshot || snapshot.builderType !== 'helmet' || snapshot.version !== 1) {
+      throw new Error('This saved design is not compatible with the current Helmet Builder.');
+    }
+
+    const parts = snapshot.parts || {};
+    const savedColors = parts.colors && typeof parts.colors === 'object' ? parts.colors : {};
+    const validZoneIds = new Set(ZONES.map(zone => zone.id));
+    setColors(current => ({
+      ...current,
+      ...Object.fromEntries(Object.entries(savedColors).filter(([id, value]) => validZoneIds.has(id) && /^#[0-9a-f]{6}$/i.test(String(value)))),
+    }));
+    setFinish(parts.shellFinish || 'gloss');
+    setFacemaskFinish(parts.facemaskFinish || 'gloss');
+    setVisorOn(parts.visorOn !== false);
+    setGlitter(parts.glitter ?? 0.3);
+    setGlitterSize(parts.glitterSize ?? 0.55);
+    setGlitterColor(parts.glitterColor || '#ffffff');
+    setSatinMetallic(parts.satinMetallic ?? 0.62);
+    setSatinTexture(parts.satinTexture ?? 0.45);
+    setCarbonFiberSize(parts.carbonFiberSize ?? 1);
+
+    const preset = snapshot.preset || {};
+    setSelectedNflPresetId(preset.selectedId || 'NFL_ARI');
+    setActiveNflPresetId(preset.activeId || null);
+
+    const wrap = snapshot.wrap || {};
+    const safeWrapSource = typeof wrap.builtInSource === 'string' && wrap.builtInSource.startsWith('/') && !wrap.builtInSource.startsWith('//')
+      ? wrap.builtInSource
+      : null;
+    if (safeWrapSource && wrap.enabled) {
+      loadWrapFromSource({
+        src: safeWrapSource,
+        fileName: wrap.fileName || 'helmet-wrap.png',
+        scale: wrap.scale ?? 1,
+        scaleX: wrap.scaleX ?? 1,
+        scaleY: wrap.scaleY ?? 1,
+        rotation: wrap.rotation ?? 0,
+        offsetX: wrap.offsetX ?? 0,
+        offsetY: wrap.offsetY ?? 0,
+        opacity: wrap.opacity ?? 1,
+        transparentBackground: !!wrap.transparentBackground,
+        projection: wrap.projectionMode || 'panoramic',
+        flipY: !!wrap.flipY,
+      });
+    } else {
+      removeWrap();
+      setWrapScale(wrap.scale ?? 1);
+      setWrapScaleX(wrap.scaleX ?? 1);
+      setWrapScaleY(wrap.scaleY ?? 1);
+      setWrapRotation(wrap.rotation ?? 0);
+      setWrapOffsetX(wrap.offsetX ?? 0);
+      setWrapOffsetY(wrap.offsetY ?? 0);
+      setWrapOpacity(wrap.opacity ?? 1);
+      setWrapTransparentBackground(!!wrap.transparentBackground);
+      setWrapProjectionMode(wrap.projectionMode || 'panoramic');
+      setWrapFlipY(!!wrap.flipY);
+    }
+
+    const stripes = snapshot.stripes || {};
+    const stripeDesign = stripes.design || {};
+    const safeStripeSource = typeof stripeDesign.builtInSource === 'string' && stripeDesign.builtInSource.startsWith('/') && !stripeDesign.builtInSource.startsWith('//')
+      ? stripeDesign.builtInSource
+      : null;
+    setHelmetStripesEnabled(!!stripes.enabled);
+    setHelmetStripePreset(stripes.preset || 'threeEqual');
+    setHelmetStripeWidth(stripes.width ?? 2);
+    setHelmetStripeLength(stripes.length ?? 1);
+    setHelmetStripeSingleColor(stripes.singleColor || '#efff00');
+    setHelmetStripeOuterColor(stripes.outerColor || '#efff00');
+    setHelmetStripeCenterColor(stripes.centerColor || '#fcfcfc');
+    setHelmetStripePipingColor(stripes.pipingColor || '#151515');
+    setDecalFinish(stripes.finish || 'gloss');
+    if (safeStripeSource && stripeDesign.enabled) {
+      loadStripeDesignFromSource({
+        src: safeStripeSource,
+        fileName: stripeDesign.fileName || 'stripe-design.png',
+        scale: stripeDesign.scale ?? 1,
+        scaleX: stripeDesign.scaleX ?? 1,
+        scaleY: stripeDesign.scaleY ?? 1,
+        stripeWidth: stripes.width ?? 2,
+        stripeLength: stripes.length ?? 1,
+        rotation: stripeDesign.rotation ?? 0,
+        offsetX: stripeDesign.offsetX ?? 0,
+        offsetY: stripeDesign.offsetY ?? 0,
+        opacity: stripeDesign.opacity ?? 1,
+        canvasAspect: stripeDesign.canvasAspect ?? (1 / 3),
+      });
+    } else {
+      removeStripeDesign();
+      setHelmetStripeDesignScale(stripeDesign.scale ?? 1);
+      setHelmetStripeDesignScaleX(stripeDesign.scaleX ?? 1);
+      setHelmetStripeDesignScaleY(stripeDesign.scaleY ?? 1);
+      setHelmetStripeDesignRotation(stripeDesign.rotation ?? 0);
+      setHelmetStripeDesignOffsetX(stripeDesign.offsetX ?? 0);
+      setHelmetStripeDesignOffsetY(stripeDesign.offsetY ?? 0);
+      setHelmetStripeDesignOpacity(stripeDesign.opacity ?? 1);
+    }
+
+    // V1 intentionally restores settings only. Any current browser-local uploaded
+    // artwork is removed so a loaded design never silently displays the wrong files.
+    removeSideLogoUpload('shared');
+    removeSideLogoUpload('left');
+    removeSideLogoUpload('right');
+    removeRearCustomSticker();
+    removeBumperLogo('front');
+    removeBumperLogo('rear');
+
+    const sideLogos = snapshot.sideLogos || {};
+    setSideLogoIndependent(!!sideLogos.independent);
+    setSideLogoLeftVisible(sideLogos.leftVisible !== false);
+    setSideLogoRightVisible(sideLogos.rightVisible !== false);
+    setSideLogoLeftMirror(!!sideLogos.leftMirror);
+    setSideLogoRightMirror(sideLogos.rightMirror !== false);
+    setSideLogoLeftRotate180(!!sideLogos.leftRotate180);
+    setSideLogoRightRotate180(!!sideLogos.rightRotate180);
+    setSideLogoScale(sideLogos.scale ?? 1);
+    setSideLogoFrontBack(sideLogos.frontBack ?? 0);
+    setSideLogoUpDown(sideLogos.upDown ?? 0);
+    setSideLogoStrokeEnabled(!!sideLogos.strokeEnabled);
+    setSideLogoStrokeColor(sideLogos.strokeColor || '#ffffff');
+    setSideLogoStrokeThickness(sideLogos.strokeThickness ?? 8);
+    setSideLogoStrokeOpacity(sideLogos.strokeOpacity ?? 0.2);
+    setSideLogoLocked(!!sideLogos.locked);
+    if (sideLogos.placements?.left) sideLogoPlacementRef.current.left = { ...cloneDefaultSideLogoPlacement(), ...sideLogos.placements.left };
+    if (sideLogos.placements?.right) sideLogoPlacementRef.current.right = { ...cloneDefaultSideLogoPlacement(), ...sideLogos.placements.right };
+    clearSideLogoUndoHistory();
+    setSideLogoRevision(value => value + 1);
+
+    const rear = snapshot.rearDecals || {};
+    const flag = rear.flag || {};
+    const warning = rear.warning || {};
+    const custom = rear.custom || {};
+    setRearFlagEnabled(!!flag.enabled);
+    setRearFlagScale(flag.scale ?? 2.7);
+    setRearFlagRotation(flag.rotation ?? 0);
+    setRearFlagAcross(flag.across ?? -62);
+    setRearFlagVertical(flag.vertical ?? -38);
+    setRearFlagLocked(!!flag.locked);
+    setRearWarningEnabled(!!warning.enabled);
+    setRearWarningColor(warning.color || '#FFFFFF');
+    setRearWarningScale(warning.scale ?? 2.7);
+    setRearWarningRotation(warning.rotation ?? 0);
+    setRearWarningAcross(warning.across ?? 58);
+    setRearWarningVertical(warning.vertical ?? -38);
+    setRearWarningLocked(!!warning.locked);
+    setRearCustomEnabled(false);
+    setRearCustomScale(custom.scale ?? 5.4);
+    setRearCustomRotation(custom.rotation ?? 0);
+    setRearCustomAcross(custom.across ?? 0);
+    setRearCustomVertical(custom.vertical ?? 20);
+    setRearCustomLocked(!!custom.locked);
+
+    const bumpers = snapshot.bumperLogos || {};
+    const frontBumper = bumpers.front || {};
+    const rearBumper = bumpers.rear || {};
+    setBumperLogoFinish(bumpers.finish || 'gloss');
+    setBumperLogoFrontScale(frontBumper.scale ?? 6.6);
+    setBumperLogoFrontRotation(frontBumper.rotation ?? 0);
+    setBumperLogoFrontAcross(frontBumper.across ?? 0);
+    setBumperLogoFrontVertical(frontBumper.vertical ?? 0);
+    setBumperLogoFrontLocked(!!frontBumper.locked);
+    setBumperLogoRearScale(rearBumper.scale ?? 5.35);
+    setBumperLogoRearRotation(rearBumper.rotation ?? 0);
+    setBumperLogoRearAcross(rearBumper.across ?? 0);
+    setBumperLogoRearVertical(rearBumper.vertical ?? -30);
+    setBumperLogoRearCurve(rearBumper.curve ?? -135);
+    setBumperLogoRearLocked(!!rearBumper.locked);
+
+    Object.values(editableDecalUndoStacksRef.current).forEach(stack => { stack.length = 0; });
+    setEditableDecalUndoCounts({ 'rear-flag':0, 'rear-warning':0, 'rear-custom':0, 'bumper-front':0, 'bumper-rear':0 });
+    selectedSideLogoRef.current = null;
+    setSelectedSideLogo(null);
+    selectedEditableDecalRef.current = null;
+    setSelectedEditableDecal(null);
+    setRearStickerRevision(value => value + 1);
+    setBumperLogoRevision(value => value + 1);
+    setEditableDecalRevision(value => value + 1);
+
+    const studio = snapshot.studio || {};
+    setViewportBgColor(studio.viewportBgColor || '#1f1c1e');
+    setTransparentBg(!!studio.transparentBg);
+    setHdriPreset(studio.hdriPreset || 'studio01');
+    setHdriIntensity(studio.hdriIntensity ?? 0.75);
+    setSceneExposure(studio.sceneExposure ?? 1.4);
+    setStudioLightStrength(studio.studioLightStrength ?? 1);
+    setRimLightColor(studio.rimLightColor || '#ffffff');
+    setShowShadows(studio.showShadows !== false);
+    setShadowOpacity(studio.shadowOpacity ?? 0.35);
+    setShadowSoftness(studio.shadowSoftness ?? 0.45);
+    setSparkleRotating(studio.sparkleRotating !== false);
+
+    const exportSettings = snapshot.export || {};
+    setExportResolution(exportSettings.resolution ?? 2048);
+    setExportSupersample(exportSettings.supersample ?? 2);
+
+    const cameraSettings = snapshot.camera || {};
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
+    if (camera && Array.isArray(cameraSettings.position) && cameraSettings.position.length === 3) {
+      camera.position.fromArray(cameraSettings.position.map(Number));
+      if (Array.isArray(cameraSettings.up) && cameraSettings.up.length === 3) camera.up.fromArray(cameraSettings.up.map(Number));
+      if (controls && Array.isArray(cameraSettings.target) && cameraSettings.target.length === 3) controls.target.fromArray(cameraSettings.target.map(Number));
+      camera.lookAt(controls?.target || new THREE.Vector3(0, 0.05, 0));
+      camera.updateProjectionMatrix();
+      controls?.update();
+    } else if (cameraSettings.activeViewPreset) {
+      applyViewPreset(cameraSettings.activeViewPreset);
+    }
+    setActiveViewPreset(cameraSettings.activeViewPreset || 'sideA');
+
+    return Array.isArray(snapshot.excludedUploadedAssets) ? snapshot.excludedUploadedAssets : [];
+  }, [
+    loadWrapFromSource, removeWrap, loadStripeDesignFromSource, removeStripeDesign,
+    removeSideLogoUpload, removeRearCustomSticker, removeBumperLogo,
+    clearSideLogoUndoHistory, applyViewPreset,
+  ]);
+
+  const requestDesignApi = useCallback(async (path, options = {}) => {
+    const response = await fetch(path, { cache: 'no-store', ...options });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data?.error || 'Saved design request failed. Please try again.');
+    return data;
+  }, []);
+
+  const refreshSavedDesigns = useCallback(async () => {
+    if (!isSignedIn) return;
+    setSavedDesignsLoading(true);
+    setSavedDesignError('');
+    try {
+      const data = await requestDesignApi('/api/designs/list?builder=helmet');
+      setSavedDesigns(data.designs || []);
+      setSavedDesignCount(data.count || 0);
+      setSavedDesignLimit(data.limit || 3);
+      setSavedDesignPlan(data.plan || 'free');
+    } catch (error) {
+      setSavedDesignError(error?.message || 'Could not load saved designs.');
+    } finally {
+      setSavedDesignsLoading(false);
+    }
+  }, [isSignedIn, requestDesignApi]);
+
+  const openSavedDesigns = useCallback(() => {
+    if (!isSignedIn) {
+      openBuilderAuth('/helmet');
+      return;
+    }
+    setSavedDesignError('');
+    setSavedDesignNotice('');
+    setShowDesignsModal(true);
+    refreshSavedDesigns();
+  }, [isSignedIn, openBuilderAuth, refreshSavedDesigns]);
+
+  const openSaveDesignDialog = useCallback(() => {
+    if (!isSignedIn) {
+      openBuilderAuth('/helmet');
+      return;
+    }
+    setSavedDesignError('');
+    setDesignNameDialog({ mode: 'save', id: null, name: loadedDesignName ? `${loadedDesignName} Copy` : '' });
+  }, [isSignedIn, loadedDesignName, openBuilderAuth]);
+
+  const submitDesignNameDialog = useCallback(async () => {
+    if (!designNameDialog || savedDesignBusyId) return;
+    const name = String(designNameDialog.name || '').trim().replace(/\s+/g, ' ');
+    if (!name || name.length > 80) {
+      setSavedDesignError('Design names must be 1–80 characters.');
+      return;
+    }
+
+    const action = designNameDialog;
+    setSavedDesignBusyId(action.id || action.mode);
+    setSavedDesignError('');
+    try {
+      if (action.mode === 'rename') {
+        await requestDesignApi('/api/designs/rename', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: action.id, name }),
+        });
+        if (loadedDesignId === action.id) setLoadedDesignName(name);
+        setSavedDesignNotice(`Renamed to “${name}”.`);
+      } else {
+        let designData;
+        if (action.mode === 'duplicate') {
+          const loaded = await requestDesignApi('/api/designs/load', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: action.id }),
+          });
+          designData = loaded.design?.design_data;
+        } else {
+          designData = buildHelmetDesignSnapshot();
+        }
+
+        const saved = await requestDesignApi('/api/designs/save', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ builderType: 'helmet', name, designData, assetPaths: [] }),
+        });
+        if (action.mode === 'save') {
+          setLoadedDesignId(saved.design?.id || null);
+          setLoadedDesignName(name);
+        }
+        setSavedDesignNotice(action.mode === 'duplicate' ? `Duplicated as “${name}”.` : `Saved “${name}”.`);
+      }
+      setDesignNameDialog(null);
+      await refreshSavedDesigns();
+    } catch (error) {
+      setSavedDesignError(error?.message || 'Could not save this design.');
+    } finally {
+      setSavedDesignBusyId(null);
+    }
+  }, [
+    designNameDialog, savedDesignBusyId, requestDesignApi, buildHelmetDesignSnapshot,
+    loadedDesignId, refreshSavedDesigns,
+  ]);
+
+  const loadSavedDesign = useCallback(async (design) => {
+    if (!design?.id || savedDesignBusyId) return;
+    setSavedDesignBusyId(design.id);
+    setSavedDesignError('');
+    try {
+      const data = await requestDesignApi('/api/designs/load', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: design.id }),
+      });
+      const excluded = restoreHelmetDesignSnapshot(data.design?.design_data);
+      setLoadedDesignId(design.id);
+      setLoadedDesignName(data.design?.name || design.name || 'Saved design');
+      setShowDesignsModal(false);
+      setDesignNameDialog(null);
+      setSavedDesignNotice(excluded.length
+        ? `Loaded “${data.design?.name || design.name}”. Re-upload ${excluded.join(', ')}; uploaded artwork is not stored in this first version.`
+        : `Loaded “${data.design?.name || design.name}”.`);
+    } catch (error) {
+      setSavedDesignError(error?.message || 'Could not load this design.');
+    } finally {
+      setSavedDesignBusyId(null);
+    }
+  }, [savedDesignBusyId, requestDesignApi, restoreHelmetDesignSnapshot]);
+
+  const deleteSavedDesign = useCallback(async (design) => {
+    if (!design?.id || savedDesignBusyId) return;
+    if (!window.confirm(`Delete “${design.name}”? This cannot be undone.`)) return;
+    setSavedDesignBusyId(design.id);
+    setSavedDesignError('');
+    try {
+      await requestDesignApi('/api/designs/delete', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: design.id }),
+      });
+      if (loadedDesignId === design.id) {
+        setLoadedDesignId(null);
+        setLoadedDesignName('');
+      }
+      setSavedDesignNotice(`Deleted “${design.name}”.`);
+      await refreshSavedDesigns();
+    } catch (error) {
+      setSavedDesignError(error?.message || 'Could not delete this design.');
+    } finally {
+      setSavedDesignBusyId(null);
+    }
+  }, [savedDesignBusyId, requestDesignApi, loadedDesignId, refreshSavedDesigns]);
+
   const handleGetCredits = async () => {
     if (!isSignedIn) {
       openBuilderAuth('/helmet?upgrade=true');
@@ -7955,6 +8492,20 @@ export default function HelmetBuilder() {
               <span style={{ fontSize:14, fontWeight:700, color:credits>0?'#f3f4f6':'#ef4444', fontFamily:"'Barlow Condensed',sans-serif" }}>{isUnlimited ? '∞' : credits}</span>
             </div>
           )}
+          <button
+            onClick={openSaveDesignDialog}
+            disabled={isSignedIn && !loaded}
+            title={loadedDesignName ? `Save a copy of ${loadedDesignName}` : 'Save the current helmet settings'}
+            style={{ background:'rgba(239,255,0,0.08)', border:'1px solid rgba(239,255,0,0.28)', borderRadius:6, padding:'6px 10px', fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800, fontSize:10, letterSpacing:'0.06em', color:'#efff00', cursor:isSignedIn&&!loaded?'default':'pointer', opacity:isSignedIn&&!loaded?0.45:1 }}
+          >
+            SAVE DESIGN
+          </button>
+          <button
+            onClick={openSavedDesigns}
+            style={{ background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:6, padding:'6px 10px', fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800, fontSize:10, letterSpacing:'0.06em', color:'#e2e8f0', cursor:'pointer' }}
+          >
+            MY DESIGNS
+          </button>
           <button onClick={handleGetCredits} style={{ background:'linear-gradient(135deg,#efff00,#c8d900)', border:'none', borderRadius:6, padding:'6px 14px', fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800, fontSize:12, letterSpacing:'0.05em', color:'#000', cursor:'pointer' }}>{isSignedIn ? (isUnlimited ? 'UNLIMITED ACTIVE' : 'GET CREDITS') : 'GET STARTED'}</button>
           {isLoaded && (isSignedIn
             ? <UserButton
@@ -9208,6 +9759,112 @@ export default function HelmetBuilder() {
           </div>
         </div>
       </div>
+
+      {/* SAVED DESIGN STATUS */}
+      {savedDesignNotice && !showDesignsModal && !designNameDialog && (
+        <div style={{ position:'fixed', top:60, right:16, zIndex:1002, width:360, maxWidth:'calc(100vw - 32px)', display:'flex', alignItems:'flex-start', gap:10, padding:'11px 12px', borderRadius:9, background:'#161314', border:'1px solid rgba(16,185,129,0.34)', boxShadow:'0 16px 48px rgba(0,0,0,0.45)' }}>
+          <span style={{ color:'#10b981', fontWeight:900, marginTop:1 }}>✓</span>
+          <span style={{ flex:1, color:'#d1d5db', fontSize:10, lineHeight:1.5 }}>{savedDesignNotice}</span>
+          <button onClick={() => setSavedDesignNotice('')} aria-label="Dismiss saved design message" style={{ background:'none', border:'none', color:'#6b7280', cursor:'pointer', fontSize:16, lineHeight:1, padding:0 }}>×</button>
+        </div>
+      )}
+
+      {/* MY DESIGNS MODAL */}
+      {showDesignsModal && (
+        <div onClick={() => { if (!savedDesignBusyId) setShowDesignsModal(false); }} style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.80)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1001, padding:18 }}>
+          <div onClick={event => event.stopPropagation()} style={{ width:720, maxWidth:'96vw', maxHeight:'88vh', display:'flex', flexDirection:'column', background:'#161314', border:'1px solid rgba(255,255,255,0.11)', borderRadius:15, boxShadow:'0 28px 80px rgba(0,0,0,0.58)', overflow:'hidden' }}>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:16, padding:'18px 20px 14px', borderBottom:'1px solid rgba(255,255,255,0.08)' }}>
+              <div>
+                <div style={{ fontSize:9, color:'#6b7280', letterSpacing:'0.12em', fontFamily:"'Barlow Condensed',sans-serif", marginBottom:3 }}>HELMET BUILDER</div>
+                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:22, letterSpacing:'0.06em' }}>MY DESIGNS</div>
+                <div style={{ fontSize:10, color:'#6b7280', marginTop:4 }}>{savedDesignCount} of {savedDesignLimit} saved · {savedDesignPlan.replaceAll('_', ' ')}</div>
+              </div>
+              <div style={{ display:'flex', alignItems:'center', gap:9 }}>
+                <button onClick={openSaveDesignDialog} disabled={!loaded || !!savedDesignBusyId || savedDesignCount >= savedDesignLimit} style={{ background:'linear-gradient(135deg,#efff00,#c8d900)', border:'none', borderRadius:7, padding:'8px 13px', fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:11, letterSpacing:'0.06em', color:'#000', cursor:loaded&&!savedDesignBusyId&&savedDesignCount<savedDesignLimit?'pointer':'default', opacity:loaded&&!savedDesignBusyId&&savedDesignCount<savedDesignLimit?1:0.45 }}>＋ SAVE CURRENT</button>
+                <button onClick={() => setShowDesignsModal(false)} disabled={!!savedDesignBusyId} aria-label="Close My Designs" style={{ width:32, height:32, background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.10)', borderRadius:7, cursor:savedDesignBusyId?'default':'pointer', color:'#9ca3af', fontSize:19 }}>×</button>
+              </div>
+            </div>
+
+            <div style={{ padding:'14px 20px 18px', overflowY:'auto' }}>
+              <div style={{ marginBottom:12, padding:'9px 11px', borderRadius:8, background:'rgba(239,255,0,0.045)', border:'1px solid rgba(239,255,0,0.14)', color:'#9ca3af', fontSize:9, lineHeight:1.5 }}>
+                This first version saves helmet settings and built-in preset artwork. Uploaded wraps, decals, stripes, and bumper logos must be uploaded again after loading.
+              </div>
+
+              {savedDesignError && (
+                <div style={{ marginBottom:12, padding:'9px 11px', borderRadius:8, background:'rgba(239,68,68,0.09)', border:'1px solid rgba(239,68,68,0.28)', color:'#fca5a5', fontSize:10, lineHeight:1.45 }}>{savedDesignError}</div>
+              )}
+              {savedDesignNotice && (
+                <div style={{ marginBottom:12, padding:'9px 11px', borderRadius:8, background:'rgba(16,185,129,0.08)', border:'1px solid rgba(16,185,129,0.26)', color:'#a7f3d0', fontSize:10, lineHeight:1.45 }}>{savedDesignNotice}</div>
+              )}
+
+              {savedDesignsLoading ? (
+                <div style={{ padding:'34px 0', textAlign:'center', color:'#6b7280', fontFamily:"'Barlow Condensed',sans-serif", fontSize:12, letterSpacing:'0.08em' }}>LOADING DESIGNS...</div>
+              ) : savedDesigns.length === 0 ? (
+                <div style={{ padding:'34px 18px', border:'1px dashed rgba(255,255,255,0.13)', borderRadius:10, textAlign:'center' }}>
+                  <div style={{ color:'#e2e8f0', fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800, fontSize:15, letterSpacing:'0.05em' }}>NO SAVED HELMETS YET</div>
+                  <div style={{ color:'#6b7280', fontSize:10, marginTop:5 }}>Build a helmet, then choose Save Current.</div>
+                </div>
+              ) : (
+                <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(285px,1fr))', gap:10 }}>
+                  {savedDesigns.map(design => {
+                    const busy = savedDesignBusyId === design.id;
+                    const active = loadedDesignId === design.id;
+                    const updated = design.updated_at ? new Date(design.updated_at).toLocaleString(undefined, { month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit' }) : '';
+                    return (
+                      <div key={design.id} style={{ padding:'12px', borderRadius:10, background:active?'rgba(239,255,0,0.065)':'rgba(255,255,255,0.035)', border:active?'1px solid rgba(239,255,0,0.32)':'1px solid rgba(255,255,255,0.09)' }}>
+                        <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:10, marginBottom:10 }}>
+                          <div style={{ minWidth:0 }}>
+                            <div title={design.name} style={{ color:'#f3f4f6', fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:14, letterSpacing:'0.035em', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{design.name}</div>
+                            <div style={{ color:'#6b7280', fontSize:8, marginTop:3 }}>{updated ? `Updated ${updated}` : 'Helmet design'}</div>
+                          </div>
+                          {active && <span style={{ flexShrink:0, color:'#efff00', background:'rgba(239,255,0,0.10)', border:'1px solid rgba(239,255,0,0.20)', borderRadius:4, padding:'2px 6px', fontSize:7, fontWeight:900, letterSpacing:'0.08em' }}>LOADED</span>}
+                        </div>
+                        <div style={{ display:'grid', gridTemplateColumns:'1.25fr 1fr 1fr 0.75fr', gap:6 }}>
+                          <button onClick={() => loadSavedDesign(design)} disabled={!!savedDesignBusyId} style={{ background:'#efff00', color:'#000', border:'none', borderRadius:6, padding:'7px 5px', cursor:savedDesignBusyId?'default':'pointer', opacity:savedDesignBusyId&&!busy?0.45:1, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:9, letterSpacing:'0.04em' }}>{busy ? 'WORKING...' : 'LOAD'}</button>
+                          <button onClick={() => { setSavedDesignError(''); setDesignNameDialog({ mode:'rename', id:design.id, name:design.name }); }} disabled={!!savedDesignBusyId} style={{ background:'rgba(255,255,255,0.06)', color:'#d1d5db', border:'1px solid rgba(255,255,255,0.11)', borderRadius:6, padding:'7px 5px', cursor:savedDesignBusyId?'default':'pointer', fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800, fontSize:9 }}>RENAME</button>
+                          <button onClick={() => { setSavedDesignError(''); setDesignNameDialog({ mode:'duplicate', id:design.id, name:`${design.name} Copy` }); }} disabled={!!savedDesignBusyId || savedDesignCount >= savedDesignLimit} style={{ background:'rgba(255,255,255,0.06)', color:'#d1d5db', border:'1px solid rgba(255,255,255,0.11)', borderRadius:6, padding:'7px 5px', cursor:savedDesignBusyId||savedDesignCount>=savedDesignLimit?'default':'pointer', opacity:savedDesignCount>=savedDesignLimit?0.4:1, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800, fontSize:9 }}>DUPLICATE</button>
+                          <button onClick={() => deleteSavedDesign(design)} disabled={!!savedDesignBusyId} title="Delete design" style={{ background:'rgba(239,68,68,0.07)', color:'#f87171', border:'1px solid rgba(239,68,68,0.20)', borderRadius:6, padding:'7px 5px', cursor:savedDesignBusyId?'default':'pointer', fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:11 }}>×</button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SAVE / RENAME / DUPLICATE NAMING FLOW */}
+      {designNameDialog && (
+        <div onClick={() => { if (!savedDesignBusyId) setDesignNameDialog(null); }} style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.78)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1003, padding:18 }}>
+          <form onSubmit={event => { event.preventDefault(); submitDesignNameDialog(); }} onClick={event => event.stopPropagation()} style={{ width:420, maxWidth:'94vw', background:'#161314', border:'1px solid rgba(255,255,255,0.12)', borderRadius:14, padding:'20px', boxShadow:'0 24px 70px rgba(0,0,0,0.58)' }}>
+            <div style={{ fontSize:9, color:'#6b7280', letterSpacing:'0.12em', fontFamily:"'Barlow Condensed',sans-serif", marginBottom:4 }}>MY DESIGNS</div>
+            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:21, letterSpacing:'0.05em', marginBottom:6 }}>
+              {designNameDialog.mode === 'rename' ? 'RENAME DESIGN' : designNameDialog.mode === 'duplicate' ? 'DUPLICATE DESIGN' : 'SAVE DESIGN'}
+            </div>
+            <div style={{ color:'#6b7280', fontSize:10, lineHeight:1.5, marginBottom:13 }}>
+              {designNameDialog.mode === 'save' ? 'Name this helmet settings snapshot.' : 'Choose a unique name for this saved helmet.'}
+            </div>
+            <input
+              autoFocus
+              maxLength={80}
+              value={designNameDialog.name}
+              onChange={event => { setDesignNameDialog(current => ({ ...current, name:event.target.value })); setSavedDesignError(''); }}
+              placeholder="Example: Seattle Alternate Concept"
+              style={{ width:'100%', boxSizing:'border-box', background:'rgba(255,255,255,0.055)', border:'1px solid rgba(255,255,255,0.15)', borderRadius:8, padding:'11px 12px', outline:'none', color:'#f3f4f6', fontSize:12, fontFamily:"'Barlow',sans-serif", marginBottom:9 }}
+            />
+            {savedDesignError && <div style={{ marginBottom:10, color:'#fca5a5', fontSize:9, lineHeight:1.45 }}>{savedDesignError}</div>}
+            <div style={{ color:'#4b5563', fontSize:8, marginBottom:14 }}>{designNameDialog.name.length}/80 characters</div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1.35fr', gap:8 }}>
+              <button type="button" onClick={() => { setDesignNameDialog(null); setSavedDesignError(''); }} disabled={!!savedDesignBusyId} style={{ background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.10)', borderRadius:7, padding:'10px', color:'#9ca3af', cursor:savedDesignBusyId?'default':'pointer', fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800, fontSize:11 }}>CANCEL</button>
+              <button type="submit" disabled={!!savedDesignBusyId || !designNameDialog.name.trim()} style={{ background:'linear-gradient(135deg,#efff00,#c8d900)', border:'none', borderRadius:7, padding:'10px', color:'#000', cursor:savedDesignBusyId||!designNameDialog.name.trim()?'default':'pointer', opacity:savedDesignBusyId||!designNameDialog.name.trim()?0.45:1, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:11, letterSpacing:'0.05em' }}>
+                {savedDesignBusyId ? 'WORKING...' : designNameDialog.mode === 'rename' ? 'SAVE NAME' : designNameDialog.mode === 'duplicate' ? 'CREATE COPY' : 'SAVE DESIGN'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {/* TIPS MODAL */}
       {showTipsModal && (
