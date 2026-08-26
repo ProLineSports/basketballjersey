@@ -1,8 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useSyncExternalStore } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 import Script from 'next/script';
-import { usePathname } from 'next/navigation';
 import {
   META_PIXEL_ID,
   flushPendingMetaEvents,
@@ -58,24 +57,18 @@ function prepareMetaQueue() {
 }
 
 export default function MetaPixel() {
-  const pathname = usePathname();
   const consent = useSyncExternalStore(
     subscribeMetaConsent,
     getMetaConsent,
     getServerConsentSnapshot
   );
-  const lastTrackedPathRef = useRef(null);
 
   useEffect(() => {
     if (consent !== 'granted') return;
     if (!prepareMetaQueue()) return;
 
     flushPendingMetaEvents();
-    if (lastTrackedPathRef.current === pathname) return;
-
-    window.fbq('track', 'PageView');
-    lastTrackedPathRef.current = pathname;
-  }, [consent, pathname]);
+  }, [consent]);
 
   const chooseConsent = (choice) => {
     saveMetaConsent(choice);
