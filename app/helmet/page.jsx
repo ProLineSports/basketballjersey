@@ -7707,6 +7707,27 @@ export default function HelmetBuilder() {
     let prevShadowW = null;
     let prevShadowH = null;
     let rendererStateChanged = false;
+    let exportHelperVisibility = [];
+
+    const hideExportSelectionHelpers = () => {
+      if (!scene) return;
+      exportHelperVisibility = [];
+      scene.traverse(object => {
+        const isSelectionHelper =
+          object?.userData?.sideLogoSelection ||
+          object?.userData?.editableDecalSelection;
+        if (!isSelectionHelper) return;
+        exportHelperVisibility.push({ object, visible: object.visible });
+        object.visible = false;
+      });
+    };
+
+    const restoreExportSelectionHelpers = () => {
+      exportHelperVisibility.forEach(({ object, visible }) => {
+        object.visible = visible;
+      });
+      exportHelperVisibility = [];
+    };
 
     try {
       liveRenderer = rendererRef.current;
@@ -7823,6 +7844,10 @@ export default function HelmetBuilder() {
       }
 
       const renderStartedAt = performance.now();
+      // Selection outlines are editing controls, not part of the customer's design.
+      // Hide every side/rear/bumper helper for the export render only, then restore
+      // its exact previous visibility for the live viewport.
+      hideExportSelectionHelpers();
       liveRenderer.render(scene, camera);
 
       // WebGL rendering is asynchronous. During hidden debug runs only, wait for
@@ -7853,6 +7878,7 @@ export default function HelmetBuilder() {
       const encodeStartedAt = performance.now();
       const rawDataURL = finalCanvas.toDataURL('image/png');
       const encodeFinishedAt = performance.now();
+      restoreExportSelectionHelpers();
 
       Object.assign(debugStaticRef.current, {
         exportRenderMs: renderFinishedAt - renderStartedAt,
@@ -7982,6 +8008,8 @@ export default function HelmetBuilder() {
         err?.message || 'Export failed. Try a smaller final size or lower supersampling.'
       );
     } finally {
+      restoreExportSelectionHelpers();
+
       // Never leave the live renderer stuck at a giant export resolution after an
       // exception, canvas failure, or browser/GPU allocation error.
       if (
