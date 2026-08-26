@@ -1,5 +1,7 @@
 import { auth } from '@clerk/nextjs/server';
+import { after } from 'next/server';
 import Stripe from 'stripe';
+import { sendMetaPurchase } from '../../../../lib/meta-conversions';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
@@ -57,6 +59,19 @@ export async function GET(req) {
     }
 
     const product = getProductDetails(session.metadata?.price_id || '');
+
+    if (new URL(req.url).searchParams.get('meta_consent') === 'granted') {
+      after(async () => {
+        try {
+          await sendMetaPurchase({ req, session, product });
+        } catch (error) {
+          console.error(
+            'Meta CAPI Purchase error:',
+            error instanceof Error ? error.message : 'Unknown error'
+          );
+        }
+      });
+    }
 
     return Response.json(
       {

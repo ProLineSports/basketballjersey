@@ -10,7 +10,11 @@ import { EXRLoader } from 'three/addons/loaders/EXRLoader.js';
 import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { DecalGeometry } from 'three/addons/geometries/DecalGeometry.js';
-import { trackMetaCustomEvent, trackMetaEvent } from '../../lib/meta-pixel';
+import {
+  getMetaConsent,
+  trackMetaCustomEvent,
+  trackMetaEvent,
+} from '../../lib/meta-pixel';
 
 const HELMET_MODEL_URL = '/SpeedFlex-draco.glb';
 const DRACO_DECODER_PATH = '/draco/';
@@ -4192,7 +4196,9 @@ export default function HelmetBuilder() {
 
         try {
           const response = await fetch(
-            `/api/stripe/checkout-status?session_id=${encodeURIComponent(checkoutSessionId)}`,
+            `/api/stripe/checkout-status?session_id=${encodeURIComponent(checkoutSessionId)}${
+              getMetaConsent() === 'granted' ? '&meta_consent=granted' : ''
+            }`,
             { cache: 'no-store' }
           );
           const purchase = await response.json().catch(() => ({}));
