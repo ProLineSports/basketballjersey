@@ -10,11 +10,41 @@ import { EXRLoader } from 'three/addons/loaders/EXRLoader.js';
 import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { DecalGeometry } from 'three/addons/geometries/DecalGeometry.js';
+import { trackMetaCustomEvent, trackMetaEvent } from '../../lib/meta-pixel';
 
 const HELMET_MODEL_URL = '/SpeedFlex-draco.glb';
 const DRACO_DECODER_PATH = '/draco/';
 const REAR_FLAG_URL = '/Flag-United-States-of-America.webp';
 const REAR_WARNING_URL = '/Warning-Label-White.png';
+const META_REGISTRATION_INTENT_KEY = 'proline_meta_registration_intent_v1';
+const META_PURCHASE_REPORTED_PREFIX = 'proline_meta_purchase_reported_v1:';
+const META_CHECKOUT_DETAILS = {
+  NEXT_PUBLIC_STRIPE_PRICE_UNLIMITED: {
+    id: 'unlimited_monthly',
+    name: 'Unlimited Monthly',
+    value: 4.99,
+  },
+  NEXT_PUBLIC_STRIPE_PRICE_LIFETIME_ALL_ACCESS: {
+    id: 'lifetime_all_access',
+    name: 'Lifetime All-Access',
+    value: 49,
+  },
+  NEXT_PUBLIC_STRIPE_PRICE_5_CREDITS: {
+    id: 'credits_5',
+    name: '5 Export Credits',
+    value: 4.99,
+  },
+  NEXT_PUBLIC_STRIPE_PRICE_15_CREDITS: {
+    id: 'credits_15',
+    name: '15 Export Credits',
+    value: 9.99,
+  },
+  NEXT_PUBLIC_STRIPE_PRICE_50_CREDITS: {
+    id: 'credits_50',
+    name: '50 Export Credits',
+    value: 24.99,
+  },
+};
 
 // ── PART / COLOR ZONES ───────────────────────────────────────────────────────
 // `parts` uses the exact mesh/node names exported in SpeedFlex.glb.
@@ -3441,6 +3471,10 @@ export default function HelmetBuilder() {
   const { openSignIn, openSignUp } = useClerk();
 
   const openBuilderAuth = useCallback((returnUrl = '/helmet') => {
+    trackMetaCustomEvent('BuilderSignInIntent', {
+      builder: 'helmet',
+      return_path: returnUrl,
+    });
     openSignIn({
       withSignUp: true,
       transferable: true,
@@ -3452,11 +3486,44 @@ export default function HelmetBuilder() {
   }, [openSignIn]);
 
   const openBuilderRegistration = useCallback((returnUrl = '/helmet') => {
+    try {
+      window.localStorage.setItem(META_REGISTRATION_INTENT_KEY, 'helmet');
+    } catch {
+      // Registration still works when storage is unavailable or blocked.
+    }
+    trackMetaCustomEvent('CreateAccountIntent', { builder: 'helmet' });
     openSignUp({
       fallbackRedirectUrl: returnUrl,
       signInFallbackRedirectUrl: returnUrl,
     });
   }, [openSignUp]);
+
+  useEffect(() => {
+    trackMetaEvent('ViewContent', {
+      content_ids: ['helmet_builder'],
+      content_name: 'ProLine Helmet Builder',
+      content_category: 'Online Builder',
+      content_type: 'product',
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!isLoaded || !isSignedIn) return;
+
+    try {
+      if (
+        window.localStorage.getItem(META_REGISTRATION_INTENT_KEY) === 'helmet'
+      ) {
+        window.localStorage.removeItem(META_REGISTRATION_INTENT_KEY);
+        trackMetaEvent('CompleteRegistration', {
+          content_name: 'ProLine Helmet Builder Account',
+          status: true,
+        });
+      }
+    } catch {
+      // Auth completion is unaffected when tracking storage is unavailable.
+    }
+  }, [isLoaded, isSignedIn]);
 
   const mountRef    = useRef(null);
   const sceneRef    = useRef(null);
@@ -4079,6 +4146,7 @@ export default function HelmetBuilder() {
 
     const url = new URL(window.location.href);
     const checkoutState = url.searchParams.get('checkout');
+    const checkoutSessionId = url.searchParams.get('session_id');
     const legacySuccess = url.searchParams.get('success') === 'true';
     const legacyCanceled = url.searchParams.get('canceled') === 'true';
 
@@ -4109,6 +4177,60 @@ export default function HelmetBuilder() {
     let attempts = 0;
     let timer = null;
 
+    const reportMetaPurchase = async () => {
+      if (!checkoutSessionId) return;
+
+      const reportedKey = `${META_PURCHASE_REPORTED_PREFIX}${checkoutSessionId}`;
+      try {
+        if (window.localStorage.getItem(reportedKey) === 'reported') return;
+      } catch {
+        // Meta's event ID still provides deduplication when storage is blocked.
+      }
+
+      for (let purchaseAttempt = 0; purchaseAttempt < 6; purchaseAttempt += 1) {
+        if (cancelled) return;
+
+        try {
+          const response = await fetch(
+            `/api/stripe/checkout-status?session_id=${encodeURIComponent(checkoutSessionId)}`,
+            { cache: 'no-store' }
+          );
+          const purchase = await response.json().catch(() => ({}));
+
+          if (response.ok && purchase?.paid) {
+            const result = trackMetaEvent(
+              'Purchase',
+              {
+                value: purchase.value,
+                currency: purchase.currency,
+                content_ids: [purchase.product?.id || 'builder_purchase'],
+                content_name: purchase.product?.name || 'Builder Purchase',
+                content_category: 'Helmet Builder',
+                content_type: 'product',
+                order_id: purchase.transactionId,
+              },
+              { eventID: purchase.eventId }
+            );
+
+            if (result === 'sent' || result === 'queued') {
+              try {
+                window.localStorage.setItem(reportedKey, 'reported');
+              } catch {
+                // The event has already been sent or queued for this page load.
+              }
+            }
+            return;
+          }
+
+          if (!response.ok && response.status !== 404) return;
+        } catch (error) {
+          console.error('Meta purchase verification:', error);
+        }
+
+        await new Promise((resolve) => window.setTimeout(resolve, 800));
+      }
+    };
+
     const poll = async () => {
       if (cancelled) return;
       attempts += 1;
@@ -4117,6 +4239,7 @@ export default function HelmetBuilder() {
     };
 
     poll();
+    reportMetaPurchase();
 
     url.searchParams.delete('checkout');
     url.searchParams.delete('success');
@@ -7831,6 +7954,20 @@ export default function HelmetBuilder() {
       a.download = `proline-helmet-${finalWidth}x${finalHeight}.png`;
       a.click();
 
+      trackMetaCustomEvent('ExportDesign', {
+        builder: 'helmet',
+        export_width: finalWidth,
+        export_height: finalHeight,
+        has_watermark: useWatermark,
+        access_type: exportData.isLifetimeAllAccess
+          ? 'lifetime'
+          : exportData.isSubscriptionUnlimited
+            ? 'unlimited_monthly'
+            : exportData.paidCredits > 0
+              ? 'paid_credits'
+              : 'free_credits',
+      });
+
       setExported(true);
       setTimeout(() => setExported(false), 2500);
     } catch (err) {
@@ -8536,6 +8673,10 @@ export default function HelmetBuilder() {
           setDesignAssets(persistedManifest || {});
         }
         setSavedDesignNotice(action.mode === 'duplicate' ? `Duplicated as “${name}”.` : `Saved “${name}”.`);
+        trackMetaCustomEvent('SaveDesign', {
+          builder: 'helmet',
+          action: action.mode === 'duplicate' ? 'duplicate' : 'save',
+        });
       }
       setDesignNameDialog(null);
       await refreshSavedDesigns();
@@ -8671,6 +8812,19 @@ export default function HelmetBuilder() {
 
       if (!response.ok || !data?.url) {
         throw new Error(data?.error || 'Unable to start checkout. Please try again.');
+      }
+
+      const metaPlan = META_CHECKOUT_DETAILS[selectedPlan];
+      if (metaPlan) {
+        trackMetaEvent('InitiateCheckout', {
+          value: metaPlan.value,
+          currency: 'USD',
+          content_ids: [metaPlan.id],
+          content_name: metaPlan.name,
+          content_category: 'Helmet Builder',
+          content_type: 'product',
+          num_items: 1,
+        });
       }
 
       try {

@@ -1,5 +1,6 @@
 // app/layout.js
 import { ClerkProvider } from '@clerk/nextjs';
+import MetaPixel from '../components/MetaPixel';
 
 export const metadata = {
   title: 'ProLine Online Builder',
@@ -112,6 +113,7 @@ export default function RootLayout({ children }) {
       <html lang="en">
         <body style={{ margin: 0, padding: 0, overflow: 'hidden' }}>
           {children}
+          <MetaPixel />
         </body>
       </html>
     </ClerkProvider>
