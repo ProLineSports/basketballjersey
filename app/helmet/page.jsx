@@ -2932,6 +2932,7 @@ function applyDecalFinishToMaterials(materials, scene, finishId) {
 
 
 const CREDITS_INITIAL = 3;
+const BUILDER_INTRO_STORAGE_KEY = 'proline-helmet-builder-intro-seen-v1';
 
 // Materials that make up the shell — the only materials the Finish selector (and its
 // environment map / glitter map) is allowed to touch. Hardware (screws, shiny metal)
@@ -3437,7 +3438,7 @@ function ColorSwatch({ color, onChange, label }) {
 export default function HelmetBuilder() {
   const router = useRouter();
   const { isSignedIn, isLoaded } = useUser();
-  const { openSignIn } = useClerk();
+  const { openSignIn, openSignUp } = useClerk();
 
   const openBuilderAuth = useCallback((returnUrl = '/helmet') => {
     openSignIn({
@@ -3449,6 +3450,13 @@ export default function HelmetBuilder() {
       signUpFallbackRedirectUrl: returnUrl,
     });
   }, [openSignIn]);
+
+  const openBuilderRegistration = useCallback((returnUrl = '/helmet') => {
+    openSignUp({
+      fallbackRedirectUrl: returnUrl,
+      signInFallbackRedirectUrl: returnUrl,
+    });
+  }, [openSignUp]);
 
   const mountRef    = useRef(null);
   const sceneRef    = useRef(null);
@@ -3957,6 +3965,31 @@ export default function HelmetBuilder() {
   const [selectedPlan, setSelectedPlan]   = useState(null);
   const [checkingOut, setCheckingOut]     = useState(false);
   const [checkoutError, setCheckoutError] = useState('');
+  const [showBuilderIntro, setShowBuilderIntro] = useState(false);
+  const builderIntroDismissedRef = useRef(false);
+
+  const dismissBuilderIntro = useCallback(() => {
+    builderIntroDismissedRef.current = true;
+    try {
+      window.localStorage.setItem(BUILDER_INTRO_STORAGE_KEY, 'seen');
+    } catch {
+      // The modal still closes when storage is unavailable or blocked.
+    }
+    setShowBuilderIntro(false);
+  }, []);
+
+  useEffect(() => {
+    if (!isLoaded || builderIntroDismissedRef.current) return;
+
+    let hasSeenIntro = false;
+    try {
+      hasSeenIntro = window.localStorage.getItem(BUILDER_INTRO_STORAGE_KEY) === 'seen';
+    } catch {
+      // Treat blocked storage as a first visit for signed-in users.
+    }
+
+    setShowBuilderIntro(!isSignedIn || !hasSeenIntro);
+  }, [isLoaded, isSignedIn]);
 
   // ── SAVED DESIGNS (settings + private uploaded artwork) ───────────────────
   const [showDesignsModal, setShowDesignsModal] = useState(false);
@@ -8578,6 +8611,27 @@ export default function HelmetBuilder() {
     setShowUpgrade(true);
   };
 
+  const signInFromBuilderIntro = () => {
+    dismissBuilderIntro();
+    openBuilderAuth('/helmet');
+  };
+
+  const createAccountFromBuilderIntro = () => {
+    dismissBuilderIntro();
+    openBuilderRegistration('/helmet');
+  };
+
+  const openUpgradeFromBuilderIntro = () => {
+    dismissBuilderIntro();
+    if (!isSignedIn) {
+      openBuilderAuth('/helmet?upgrade=true');
+      return;
+    }
+    setSelectedPlan(null);
+    setCheckoutError('');
+    setShowUpgrade(true);
+  };
+
   const startUpgradeCheckout = async () => {
     if (!selectedPlan || checkingOut) return;
 
@@ -10158,6 +10212,89 @@ export default function HelmetBuilder() {
                 <span style={{ fontSize:12, color:'#9ca3af', lineHeight:1.55 }}>{tip.text}</span>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* BUILDER INTRO MODAL */}
+      {showBuilderIntro && (
+        <div
+          onClick={dismissBuilderIntro}
+          style={{ position:'fixed', inset:0, zIndex:1100, display:'flex', alignItems:'center', justifyContent:'center', padding:18, background:'rgba(0,0,0,0.86)', backdropFilter:'blur(6px)' }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="builder-intro-title"
+            onClick={event => event.stopPropagation()}
+            style={{ width:620, maxWidth:'calc(100vw - 32px)', maxHeight:'90vh', overflowY:'auto', position:'relative', padding:'30px 30px 24px', borderRadius:18, background:'linear-gradient(145deg,#201c1f 0%,#121011 100%)', border:'1px solid rgba(255,255,255,0.16)', boxShadow:'0 32px 100px rgba(0,0,0,0.72)', color:'#f8fafc' }}
+          >
+            <button
+              onClick={dismissBuilderIntro}
+              aria-label="Close Builder introduction"
+              style={{ position:'absolute', top:14, right:14, width:34, height:34, display:'grid', placeItems:'center', borderRadius:8, border:'1px solid rgba(255,255,255,0.16)', background:'rgba(255,255,255,0.07)', color:'#f8fafc', cursor:'pointer', fontSize:20, lineHeight:1 }}
+            >×</button>
+
+            <div style={{ display:'inline-flex', alignItems:'center', gap:7, marginBottom:13, padding:'5px 9px', borderRadius:5, background:'#efff00', color:'#090909', fontFamily:"'Barlow Condensed',sans-serif", fontSize:10, fontWeight:900, letterSpacing:'0.11em' }}>
+              WELCOME TO PROLINE
+            </div>
+            <h2 id="builder-intro-title" style={{ margin:'0 42px 7px 0', color:'#ffffff', fontFamily:"'Barlow Condensed',sans-serif", fontSize:30, fontWeight:900, lineHeight:1.02, letterSpacing:'0.045em' }}>
+              BUILD YOUR HELMET IN MINUTES
+            </h2>
+            <p style={{ margin:'0 0 20px', maxWidth:520, color:'#d3d8e0', fontSize:12, lineHeight:1.65 }}>
+              Customize the helmet live, save your ideas, and export polished PNG mockups when your design is ready.
+            </p>
+
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(3,minmax(0,1fr))', gap:9, marginBottom:19 }}>
+              {[
+                ['1','CHOOSE YOUR LOOK','Set colors, finishes, visor, facemask, and lighting.'],
+                ['2','ADD YOUR ART','Apply stripes, logos, decals, and wraps, then position them live.'],
+                ['3','SAVE & EXPORT','Save designs to your account and export presentation-ready PNGs.'],
+              ].map(([number,title,description]) => (
+                <div key={number} style={{ minHeight:118, padding:'13px 12px', borderRadius:10, background:'rgba(255,255,255,0.055)', border:'1px solid rgba(255,255,255,0.11)' }}>
+                  <div style={{ width:24, height:24, display:'grid', placeItems:'center', marginBottom:9, borderRadius:6, background:'rgba(239,255,0,0.14)', border:'1px solid rgba(239,255,0,0.32)', color:'#efff00', fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:12 }}>{number}</div>
+                  <div style={{ marginBottom:5, color:'#ffffff', fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:13, letterSpacing:'0.055em' }}>{title}</div>
+                  <div style={{ color:'#c3cad4', fontSize:10, lineHeight:1.5 }}>{description}</div>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ padding:'14px', marginBottom:15, borderRadius:11, background:'rgba(239,255,0,0.055)', border:'1px solid rgba(239,255,0,0.18)' }}>
+              <div style={{ marginBottom:9, color:'#f8fafc', fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:12, letterSpacing:'0.065em' }}>READY FOR WATERMARK-FREE EXPORTS?</div>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:9 }}>
+                <button onClick={openUpgradeFromBuilderIntro} style={{ padding:'11px 12px', borderRadius:8, border:'1px solid rgba(255,255,255,0.15)', background:'rgba(255,255,255,0.07)', color:'#ffffff', cursor:'pointer', textAlign:'left' }}>
+                  <span style={{ display:'block', fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:12, letterSpacing:'0.05em' }}>BUY EXPORT CREDITS →</span>
+                  <span style={{ display:'block', marginTop:3, color:'#c3cad4', fontSize:9, lineHeight:1.4 }}>Choose 5, 15, or 50 watermark-free exports.</span>
+                </button>
+                <button onClick={openUpgradeFromBuilderIntro} style={{ padding:'11px 12px', borderRadius:8, border:'1px solid rgba(239,255,0,0.28)', background:'rgba(239,255,0,0.08)', color:'#efff00', cursor:'pointer', textAlign:'left' }}>
+                  <span style={{ display:'block', fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:12, letterSpacing:'0.05em' }}>VIEW UNLIMITED PLANS →</span>
+                  <span style={{ display:'block', marginTop:3, color:'#d3d8e0', fontSize:9, lineHeight:1.4 }}>Monthly flexibility or one-time Lifetime access.</span>
+                </button>
+              </div>
+            </div>
+
+            {!isSignedIn ? (
+              <>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr auto', gap:9 }}>
+                  <button onClick={signInFromBuilderIntro} style={{ border:'none', borderRadius:9, padding:'13px 16px', background:'linear-gradient(135deg,#efff00,#c8d900)', color:'#050505', cursor:'pointer', fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:14, letterSpacing:'0.07em' }}>
+                    SIGN IN TO SAVE & EXPORT
+                  </button>
+                  <button onClick={dismissBuilderIntro} style={{ border:'1px solid rgba(255,255,255,0.16)', borderRadius:9, padding:'13px 15px', background:'rgba(255,255,255,0.06)', color:'#f1f5f9', cursor:'pointer', fontFamily:"'Barlow Condensed',sans-serif", fontWeight:800, fontSize:11, letterSpacing:'0.05em' }}>
+                    CONTINUE AS GUEST
+                  </button>
+                </div>
+                <div style={{ marginTop:14, color:'#d3d8e0', fontSize:11, lineHeight:1.45, textAlign:'center' }}>
+                  New to ProLine?{' '}
+                  <button onClick={createAccountFromBuilderIntro} style={{ padding:0, border:'none', background:'none', color:'#efff00', cursor:'pointer', font: 'inherit', fontWeight:800, textDecoration:'underline', textUnderlineOffset:3 }}>
+                    Create a free account
+                  </button>
+                </div>
+              </>
+            ) : (
+              <button onClick={dismissBuilderIntro} style={{ width:'100%', border:'none', borderRadius:9, padding:'13px 16px', background:'linear-gradient(135deg,#efff00,#c8d900)', color:'#050505', cursor:'pointer', fontFamily:"'Barlow Condensed',sans-serif", fontWeight:900, fontSize:14, letterSpacing:'0.07em' }}>
+                START BUILDING →
+              </button>
+            )}
           </div>
         </div>
       )}
