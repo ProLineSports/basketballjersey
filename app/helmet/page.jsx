@@ -1379,7 +1379,7 @@ if (
   sideLogoU >= 0.0 && sideLogoU <= 1.0 &&
   sideLogoV >= 0.0 && sideLogoV <= 1.0 &&
   sideLogoDepth <= uSideLogoDepth &&
-  sideLogoFacing > 0.05 &&
+  sideLogoFacing > -0.15 &&
   sideLogoMedianMask > 0.5
 ) {
   sideLogoSample = texture2D(map, vec2(sideLogoU, sideLogoV));
@@ -6282,7 +6282,14 @@ export default function HelmetBuilder() {
 
       // The artwork is sampled on the *entire* baked carrier surface. Only transparent
       // pixels outside the image disappear; there is no geometric decal mask at all.
-      const physicalDepth = Math.max(boundsModel.width * 0.00055, 0.00024);
+      // Keep the rendered decal microscopically above the carrier shell. The previous
+      // offset was too small for stable depth precision at grazing camera angles and
+      // could z-fight/mask pieces of the logo while rotating the helmet.
+      const physicalDepth = Math.max(
+        boundsModel.width * 0.0018,
+        baseHeight * 0.0010,
+        0.00055
+      );
       const projectionDepth = Math.max(baseHeight * 0.32, boundsModel.width * 0.10);
       const medianOriginLocal = new THREE.Vector3(boundsModel.centerX, boundsModel.centerY, boundsModel.centerZ);
       const medianOriginWorld = model.localToWorld(medianOriginLocal.clone());
@@ -6297,7 +6304,7 @@ export default function HelmetBuilder() {
         width: { value: baseWidth * 1.03 },
         height: { value: baseHeight * 1.03 },
         depth: { value: projectionDepth },
-        lift: { value: physicalDepth * 0.20 },
+        lift: { value: physicalDepth * 0.55 },
         medianOrigin: { value: medianOriginWorld },
         medianNormal: { value: medianNormalWorld },
         medianSide: { value: medianSideSign },
@@ -6310,7 +6317,7 @@ export default function HelmetBuilder() {
         width: { value: baseWidth },
         height: { value: baseHeight },
         depth: { value: projectionDepth },
-        lift: { value: physicalDepth * 0.70 },
+        lift: { value: physicalDepth * 1.00 },
         medianOrigin: { value: medianOriginWorld },
         medianNormal: { value: medianNormalWorld },
         medianSide: { value: medianSideSign },
@@ -6326,12 +6333,12 @@ export default function HelmetBuilder() {
         depthWrite: false,
         depthTest: true,
         polygonOffset: true,
-        polygonOffsetFactor: -1,
-        polygonOffsetUnits: -1,
+        polygonOffsetFactor: -3,
+        polygonOffsetUnits: -3,
         roughness: 0.95,
         metalness: 0.0,
       });
-      installSideLogoSurfaceProjection(shadowMat, shadowUniforms, `side-logo-shadow-v2-${side}`);
+      installSideLogoSurfaceProjection(shadowMat, shadowUniforms, `side-logo-shadow-v3-${side}`);
 
       const mainMat = new THREE.MeshPhysicalMaterial({
         color: 0xffffff,
@@ -6343,11 +6350,11 @@ export default function HelmetBuilder() {
         depthWrite: false,
         depthTest: true,
         polygonOffset: true,
-        polygonOffsetFactor: -2,
-        polygonOffsetUnits: -2,
+        polygonOffsetFactor: -5,
+        polygonOffsetUnits: -5,
       });
       mainMat.userData.sideLogoMainMaterial = true;
-      installSideLogoSurfaceProjection(mainMat, mainUniforms, `side-logo-main-v2-${side}`);
+      installSideLogoSurfaceProjection(mainMat, mainUniforms, `side-logo-main-v3-${side}`);
       applyDecalFinishToMaterials([mainMat], scene, decalFinishRef.current);
 
       const shadowMeshes = createCarrierSurfaceLogoMeshes(scene, shellMeshes, shadowMat, side, 'Shadow', 39);
