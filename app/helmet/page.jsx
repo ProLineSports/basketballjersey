@@ -3556,7 +3556,7 @@ export default function HelmetBuilder() {
   const stripeDesignImageRef     = useRef(null);
   const stripeDesignCanvasRef    = useRef(null);
   const stripeDesignWorkCanvasRef = useRef(null);
-  const stripeDesignCanvasAspectRef = useRef(1 / 3);
+  const stripeDesignCanvasAspectRef = useRef(1 / 2);
   const stripeDesignTextureRef   = useRef(null);
   const stripeDesignObjectUrlRef = useRef(null);
   const decalOverlayMeshesRef    = useRef([]);
@@ -4544,7 +4544,7 @@ export default function HelmetBuilder() {
       stripeDesignObjectUrlRef.current = null;
     }
     stripeDesignImageRef.current = null;
-    stripeDesignCanvasAspectRef.current = 1 / 3;
+    stripeDesignCanvasAspectRef.current = 1 / 2;
     setHelmetStripeDesignPreviewUrl(null);
     setHelmetStripeDesignFileName('');
     setHelmetStripeDesignError('');
@@ -4554,7 +4554,7 @@ export default function HelmetBuilder() {
     setHelmetStripeDesignRevision(r => r + 1);
   }, [clearPersistedDesignAsset, resetStripeDesignTransform]);
 
-  const loadStripeDesignFromSource = useCallback(({ src, fileName = 'stripe-design.png', scale = 1, scaleX = 1, scaleY = 1, stripeWidth = null, stripeLength = null, rotation = 0, offsetX = 0, offsetY = 0, opacity = 1, canvasAspect = 1 / 3, enabled = true, crossOrigin = null, ownedObjectUrl = false, loadToken = null }) => {
+  const loadStripeDesignFromSource = useCallback(({ src, fileName = 'stripe-design.png', scale = 1, scaleX = 1, scaleY = 1, stripeWidth = null, stripeLength = null, rotation = 0, offsetX = 0, offsetY = 0, opacity = 1, canvasAspect = 1 / 2, enabled = true, crossOrigin = null, ownedObjectUrl = false, loadToken = null }) => {
     if (!src) return;
 
     const img = new Image();
@@ -4570,7 +4570,7 @@ export default function HelmetBuilder() {
       stripeDesignObjectUrlRef.current = ownedObjectUrl ? src : null;
       if (!ownedObjectUrl && typeof src === 'string' && src.startsWith('/')) clearPersistedDesignAsset('stripeDesign');
       stripeDesignImageRef.current = img;
-      stripeDesignCanvasAspectRef.current = Math.max(0.2, Math.min(0.85, Number(canvasAspect) || (1 / 3)));
+      stripeDesignCanvasAspectRef.current = Math.max(0.2, Math.min(0.85, Number(canvasAspect) || (1 / 2)));
       setHelmetStripeDesignPreviewUrl(src);
       setHelmetStripeDesignFileName(fileName);
       setHelmetStripeDesignError('');
@@ -4608,7 +4608,7 @@ export default function HelmetBuilder() {
       if (stripeDesignObjectUrlRef.current) URL.revokeObjectURL(stripeDesignObjectUrlRef.current);
       stripeDesignObjectUrlRef.current = objectUrl;
       stripeDesignImageRef.current = img;
-      stripeDesignCanvasAspectRef.current = 1 / 3;
+      stripeDesignCanvasAspectRef.current = 1 / 2;
       clearPersistedDesignAsset('stripeDesign');
       setHelmetStripeDesignPreviewUrl(objectUrl);
       setHelmetStripeDesignFileName(file.name);
@@ -5895,7 +5895,7 @@ export default function HelmetBuilder() {
     const normalHeight = Math.min(6144, maxTextureSize);
     const normalWidth = Math.min(2048, Math.max(1024, Math.floor(normalHeight / 3)));
     const pixelBudget = normalWidth * normalHeight;
-    const canvasAspect = Math.max(0.2, Math.min(0.85, stripeDesignCanvasAspectRef.current || (1 / 3)));
+    const canvasAspect = Math.max(0.2, Math.min(0.85, stripeDesignCanvasAspectRef.current || (1 / 2)));
     let targetHeight = Math.min(maxTextureSize, Math.floor(Math.sqrt(pixelBudget / canvasAspect)));
     let targetWidth = Math.min(maxTextureSize, Math.floor(targetHeight * canvasAspect));
     if (targetWidth >= maxTextureSize) {
@@ -9517,7 +9517,7 @@ export default function HelmetBuilder() {
 
                   <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:10 }}>
                     <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Width</span>
-                    <input type="range" min="70" max="700" value={Math.round(helmetStripeWidth*100)} onChange={e => setHelmetStripeWidth(parseInt(e.target.value)/100)} style={{ flex:1, minWidth:0 }} />
+                    <input type="range" min="70" max="1000" value={Math.round(helmetStripeWidth*100)} onChange={e => setHelmetStripeWidth(parseInt(e.target.value)/100)} style={{ flex:1, minWidth:0 }} />
                   </div>
                   <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:8 }}>
                     <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Length</span>
@@ -9541,7 +9541,7 @@ export default function HelmetBuilder() {
                   <div style={{ height:1, background:'rgba(255,255,255,0.06)', margin:'12px 0 10px' }} />
                   <SectionLabel>Custom Stripe Design</SectionLabel>
                   <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.5, marginBottom:10 }}>
-                    Upload a transparent PNG or JPEG to place artwork inside the stripe zone. For a full-width full-length design, ideal artwork is around 1200×3600px or larger. Taller files such as 1500×4500px are also great, and narrower or shorter artwork is perfectly fine too.
+                    Upload a transparent PNG or JPEG to place artwork inside the stripe zone. For a full-width full-length design, ideal artwork is around 1800×3600px or larger. Taller files are also great, and narrower or shorter artwork is perfectly fine too.
                   </div>
                   <div style={{ fontSize:8, color:'#4b5563', lineHeight:1.45, marginBottom:10 }}>
                     The current Width and Length sliders define the available stripe area on the helmet. Your uploaded design fits inside that live area and can be used with or without the preset stripe colors underneath.
@@ -9572,7 +9572,7 @@ export default function HelmetBuilder() {
                       <div style={{
                         position:'relative',
                         width:'100%',
-                        aspectRatio:'1 / 2.8',
+                        aspectRatio:'1 / 2',
                         overflow:'hidden',
                         borderRadius:8,
                         border:'1px solid rgba(255,255,255,0.12)',
