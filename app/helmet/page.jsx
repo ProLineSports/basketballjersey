@@ -1314,7 +1314,6 @@ function installSideLogoSurfaceProjection(material, uniforms, cacheKey) {
   const medianOriginUniform = uniforms.medianOrigin || { value:new THREE.Vector3(0, 0, 0) };
   const medianNormalUniform = uniforms.medianNormal || { value:new THREE.Vector3(1, 0, 0) };
   const medianSideUniform = uniforms.medianSide || { value:0 };
-  const facingMinUniform = uniforms.facingMin || { value:-0.15 };
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uSideLogoCenter = uniforms.center;
     shader.uniforms.uSideLogoRight = uniforms.right;
@@ -1327,7 +1326,6 @@ function installSideLogoSurfaceProjection(material, uniforms, cacheKey) {
     shader.uniforms.uSideLogoMedianOrigin = medianOriginUniform;
     shader.uniforms.uSideLogoMedianNormal = medianNormalUniform;
     shader.uniforms.uSideLogoMedianSide = medianSideUniform;
-    shader.uniforms.uSideLogoFacingMin = facingMinUniform;
 
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -1359,7 +1357,6 @@ uniform float uSideLogoDepth;
 uniform vec3 uSideLogoMedianOrigin;
 uniform vec3 uSideLogoMedianNormal;
 uniform float uSideLogoMedianSide;
-uniform float uSideLogoFacingMin;
 varying vec3 vSideLogoWorldPosition;
 varying vec3 vSideLogoWorldNormal;`
       )
@@ -1382,7 +1379,7 @@ if (
   sideLogoU >= 0.0 && sideLogoU <= 1.0 &&
   sideLogoV >= 0.0 && sideLogoV <= 1.0 &&
   sideLogoDepth <= uSideLogoDepth &&
-  sideLogoFacing > uSideLogoFacingMin &&
+  sideLogoFacing > 0.05 &&
   sideLogoMedianMask > 0.5
 ) {
   sideLogoSample = texture2D(map, vec2(sideLogoU, sideLogoV));
@@ -2968,80 +2965,6 @@ function applyDecalFinishToMaterials(materials, scene, finishId) {
 }
 
 
-// Full wraps are shell artwork, not a separate vinyl-finish choice. The visible wrap
-// is rendered on a thin carrier above the shell, so copy the shell's current physical
-// response onto that carrier. This keeps Matte matte, Satin satin, Chrome reflective,
-// and also lets Car Paint / Carbon Fiber share the shell's active surface maps without
-// regenerating duplicate GPU textures.
-function syncWrapFinishToShell(materialsMap, wrapMaterials, scene, finishId) {
-  const shellMat = SHELL_MATERIAL_NAMES
-    .flatMap(name => materialsMap?.[name] || [])
-    .find(Boolean);
-
-  const fallback = FINISHES.find(f => f.id === finishId) || FINISHES[0];
-
-  (wrapMaterials || []).forEach(mat => {
-    if (!mat) return;
-
-    if (shellMat) {
-      const scalarProps = [
-        'roughness',
-        'metalness',
-        'clearcoat',
-        'clearcoatRoughness',
-        'iridescence',
-        'iridescenceIOR',
-        'emissiveIntensity',
-        'envMapIntensity',
-        'bumpScale',
-        'specularIntensity',
-        'sheen',
-        'sheenRoughness',
-      ];
-
-      scalarProps.forEach(prop => {
-        if (prop in shellMat && prop in mat && shellMat[prop] != null) {
-          mat[prop] = shellMat[prop];
-        }
-      });
-
-      if ('iridescenceThicknessRange' in mat && shellMat.iridescenceThicknessRange) {
-        mat.iridescenceThicknessRange = Array.isArray(shellMat.iridescenceThicknessRange)
-          ? [...shellMat.iridescenceThicknessRange]
-          : shellMat.iridescenceThicknessRange;
-      }
-
-      // Reuse the shell's already-generated finish textures. These are shared
-      // references only; the wrap carrier never owns or disposes them.
-      mat.roughnessMap = shellMat.roughnessMap || null;
-      mat.metalnessMap = shellMat.metalnessMap || null;
-      mat.bumpMap = shellMat.bumpMap || null;
-      mat.emissiveMap = shellMat.emissiveMap || null;
-
-      if (mat.emissive && shellMat.emissive) {
-        mat.emissive.copy(shellMat.emissive);
-      }
-
-      mat.envMap = shellMat.envMap || null;
-    } else {
-      mat.roughness = fallback.roughness;
-      mat.metalness = fallback.metalness;
-      mat.clearcoat = fallback.clearcoat || 0;
-      mat.clearcoatRoughness = fallback.clearcoatRoughness || 0;
-      mat.iridescence = fallback.iridescence || 0;
-      mat.envMap = finishId === 'chrome'
-        ? (scene?.userData?.chromeEnvTexture || scene?.userData?.envTexture || null)
-        : finishId === 'carpaint'
-          ? (scene?.userData?.envTexture || null)
-          : null;
-      mat.envMapIntensity = finishId === 'chrome' ? 1.6 : finishId === 'carpaint' ? 0.85 : 1.0;
-    }
-
-    mat.needsUpdate = true;
-  });
-}
-
-
 const CREDITS_INITIAL = 3;
 const BUILDER_INTRO_STORAGE_KEY = 'proline-helmet-builder-intro-seen-v1';
 
@@ -3633,7 +3556,7 @@ export default function HelmetBuilder() {
   const stripeDesignImageRef     = useRef(null);
   const stripeDesignCanvasRef    = useRef(null);
   const stripeDesignWorkCanvasRef = useRef(null);
-  const stripeDesignCanvasAspectRef = useRef(1 / 2);
+  const stripeDesignCanvasAspectRef = useRef(1 / 3);
   const stripeDesignTextureRef   = useRef(null);
   const stripeDesignObjectUrlRef = useRef(null);
   const decalOverlayMeshesRef    = useRef([]);
@@ -3907,7 +3830,7 @@ export default function HelmetBuilder() {
   const [carbonFiberSize, setCarbonFiberSize] = useState(1.0);
   const satinMicroTextureRef                = useRef(null);
   const carbonWeaveTextureRef               = useRef(null);
-  const [facemaskFinish, setFacemaskFinish] = useState('gloss'); // gloss | satin | matte | chrome
+  const [facemaskFinish, setFacemaskFinish] = useState('gloss'); // gloss | matte
 
   const [wrapEnabled, setWrapEnabled]       = useState(false);
   const [wrapPreviewUrl, setWrapPreviewUrl] = useState(null);
@@ -4621,7 +4544,7 @@ export default function HelmetBuilder() {
       stripeDesignObjectUrlRef.current = null;
     }
     stripeDesignImageRef.current = null;
-    stripeDesignCanvasAspectRef.current = 1 / 2;
+    stripeDesignCanvasAspectRef.current = 1 / 3;
     setHelmetStripeDesignPreviewUrl(null);
     setHelmetStripeDesignFileName('');
     setHelmetStripeDesignError('');
@@ -4631,7 +4554,7 @@ export default function HelmetBuilder() {
     setHelmetStripeDesignRevision(r => r + 1);
   }, [clearPersistedDesignAsset, resetStripeDesignTransform]);
 
-  const loadStripeDesignFromSource = useCallback(({ src, fileName = 'stripe-design.png', scale = 1, scaleX = 1, scaleY = 1, stripeWidth = null, stripeLength = null, rotation = 0, offsetX = 0, offsetY = 0, opacity = 1, canvasAspect = 1 / 2, enabled = true, crossOrigin = null, ownedObjectUrl = false, loadToken = null }) => {
+  const loadStripeDesignFromSource = useCallback(({ src, fileName = 'stripe-design.png', scale = 1, scaleX = 1, scaleY = 1, stripeWidth = null, stripeLength = null, rotation = 0, offsetX = 0, offsetY = 0, opacity = 1, canvasAspect = 1 / 3, enabled = true, crossOrigin = null, ownedObjectUrl = false, loadToken = null }) => {
     if (!src) return;
 
     const img = new Image();
@@ -4647,7 +4570,7 @@ export default function HelmetBuilder() {
       stripeDesignObjectUrlRef.current = ownedObjectUrl ? src : null;
       if (!ownedObjectUrl && typeof src === 'string' && src.startsWith('/')) clearPersistedDesignAsset('stripeDesign');
       stripeDesignImageRef.current = img;
-      stripeDesignCanvasAspectRef.current = Math.max(0.2, Math.min(0.85, Number(canvasAspect) || (1 / 2)));
+      stripeDesignCanvasAspectRef.current = Math.max(0.2, Math.min(0.85, Number(canvasAspect) || (1 / 3)));
       setHelmetStripeDesignPreviewUrl(src);
       setHelmetStripeDesignFileName(fileName);
       setHelmetStripeDesignError('');
@@ -4685,7 +4608,7 @@ export default function HelmetBuilder() {
       if (stripeDesignObjectUrlRef.current) URL.revokeObjectURL(stripeDesignObjectUrlRef.current);
       stripeDesignObjectUrlRef.current = objectUrl;
       stripeDesignImageRef.current = img;
-      stripeDesignCanvasAspectRef.current = 1 / 2;
+      stripeDesignCanvasAspectRef.current = 1 / 3;
       clearPersistedDesignAsset('stripeDesign');
       setHelmetStripeDesignPreviewUrl(objectUrl);
       setHelmetStripeDesignFileName(file.name);
@@ -5130,13 +5053,8 @@ export default function HelmetBuilder() {
         // Refresh in case Chrome is already the active finish and materials already exist
         applyShellEnvMap(materialsRef.current, scene, finishRef.current);
         applyFacemaskEnvMap(materialsRef.current, scene, facemaskFinishRef.current);
-        syncWrapFinishToShell(
-          materialsRef.current,
-          decalOverlayMaterialsRef.current,
-          scene,
-          finishRef.current
-        );
         applyDecalFinishToMaterials([
+          ...decalOverlayMaterialsRef.current,
           ...stripeCarrierOverlayMaterialsRef.current,
           ...sideLogoMaterialsRef.current.filter(mat => mat.userData?.sideLogoMainMaterial),
         ], scene, decalFinishRef.current);
@@ -5516,6 +5434,7 @@ export default function HelmetBuilder() {
       }
 
       applyDecalFinishToMaterials([
+        ...decalOverlayMaterialsRef.current,
         ...stripeCarrierOverlayMaterialsRef.current,
       ], scene, decalFinishRef.current);
 
@@ -5534,12 +5453,6 @@ export default function HelmetBuilder() {
       // (scoped to car paint / chrome only — see applyShellEnvMap above).
       applyShellEnvMap(materialsRef.current, scene, finishRef.current);
       applyFacemaskEnvMap(materialsRef.current, scene, facemaskFinishRef.current);
-      syncWrapFinishToShell(
-        materialsRef.current,
-        decalOverlayMaterialsRef.current,
-        scene,
-        finishRef.current
-      );
 
       const modelSetupDoneAt = performance.now();
       debugTimingRef.current.modelSetupDone = modelSetupDoneAt;
@@ -5673,14 +5586,9 @@ export default function HelmetBuilder() {
       // Re-route any finishes that explicitly use the environment texture.
       applyShellEnvMap(materialsRef.current, scene, finishRef.current);
       applyFacemaskEnvMap(materialsRef.current, scene, facemaskFinishRef.current);
-      syncWrapFinishToShell(
-        materialsRef.current,
-        decalOverlayMaterialsRef.current,
-        scene,
-        finishRef.current
-      );
 
       applyDecalFinishToMaterials([
+        ...decalOverlayMaterialsRef.current,
         ...stripeCarrierOverlayMaterialsRef.current,
         ...sideLogoMaterialsRef.current.filter(mat => mat.userData?.sideLogoMainMaterial),
       ], scene, decalFinishRef.current);
@@ -5987,7 +5895,7 @@ export default function HelmetBuilder() {
     const normalHeight = Math.min(6144, maxTextureSize);
     const normalWidth = Math.min(2048, Math.max(1024, Math.floor(normalHeight / 3)));
     const pixelBudget = normalWidth * normalHeight;
-    const canvasAspect = Math.max(0.2, Math.min(0.85, stripeDesignCanvasAspectRef.current || (1 / 2)));
+    const canvasAspect = Math.max(0.2, Math.min(0.85, stripeDesignCanvasAspectRef.current || (1 / 3)));
     let targetHeight = Math.min(maxTextureSize, Math.floor(Math.sqrt(pixelBudget / canvasAspect)));
     let targetWidth = Math.min(maxTextureSize, Math.floor(targetHeight * canvasAspect));
     if (targetWidth >= maxTextureSize) {
@@ -6285,14 +6193,7 @@ export default function HelmetBuilder() {
 
       // The artwork is sampled on the *entire* baked carrier surface. Only transparent
       // pixels outside the image disappear; there is no geometric decal mask at all.
-      // Keep the rendered decal microscopically above the carrier shell. The previous
-      // offset was too small for stable depth precision at grazing camera angles and
-      // could z-fight/mask pieces of the logo while rotating the helmet.
-      const physicalDepth = Math.max(
-        boundsModel.width * 0.0018,
-        baseHeight * 0.0010,
-        0.00055
-      );
+      const physicalDepth = Math.max(boundsModel.width * 0.00055, 0.00024);
       const projectionDepth = Math.max(baseHeight * 0.32, boundsModel.width * 0.10);
       const medianOriginLocal = new THREE.Vector3(boundsModel.centerX, boundsModel.centerY, boundsModel.centerZ);
       const medianOriginWorld = model.localToWorld(medianOriginLocal.clone());
@@ -6307,7 +6208,7 @@ export default function HelmetBuilder() {
         width: { value: baseWidth * 1.03 },
         height: { value: baseHeight * 1.03 },
         depth: { value: projectionDepth },
-        lift: { value: physicalDepth * 0.55 },
+        lift: { value: physicalDepth * 0.20 },
         medianOrigin: { value: medianOriginWorld },
         medianNormal: { value: medianNormalWorld },
         medianSide: { value: medianSideSign },
@@ -6320,7 +6221,7 @@ export default function HelmetBuilder() {
         width: { value: baseWidth },
         height: { value: baseHeight },
         depth: { value: projectionDepth },
-        lift: { value: physicalDepth * 1.00 },
+        lift: { value: physicalDepth * 0.70 },
         medianOrigin: { value: medianOriginWorld },
         medianNormal: { value: medianNormalWorld },
         medianSide: { value: medianSideSign },
@@ -6336,12 +6237,12 @@ export default function HelmetBuilder() {
         depthWrite: false,
         depthTest: true,
         polygonOffset: true,
-        polygonOffsetFactor: -3,
-        polygonOffsetUnits: -3,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1,
         roughness: 0.95,
         metalness: 0.0,
       });
-      installSideLogoSurfaceProjection(shadowMat, shadowUniforms, `side-logo-shadow-v3-${side}`);
+      installSideLogoSurfaceProjection(shadowMat, shadowUniforms, `side-logo-shadow-v2-${side}`);
 
       const mainMat = new THREE.MeshPhysicalMaterial({
         color: 0xffffff,
@@ -6353,11 +6254,11 @@ export default function HelmetBuilder() {
         depthWrite: false,
         depthTest: true,
         polygonOffset: true,
-        polygonOffsetFactor: -5,
-        polygonOffsetUnits: -5,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -2,
       });
       mainMat.userData.sideLogoMainMaterial = true;
-      installSideLogoSurfaceProjection(mainMat, mainUniforms, `side-logo-main-v3-${side}`);
+      installSideLogoSurfaceProjection(mainMat, mainUniforms, `side-logo-main-v2-${side}`);
       applyDecalFinishToMaterials([mainMat], scene, decalFinishRef.current);
 
       const shadowMeshes = createCarrierSurfaceLogoMeshes(scene, shellMeshes, shadowMat, side, 'Shadow', 39);
@@ -6836,39 +6737,33 @@ export default function HelmetBuilder() {
       helper.lookAt(projectorPosition.clone().add(worldNormal));
       helper.rotateZ(rotation * Math.PI / 180);
       const orientation = new THREE.Euler().setFromQuaternion(helper.quaternion, 'XYZ');
-
-      const lift = Math.max(boundsModel.width * 0.00072, 0.00024);
-      const projectionDepth = slot === 'custom'
-        ? Math.max(boundsModel.depth * 0.34, baseHeight * 1.35, 0.09)
-        : Math.max(boundsModel.depth * 0.18, baseHeight * 0.9, 0.05);
-      const facingMin = slot === 'custom' ? -0.55 : -0.15;
-
       const frameQuat = helper.quaternion.clone();
       const frameRight = new THREE.Vector3(1, 0, 0).applyQuaternion(frameQuat).normalize();
       const frameUp = new THREE.Vector3(0, 1, 0).applyQuaternion(frameQuat).normalize();
 
-      const shadowUniforms = {
-        center:{ value:projectorPosition },
-        right:{ value:frameRight },
-        up:{ value:frameUp },
-        normal:{ value:worldNormal },
-        width:{ value:baseWidth * 1.018 },
-        height:{ value:baseHeight * 1.018 },
-        depth:{ value:projectionDepth },
-        lift:{ value:lift * 0.22 },
-        facingMin:{ value:facingMin },
-      };
-      const mainUniforms = {
-        center:{ value:projectorPosition },
-        right:{ value:frameRight },
-        up:{ value:frameUp },
-        normal:{ value:worldNormal },
-        width:{ value:baseWidth },
-        height:{ value:baseHeight },
-        depth:{ value:projectionDepth },
-        lift:{ value:lift * 0.78 },
-        facingMin:{ value:facingMin },
-      };
+      // Use true decal geometry on the rear carrier surface instead of drawing the
+      // entire shell again with a projected rectangle. That keeps the rear custom,
+      // flag, and warning decals on the same surface plane as other decals and avoids
+      // the angle-dependent rectangular clipping that came from overlapping transparent
+      // full-surface overlays.
+      const projectionDepth = Math.max(boundsModel.depth * 0.20, baseHeight * 0.90, 0.06);
+      const shadowGeo = new DecalGeometry(
+        hit.object,
+        projectorPosition,
+        orientation,
+        new THREE.Vector3(baseWidth * 1.018, baseHeight * 1.018, projectionDepth),
+      );
+      const mainGeo = new DecalGeometry(
+        hit.object,
+        projectorPosition,
+        orientation,
+        new THREE.Vector3(baseWidth, baseHeight, projectionDepth),
+      );
+      const lift = Math.max(boundsModel.width * 0.00085, 0.00030);
+      offsetGeometryAlongNormals(shadowGeo, lift * 0.25);
+      offsetGeometryAlongNormals(mainGeo, lift * 0.85);
+
+      const slotOrder = slot === 'flag' ? 0 : slot === 'custom' ? 1 : 2;
 
       const shadowMat = new THREE.MeshPhysicalMaterial({
         color:0x000000,
@@ -6876,8 +6771,6 @@ export default function HelmetBuilder() {
         transparent:true,
         alphaTest:0.01,
         opacity:0.22,
-        // DoubleSide tolerates either winding on an exported carrier surface. The
-        // projection shader's normal-facing test prevents opposite-side bleed-through.
         side:THREE.DoubleSide,
         depthWrite:false,
         depthTest:true,
@@ -6887,11 +6780,6 @@ export default function HelmetBuilder() {
         polygonOffsetFactor:-1,
         polygonOffsetUnits:-1,
       });
-      installSideLogoSurfaceProjection(
-        shadowMat,
-        shadowUniforms,
-        `rear-sticker-${slot}-shadow-surface-v2`
-      );
 
       const mainMat = new THREE.MeshPhysicalMaterial({
         color:new THREE.Color(color),
@@ -6900,8 +6788,6 @@ export default function HelmetBuilder() {
         alphaTest:0.01,
         opacity:1,
         side:THREE.DoubleSide,
-        // Rear decals are a top vinyl layer. The normal-facing projection test keeps
-        // the artwork on the rear even when the exported carrier winding is reversed.
         depthWrite:false,
         depthTest:true,
         polygonOffset:true,
@@ -6911,41 +6797,26 @@ export default function HelmetBuilder() {
       mainMat.userData.rearStickerMainMaterial = true;
       mainMat.userData.rearStickerSlot = slot;
       rearStickerMainMaterialsRef.current[slot] = mainMat;
-      installSideLogoSurfaceProjection(
-        mainMat,
-        mainUniforms,
-        `rear-sticker-${slot}-main-surface-v2`
-      );
       applyDecalFinishToMaterials([mainMat], scene, decalFinishRef.current);
 
-      const shadowMeshes = createCarrierSurfaceLogoMeshes(
-        scene,
-        shellMeshes,
-        shadowMat,
-        `rear-${slot}`,
-        'Shadow',
-        44,
-        { shareGeometry:true }
-      );
-      const mainMeshes = createCarrierSurfaceLogoMeshes(
-        scene,
-        shellMeshes,
-        mainMat,
-        `rear-${slot}`,
-        'Artwork',
-        45,
-        { shareGeometry:true }
-      );
+      const shadowMesh = new THREE.Mesh(shadowGeo, shadowMat);
+      shadowMesh.name = `RearSticker_${slot}_Shadow`;
+      shadowMesh.userData.rearStickerSlot = slot;
+      shadowMesh.renderOrder = 44 + slotOrder * 2;
+      shadowMesh.castShadow = false;
+      shadowMesh.receiveShadow = false;
+      scene.add(shadowMesh);
 
-      shadowMeshes.forEach(mesh => {
-        mesh.userData.rearStickerSlot = slot;
-      });
-      mainMeshes.forEach(mesh => {
-        mesh.userData.rearStickerSlot = slot;
-      });
+      const mainMesh = new THREE.Mesh(mainGeo, mainMat);
+      mainMesh.name = `RearSticker_${slot}_Artwork`;
+      mainMesh.userData.rearStickerSlot = slot;
+      mainMesh.renderOrder = 45 + slotOrder * 2;
+      mainMesh.castShadow = false;
+      mainMesh.receiveShadow = false;
+      scene.add(mainMesh);
 
       const editableId = `rear-${slot}`;
-      const frameCenter = projectorPosition.clone().addScaledVector(worldNormal, lift * 2.0);
+      const frameCenter = projectorPosition.clone().addScaledVector(worldNormal, lift * 1.8);
       const halfW = baseWidth * 0.50;
       const halfH = baseHeight * 0.50;
 
@@ -6970,7 +6841,7 @@ export default function HelmetBuilder() {
       hitProxy.renderOrder = 96;
       scene.add(hitProxy);
 
-      rearStickerMeshesRef.current.push(...shadowMeshes, ...mainMeshes, hitProxy);
+      rearStickerMeshesRef.current.push(shadowMesh, mainMesh, hitProxy);
       rearStickerMaterialsRef.current.push(shadowMat, mainMat, hitProxyMat);
 
       if (selectedEditableDecalRef.current === editableId) {
@@ -6999,10 +6870,10 @@ export default function HelmetBuilder() {
     makeSticker({ slot:'warning', enabled:rearWarningEnabled, image:rearWarningImageRef.current, ...warningPlacement, color:rearWarningColor });
     makeSticker({ slot:'custom', enabled:rearCustomEnabled, image:rearCustomImageRef.current, ...customPlacement });
 
-    applyStripeBumperStencilMask(
-      partObjectsRef.current,
-      rearStickerMaterialsRef.current
-    );
+    // Rear decals are true DecalGeometry on the curved shell and already use normal
+    // depth testing against the bumper geometry. Do NOT run them through the shared
+    // screen-space bumper stencil: that stencil is camera-dependent and was carving
+    // rectangular pieces out of the flag/warning/custom decals at certain view angles.
 
     return cleanup;
   }, [
@@ -7500,10 +7371,10 @@ export default function HelmetBuilder() {
     return()=>{ canvas.removeEventListener('pointerdown',onPointerDown,true); canvas.removeEventListener('pointermove',onPointerMove); canvas.removeEventListener('pointerup',endInteraction); canvas.removeEventListener('pointercancel',endInteraction); if (controlsRef.current) controlsRef.current.enabled=true; };
   }, [loaded, commitEditableDecalPlacement, pushEditableDecalUndo]);
 
-  // ── MAIN DECAL FINISH — stripes + side/rear logos ───────────────────────────
-  // Full wraps inherit the Shell finish and are intentionally excluded here.
+  // ── MAIN DECAL FINISH — wraps + stripes + side logos ─────────────────────────
   useEffect(() => {
     applyDecalFinishToMaterials([
+      ...decalOverlayMaterialsRef.current,
       ...stripeCarrierOverlayMaterialsRef.current,
       ...sideLogoMaterialsRef.current.filter(mat => mat.userData?.sideLogoMainMaterial),
       ...rearStickerMaterialsRef.current.filter(mat => mat.userData?.rearStickerMainMaterial),
@@ -7515,7 +7386,6 @@ export default function HelmetBuilder() {
         ...decalOverlayMaterialsRef.current,
         ...stripeCarrierOverlayMaterialsRef.current,
         ...sideLogoMaterialsRef.current,
-        ...rearStickerMaterialsRef.current,
       ]
     );
   }, [loaded, decalFinish]);
@@ -7589,24 +7459,10 @@ export default function HelmetBuilder() {
           mat.metalness = 1.0;
           mat.clearcoat = 0.0;
           mat.clearcoatRoughness = 0.0;
-        } else if (facemaskFinish === 'satin') {
-          // Mid-sheen powder-coat look: noticeably softer than Gloss, but still
-          // catches controlled highlights unlike Matte.
-          mat.roughness = 0.42;
-          mat.metalness = 0.1;
-          mat.clearcoat = 0.42;
-          mat.clearcoatRoughness = 0.30;
-        } else if (facemaskFinish === 'matte') {
-          mat.roughness = 0.9;
-          mat.metalness = 0.1;
-          mat.clearcoat = 0.0;
-          mat.clearcoatRoughness = 1.0;
         } else {
-          // Gloss
-          mat.roughness = 0.1;
-          mat.metalness = 0.1;
-          mat.clearcoat = 0.8;
-          mat.clearcoatRoughness = 0.08;
+          mat.roughness = facemaskFinish === 'matte' ? 0.9 : 0.1;
+          mat.metalness = 0.1; // reset back down in case it was chrome (metalness=1) before
+          mat.clearcoat = facemaskFinish === 'matte' ? 0.0 : 0.8;
         }
         mat.needsUpdate = true;
       });
@@ -7773,18 +7629,6 @@ export default function HelmetBuilder() {
     });
   }, [glitter, glitterSize, satinMetallic, satinTexture, carbonFiberSize, finish, loaded]);
 
-  // The full-wrap carrier is physically separate from the shell so it can sit over
-  // cutouts and under bumpers, but visually it should be the same painted surface.
-  useEffect(() => {
-    if (!loaded) return;
-    syncWrapFinishToShell(
-      materialsRef.current,
-      decalOverlayMaterialsRef.current,
-      sceneRef.current,
-      finish
-    );
-  }, [finish, glitter, glitterSize, glitterColor, satinMetallic, satinTexture, carbonFiberSize, loaded]);
-
   // Sparkle Color is intentionally isolated from the expensive texture-generation
   // effect above. Native color inputs can emit many changes per second; here each one
   // only updates the existing MeshPhysicalMaterial emissive uniform.
@@ -7798,12 +7642,6 @@ export default function HelmetBuilder() {
         mat.emissive.set(glitterColor);
       });
     });
-    syncWrapFinishToShell(
-      materialsRef.current,
-      decalOverlayMaterialsRef.current,
-      sceneRef.current,
-      finish
-    );
   }, [glitterColor, finish, loaded]);
 
   useEffect(() => () => {
@@ -9459,7 +9297,7 @@ export default function HelmetBuilder() {
                 </CollapsibleSection>
                 <CollapsibleSection title="FACEMASK FINISH">
                 <div style={{ display:'flex', gap:6 }}>
-                  {['gloss','satin','matte','chrome'].map(f => (
+                  {['gloss','matte','chrome'].map(f => (
                     <button key={f} onClick={() => setFacemaskFinish(f)} style={{ flex:1, background:facemaskFinish===f?'rgba(239,255,0,0.1)':'rgba(255,255,255,0.04)', border:facemaskFinish===f?'1px solid rgba(239,255,0,0.4)':'1px solid rgba(255,255,255,0.08)', borderRadius:6, padding:'8px 4px', cursor:'pointer', fontSize:10, fontWeight:700, fontFamily:"'Barlow Condensed',sans-serif", color:facemaskFinish===f?'#efff00':'#9ca3af' }}>{f.toUpperCase()}</button>
                   ))}
                 </div>
@@ -9494,7 +9332,7 @@ export default function HelmetBuilder() {
                   ))}
                 </div>
                 <div style={{ fontSize:8, color:'#4b5563', lineHeight:1.45, marginBottom:14 }}>
-                  Applies to helmet stripes, side/rear decals, and bumper logos. Full wraps inherit the current Shell finish so Matte, Satin, Car Paint, Carbon Fiber, and Chrome stay visually consistent with the helmet surface.
+                  Applies to full wraps, helmet stripes, side logos, and bumper logos. Decals use their own finish and never inherit Shell glitter or Car Paint effects.
                 </div>
                 </CollapsibleSection>
 
@@ -9639,7 +9477,7 @@ export default function HelmetBuilder() {
 
                   <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:10 }}>
                     <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Width</span>
-                    <input type="range" min="70" max="1000" value={Math.round(helmetStripeWidth*100)} onChange={e => setHelmetStripeWidth(parseInt(e.target.value)/100)} style={{ flex:1, minWidth:0 }} />
+                    <input type="range" min="70" max="700" value={Math.round(helmetStripeWidth*100)} onChange={e => setHelmetStripeWidth(parseInt(e.target.value)/100)} style={{ flex:1, minWidth:0 }} />
                   </div>
                   <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:8 }}>
                     <span style={{ width:56, flexShrink:0, fontSize:9, color:'#9ca3af' }}>Length</span>
@@ -9663,7 +9501,7 @@ export default function HelmetBuilder() {
                   <div style={{ height:1, background:'rgba(255,255,255,0.06)', margin:'12px 0 10px' }} />
                   <SectionLabel>Custom Stripe Design</SectionLabel>
                   <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.5, marginBottom:10 }}>
-                    Upload a transparent PNG or JPEG to place artwork inside the stripe zone. For a full-width full-length design, ideal artwork is around 1800×3600px or larger. Taller files are also great, and narrower or shorter artwork is perfectly fine too.
+                    Upload a transparent PNG or JPEG to place artwork inside the stripe zone. For a full-width full-length design, ideal artwork is around 1200×3600px or larger. Taller files such as 1500×4500px are also great, and narrower or shorter artwork is perfectly fine too.
                   </div>
                   <div style={{ fontSize:8, color:'#4b5563', lineHeight:1.45, marginBottom:10 }}>
                     The current Width and Length sliders define the available stripe area on the helmet. Your uploaded design fits inside that live area and can be used with or without the preset stripe colors underneath.
@@ -9694,7 +9532,7 @@ export default function HelmetBuilder() {
                       <div style={{
                         position:'relative',
                         width:'100%',
-                        aspectRatio:'1 / 2',
+                        aspectRatio:'1 / 2.8',
                         overflow:'hidden',
                         borderRadius:8,
                         border:'1px solid rgba(255,255,255,0.12)',
