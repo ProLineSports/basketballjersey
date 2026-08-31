@@ -2965,6 +2965,80 @@ function applyDecalFinishToMaterials(materials, scene, finishId) {
 }
 
 
+// Full wraps are shell artwork, not a separate vinyl-finish choice. The visible wrap
+// is rendered on a thin carrier above the shell, so copy the shell's current physical
+// response onto that carrier. This keeps Matte matte, Satin satin, Chrome reflective,
+// and also lets Car Paint / Carbon Fiber share the shell's active surface maps without
+// regenerating duplicate GPU textures.
+function syncWrapFinishToShell(materialsMap, wrapMaterials, scene, finishId) {
+  const shellMat = SHELL_MATERIAL_NAMES
+    .flatMap(name => materialsMap?.[name] || [])
+    .find(Boolean);
+
+  const fallback = FINISHES.find(f => f.id === finishId) || FINISHES[0];
+
+  (wrapMaterials || []).forEach(mat => {
+    if (!mat) return;
+
+    if (shellMat) {
+      const scalarProps = [
+        'roughness',
+        'metalness',
+        'clearcoat',
+        'clearcoatRoughness',
+        'iridescence',
+        'iridescenceIOR',
+        'emissiveIntensity',
+        'envMapIntensity',
+        'bumpScale',
+        'specularIntensity',
+        'sheen',
+        'sheenRoughness',
+      ];
+
+      scalarProps.forEach(prop => {
+        if (prop in shellMat && prop in mat && shellMat[prop] != null) {
+          mat[prop] = shellMat[prop];
+        }
+      });
+
+      if ('iridescenceThicknessRange' in mat && shellMat.iridescenceThicknessRange) {
+        mat.iridescenceThicknessRange = Array.isArray(shellMat.iridescenceThicknessRange)
+          ? [...shellMat.iridescenceThicknessRange]
+          : shellMat.iridescenceThicknessRange;
+      }
+
+      // Reuse the shell's already-generated finish textures. These are shared
+      // references only; the wrap carrier never owns or disposes them.
+      mat.roughnessMap = shellMat.roughnessMap || null;
+      mat.metalnessMap = shellMat.metalnessMap || null;
+      mat.bumpMap = shellMat.bumpMap || null;
+      mat.emissiveMap = shellMat.emissiveMap || null;
+
+      if (mat.emissive && shellMat.emissive) {
+        mat.emissive.copy(shellMat.emissive);
+      }
+
+      mat.envMap = shellMat.envMap || null;
+    } else {
+      mat.roughness = fallback.roughness;
+      mat.metalness = fallback.metalness;
+      mat.clearcoat = fallback.clearcoat || 0;
+      mat.clearcoatRoughness = fallback.clearcoatRoughness || 0;
+      mat.iridescence = fallback.iridescence || 0;
+      mat.envMap = finishId === 'chrome'
+        ? (scene?.userData?.chromeEnvTexture || scene?.userData?.envTexture || null)
+        : finishId === 'carpaint'
+          ? (scene?.userData?.envTexture || null)
+          : null;
+      mat.envMapIntensity = finishId === 'chrome' ? 1.6 : finishId === 'carpaint' ? 0.85 : 1.0;
+    }
+
+    mat.needsUpdate = true;
+  });
+}
+
+
 const CREDITS_INITIAL = 3;
 const BUILDER_INTRO_STORAGE_KEY = 'proline-helmet-builder-intro-seen-v1';
 
@@ -5053,8 +5127,13 @@ export default function HelmetBuilder() {
         // Refresh in case Chrome is already the active finish and materials already exist
         applyShellEnvMap(materialsRef.current, scene, finishRef.current);
         applyFacemaskEnvMap(materialsRef.current, scene, facemaskFinishRef.current);
+        syncWrapFinishToShell(
+          materialsRef.current,
+          decalOverlayMaterialsRef.current,
+          scene,
+          finishRef.current
+        );
         applyDecalFinishToMaterials([
-          ...decalOverlayMaterialsRef.current,
           ...stripeCarrierOverlayMaterialsRef.current,
           ...sideLogoMaterialsRef.current.filter(mat => mat.userData?.sideLogoMainMaterial),
         ], scene, decalFinishRef.current);
@@ -5434,7 +5513,6 @@ export default function HelmetBuilder() {
       }
 
       applyDecalFinishToMaterials([
-        ...decalOverlayMaterialsRef.current,
         ...stripeCarrierOverlayMaterialsRef.current,
       ], scene, decalFinishRef.current);
 
@@ -5453,6 +5531,12 @@ export default function HelmetBuilder() {
       // (scoped to car paint / chrome only — see applyShellEnvMap above).
       applyShellEnvMap(materialsRef.current, scene, finishRef.current);
       applyFacemaskEnvMap(materialsRef.current, scene, facemaskFinishRef.current);
+      syncWrapFinishToShell(
+        materialsRef.current,
+        decalOverlayMaterialsRef.current,
+        scene,
+        finishRef.current
+      );
 
       const modelSetupDoneAt = performance.now();
       debugTimingRef.current.modelSetupDone = modelSetupDoneAt;
@@ -5586,9 +5670,14 @@ export default function HelmetBuilder() {
       // Re-route any finishes that explicitly use the environment texture.
       applyShellEnvMap(materialsRef.current, scene, finishRef.current);
       applyFacemaskEnvMap(materialsRef.current, scene, facemaskFinishRef.current);
+      syncWrapFinishToShell(
+        materialsRef.current,
+        decalOverlayMaterialsRef.current,
+        scene,
+        finishRef.current
+      );
 
       applyDecalFinishToMaterials([
-        ...decalOverlayMaterialsRef.current,
         ...stripeCarrierOverlayMaterialsRef.current,
         ...sideLogoMaterialsRef.current.filter(mat => mat.userData?.sideLogoMainMaterial),
       ], scene, decalFinishRef.current);
@@ -7396,10 +7485,10 @@ export default function HelmetBuilder() {
     return()=>{ canvas.removeEventListener('pointerdown',onPointerDown,true); canvas.removeEventListener('pointermove',onPointerMove); canvas.removeEventListener('pointerup',endInteraction); canvas.removeEventListener('pointercancel',endInteraction); if (controlsRef.current) controlsRef.current.enabled=true; };
   }, [loaded, commitEditableDecalPlacement, pushEditableDecalUndo]);
 
-  // ── MAIN DECAL FINISH — wraps + stripes + side logos ─────────────────────────
+  // ── MAIN DECAL FINISH — stripes + side/rear logos ───────────────────────────
+  // Full wraps inherit the Shell finish and are intentionally excluded here.
   useEffect(() => {
     applyDecalFinishToMaterials([
-      ...decalOverlayMaterialsRef.current,
       ...stripeCarrierOverlayMaterialsRef.current,
       ...sideLogoMaterialsRef.current.filter(mat => mat.userData?.sideLogoMainMaterial),
       ...rearStickerMaterialsRef.current.filter(mat => mat.userData?.rearStickerMainMaterial),
@@ -7669,6 +7758,18 @@ export default function HelmetBuilder() {
     });
   }, [glitter, glitterSize, satinMetallic, satinTexture, carbonFiberSize, finish, loaded]);
 
+  // The full-wrap carrier is physically separate from the shell so it can sit over
+  // cutouts and under bumpers, but visually it should be the same painted surface.
+  useEffect(() => {
+    if (!loaded) return;
+    syncWrapFinishToShell(
+      materialsRef.current,
+      decalOverlayMaterialsRef.current,
+      sceneRef.current,
+      finish
+    );
+  }, [finish, glitter, glitterSize, glitterColor, satinMetallic, satinTexture, carbonFiberSize, loaded]);
+
   // Sparkle Color is intentionally isolated from the expensive texture-generation
   // effect above. Native color inputs can emit many changes per second; here each one
   // only updates the existing MeshPhysicalMaterial emissive uniform.
@@ -7682,6 +7783,12 @@ export default function HelmetBuilder() {
         mat.emissive.set(glitterColor);
       });
     });
+    syncWrapFinishToShell(
+      materialsRef.current,
+      decalOverlayMaterialsRef.current,
+      sceneRef.current,
+      finish
+    );
   }, [glitterColor, finish, loaded]);
 
   useEffect(() => () => {
@@ -9372,7 +9479,7 @@ export default function HelmetBuilder() {
                   ))}
                 </div>
                 <div style={{ fontSize:8, color:'#4b5563', lineHeight:1.45, marginBottom:14 }}>
-                  Applies to full wraps, helmet stripes, side logos, and bumper logos. Decals use their own finish and never inherit Shell glitter or Car Paint effects.
+                  Applies to helmet stripes, side/rear decals, and bumper logos. Full wraps inherit the current Shell finish so Matte, Satin, Car Paint, Carbon Fiber, and Chrome stay visually consistent with the helmet surface.
                 </div>
                 </CollapsibleSection>
 
