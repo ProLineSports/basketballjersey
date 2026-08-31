@@ -1379,7 +1379,7 @@ if (
   sideLogoU >= 0.0 && sideLogoU <= 1.0 &&
   sideLogoV >= 0.0 && sideLogoV <= 1.0 &&
   sideLogoDepth <= uSideLogoDepth &&
-  sideLogoFacing > 0.05 &&
+  sideLogoFacing > -0.22 &&
   sideLogoMedianMask > 0.5
 ) {
   sideLogoSample = texture2D(map, vec2(sideLogoU, sideLogoV));
@@ -1407,6 +1407,7 @@ function createCarrierSurfaceLogoMeshes(scene, sourceMeshes, material, side, lay
     overlay.userData.sideLogoArtwork = true;
     overlay.userData.sharedCarrierGeometry = shareGeometry;
     overlay.renderOrder = renderOrder;
+    overlay.frustumCulled = false;
     overlay.castShadow = false;
     overlay.receiveShadow = false;
     source.updateWorldMatrix(true, false);
@@ -6193,8 +6194,10 @@ export default function HelmetBuilder() {
 
       // The artwork is sampled on the *entire* baked carrier surface. Only transparent
       // pixels outside the image disappear; there is no geometric decal mask at all.
-      const physicalDepth = Math.max(boundsModel.width * 0.00055, 0.00024);
-      const projectionDepth = Math.max(baseHeight * 0.32, boundsModel.width * 0.10);
+      // Keep logo decals clearly above the shell / wrap / stripe depth layers.
+      // This remains visually flush, but prevents grazing-angle depth clipping.
+      const physicalDepth = Math.max(boundsModel.width * 0.0022, 0.00080);
+      const projectionDepth = Math.max(baseHeight * 0.40, boundsModel.width * 0.14);
       const medianOriginLocal = new THREE.Vector3(boundsModel.centerX, boundsModel.centerY, boundsModel.centerZ);
       const medianOriginWorld = model.localToWorld(medianOriginLocal.clone());
       const medianNormalWorld = new THREE.Vector3(1, 0, 0).transformDirection(model.matrixWorld).normalize();
@@ -6208,7 +6211,7 @@ export default function HelmetBuilder() {
         width: { value: baseWidth * 1.03 },
         height: { value: baseHeight * 1.03 },
         depth: { value: projectionDepth },
-        lift: { value: physicalDepth * 0.20 },
+        lift: { value: physicalDepth * 0.68 },
         medianOrigin: { value: medianOriginWorld },
         medianNormal: { value: medianNormalWorld },
         medianSide: { value: medianSideSign },
@@ -6221,7 +6224,7 @@ export default function HelmetBuilder() {
         width: { value: baseWidth },
         height: { value: baseHeight },
         depth: { value: projectionDepth },
-        lift: { value: physicalDepth * 0.70 },
+        lift: { value: physicalDepth * 1.00 },
         medianOrigin: { value: medianOriginWorld },
         medianNormal: { value: medianNormalWorld },
         medianSide: { value: medianSideSign },
@@ -6237,12 +6240,12 @@ export default function HelmetBuilder() {
         depthWrite: false,
         depthTest: true,
         polygonOffset: true,
-        polygonOffsetFactor: -1,
-        polygonOffsetUnits: -1,
+        polygonOffsetFactor: -5,
+        polygonOffsetUnits: -5,
         roughness: 0.95,
         metalness: 0.0,
       });
-      installSideLogoSurfaceProjection(shadowMat, shadowUniforms, `side-logo-shadow-v2-${side}`);
+      installSideLogoSurfaceProjection(shadowMat, shadowUniforms, `side-logo-shadow-v4-${side}`);
 
       const mainMat = new THREE.MeshPhysicalMaterial({
         color: 0xffffff,
@@ -6254,11 +6257,11 @@ export default function HelmetBuilder() {
         depthWrite: false,
         depthTest: true,
         polygonOffset: true,
-        polygonOffsetFactor: -2,
-        polygonOffsetUnits: -2,
+        polygonOffsetFactor: -8,
+        polygonOffsetUnits: -8,
       });
       mainMat.userData.sideLogoMainMaterial = true;
-      installSideLogoSurfaceProjection(mainMat, mainUniforms, `side-logo-main-v2-${side}`);
+      installSideLogoSurfaceProjection(mainMat, mainUniforms, `side-logo-main-v4-${side}`);
       applyDecalFinishToMaterials([mainMat], scene, decalFinishRef.current);
 
       const shadowMeshes = createCarrierSurfaceLogoMeshes(scene, shellMeshes, shadowMat, side, 'Shadow', 39);
@@ -6759,9 +6762,11 @@ export default function HelmetBuilder() {
         orientation,
         new THREE.Vector3(baseWidth, baseHeight, projectionDepth),
       );
-      const lift = Math.max(boundsModel.width * 0.00085, 0.00030);
-      offsetGeometryAlongNormals(shadowGeo, lift * 0.25);
-      offsetGeometryAlongNormals(mainGeo, lift * 0.85);
+      // Rear decals are true curved DecalGeometry. Give the decal film a stable
+      // separation from shell/wrap depth so sections cannot disappear by view angle.
+      const lift = Math.max(boundsModel.width * 0.0022, 0.00080);
+      offsetGeometryAlongNormals(shadowGeo, lift * 0.68);
+      offsetGeometryAlongNormals(mainGeo, lift * 1.00);
 
       const slotOrder = slot === 'flag' ? 0 : slot === 'custom' ? 1 : 2;
 
@@ -6777,8 +6782,8 @@ export default function HelmetBuilder() {
         roughness:0.95,
         metalness:0,
         polygonOffset:true,
-        polygonOffsetFactor:-1,
-        polygonOffsetUnits:-1,
+        polygonOffsetFactor:-5,
+        polygonOffsetUnits:-5,
       });
 
       const mainMat = new THREE.MeshPhysicalMaterial({
@@ -6791,8 +6796,8 @@ export default function HelmetBuilder() {
         depthWrite:false,
         depthTest:true,
         polygonOffset:true,
-        polygonOffsetFactor:-2,
-        polygonOffsetUnits:-2,
+        polygonOffsetFactor:-8,
+        polygonOffsetUnits:-8,
       });
       mainMat.userData.rearStickerMainMaterial = true;
       mainMat.userData.rearStickerSlot = slot;
@@ -6803,6 +6808,7 @@ export default function HelmetBuilder() {
       shadowMesh.name = `RearSticker_${slot}_Shadow`;
       shadowMesh.userData.rearStickerSlot = slot;
       shadowMesh.renderOrder = 44 + slotOrder * 2;
+      shadowMesh.frustumCulled = false;
       shadowMesh.castShadow = false;
       shadowMesh.receiveShadow = false;
       scene.add(shadowMesh);
@@ -6811,6 +6817,7 @@ export default function HelmetBuilder() {
       mainMesh.name = `RearSticker_${slot}_Artwork`;
       mainMesh.userData.rearStickerSlot = slot;
       mainMesh.renderOrder = 45 + slotOrder * 2;
+      mainMesh.frustumCulled = false;
       mainMesh.castShadow = false;
       mainMesh.receiveShadow = false;
       scene.add(mainMesh);
