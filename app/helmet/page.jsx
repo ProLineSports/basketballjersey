@@ -6710,10 +6710,12 @@ export default function HelmetBuilder() {
     const model = modelRef.current;
     if (!loaded || !scene || !model) return;
 
-    // Rear decals render more reliably on the actual visible Shell meshes.
-    // Unlike crown stripes they do not need cutout-bridging coverage, and using the
-    // real shell avoids the extra rear clipping/grazing artifacts seen on exports.
-    let shellRoots = partObjectsRef.current[partKey('Shell')] || [];
+    // Rear decals use the same filled baked Decal Surface as side logos/stripes.
+    // That carrier bridges vents/cutouts so artwork behaves like one continuous vinyl
+    // sticker instead of being clipped by the visible shell topology.
+    let shellRoots = decalSurfaceObjectsRef.current.length
+      ? decalSurfaceObjectsRef.current
+      : (partObjectsRef.current[partKey('Shell')] || []);
 
     if (!shellRoots.length) {
       const shellKey = partKey('Shell');
@@ -6832,12 +6834,140 @@ export default function HelmetBuilder() {
       helper.rotateZ(rotation * Math.PI / 180);
       const orientation = new THREE.Euler().setFromQuaternion(helper.quaternion, 'XYZ');
 
-      const lift = Math.max(boundsModel.width * 0.00105, 0.00034);
-      const projectionDepth = Math.max(boundsModel.depth * 0.26, baseHeight * 1.08, 0.08);
+      const lift = Math.max(boundsModel.width * 0.00072, 0.00024);
+      const projectionDepth = Math.max(boundsModel.depth * 0.18, baseHeight * 0.9, 0.05);
 
       const frameQuat = helper.quaternion.clone();
       const frameRight = new THREE.Vector3(1, 0, 0).applyQuaternion(frameQuat).normalize();
       const frameUp = new THREE.Vector3(0, 1, 0).applyQuaternion(frameQuat).normalize();
+
+      // Custom rear artwork is intentionally a single flat decal plane. Projecting a
+      // custom image across the full rear carrier surface caused the carrier's depth/
+      // facing tests to slice the artwork into pieces at some camera angles and even
+      // more aggressively during high-resolution exports. A normal decal plane is the
+      // correct treatment here: one uninterrupted image layer sitting just above the
+      // rear shell, exactly like a physical rear-number/name sticker.
+      if (slot === 'custom') {
+        const rearNormal = new THREE.Vector3(0, 0, -1)
+          .transformDirection(model.matrixWorld)
+          .normalize();
+
+        const planeHelper = new THREE.Object3D();
+        const planeCenter = hit.point.clone().addScaledVector(rearNormal, lift * 1.35);
+        planeHelper.position.copy(planeCenter);
+        planeHelper.lookAt(planeCenter.clone().add(rearNormal));
+        planeHelper.rotateZ(rotation * Math.PI / 180);
+        const planeQuat = planeHelper.quaternion.clone();
+        const planeRight = new THREE.Vector3(1, 0, 0).applyQuaternion(planeQuat).normalize();
+        const planeUp = new THREE.Vector3(0, 1, 0).applyQuaternion(planeQuat).normalize();
+
+        const shadowMat = new THREE.MeshPhysicalMaterial({
+          color:0x000000,
+          map:pack.rimTexture,
+          transparent:true,
+          alphaTest:0.01,
+          opacity:0.22,
+          side:THREE.DoubleSide,
+          depthWrite:false,
+          depthTest:true,
+          roughness:0.95,
+          metalness:0,
+          polygonOffset:true,
+          polygonOffsetFactor:-2,
+          polygonOffsetUnits:-2,
+        });
+        const mainMat = new THREE.MeshPhysicalMaterial({
+          color:new THREE.Color(color),
+          map:pack.mainTexture,
+          transparent:true,
+          alphaTest:0.01,
+          opacity:1,
+          side:THREE.DoubleSide,
+          depthWrite:false,
+          depthTest:true,
+          polygonOffset:true,
+          polygonOffsetFactor:-4,
+          polygonOffsetUnits:-4,
+        });
+        mainMat.userData.rearStickerMainMaterial = true;
+        mainMat.userData.rearStickerSlot = slot;
+        rearStickerMainMaterialsRef.current[slot] = mainMat;
+        applyDecalFinishToMaterials([mainMat], scene, decalFinishRef.current);
+
+        const shadowGeo = new THREE.PlaneGeometry(baseWidth * 1.018, baseHeight * 1.018, 1, 1);
+        const mainGeo = new THREE.PlaneGeometry(baseWidth, baseHeight, 1, 1);
+        const shadowMesh = new THREE.Mesh(shadowGeo, shadowMat);
+        const mainMesh = new THREE.Mesh(mainGeo, mainMat);
+
+        shadowMesh.name = 'RearSticker_custom_ShadowPlane';
+        mainMesh.name = 'RearSticker_custom_ArtworkPlane';
+        shadowMesh.userData.rearStickerSlot = slot;
+        mainMesh.userData.rearStickerSlot = slot;
+        shadowMesh.position.copy(planeCenter.clone().addScaledVector(rearNormal, lift * 0.08));
+        mainMesh.position.copy(planeCenter.clone().addScaledVector(rearNormal, lift * 0.22));
+        shadowMesh.quaternion.copy(planeQuat);
+        mainMesh.quaternion.copy(planeQuat);
+        shadowMesh.renderOrder = 44;
+        mainMesh.renderOrder = 45;
+        shadowMesh.castShadow = false;
+        shadowMesh.receiveShadow = false;
+        mainMesh.castShadow = false;
+        mainMesh.receiveShadow = false;
+        scene.add(shadowMesh, mainMesh);
+
+        const editableId = 'rear-custom';
+        const frameCenter = mainMesh.position.clone();
+        const halfW = baseWidth * 0.50;
+        const halfH = baseHeight * 0.50;
+        editableDecalWorldFrameRef.current[editableId] = {
+          id:editableId, surface:'rear-shell', center:frameCenter,
+          corners:[
+            frameCenter.clone().addScaledVector(planeRight, -halfW).addScaledVector(planeUp,  halfH),
+            frameCenter.clone().addScaledVector(planeRight,  halfW).addScaledVector(planeUp,  halfH),
+            frameCenter.clone().addScaledVector(planeRight, -halfW).addScaledVector(planeUp, -halfH),
+            frameCenter.clone().addScaledVector(planeRight,  halfW).addScaledVector(planeUp, -halfH),
+          ],
+        };
+
+        const hitProxyGeo = new THREE.PlaneGeometry(baseWidth, baseHeight, 1, 1);
+        const hitProxyMat = new THREE.MeshBasicMaterial({
+          transparent:true, opacity:0, colorWrite:false,
+          depthWrite:false, depthTest:false, side:THREE.DoubleSide,
+        });
+        const hitProxy = new THREE.Mesh(hitProxyGeo, hitProxyMat);
+        hitProxy.name = 'RearSticker_custom_HitProxy';
+        hitProxy.userData.editableDecalId = editableId;
+        hitProxy.userData.editableDecalMain = true;
+        hitProxy.position.copy(frameCenter);
+        hitProxy.quaternion.copy(planeQuat);
+        hitProxy.renderOrder = 96;
+        scene.add(hitProxy);
+
+        rearStickerMeshesRef.current.push(shadowMesh, mainMesh, hitProxy);
+        rearStickerMaterialsRef.current.push(shadowMat, mainMat, hitProxyMat);
+
+        if (selectedEditableDecalRef.current === editableId) {
+          const selectionTex = createSelectionBoxTexture();
+          const selectionGeo = new THREE.PlaneGeometry(baseWidth * 1.10, baseHeight * 1.10, 1, 1);
+          const selectionMat = new THREE.MeshBasicMaterial({
+            map:selectionTex, transparent:true, alphaTest:0.02,
+            depthTest:false, depthWrite:false, toneMapped:false, side:THREE.DoubleSide,
+          });
+          selectionMat.userData.ownedTexture = selectionTex;
+          const selectionMesh = new THREE.Mesh(selectionGeo, selectionMat);
+          selectionMesh.name = 'RearSticker_custom_Selection';
+          selectionMesh.userData.editableDecalId = editableId;
+          selectionMesh.userData.editableDecalSelection = true;
+          selectionMesh.position.copy(frameCenter);
+          selectionMesh.quaternion.copy(planeQuat);
+          selectionMesh.renderOrder = 110;
+          scene.add(selectionMesh);
+          rearStickerMeshesRef.current.push(selectionMesh);
+          rearStickerMaterialsRef.current.push(selectionMat);
+        }
+
+        return;
+      }
 
       const shadowUniforms = {
         center:{ value:projectorPosition },
@@ -6847,7 +6977,7 @@ export default function HelmetBuilder() {
         width:{ value:baseWidth * 1.018 },
         height:{ value:baseHeight * 1.018 },
         depth:{ value:projectionDepth },
-        lift:{ value:lift * 0.28 },
+        lift:{ value:lift * 0.22 },
       };
       const mainUniforms = {
         center:{ value:projectorPosition },
@@ -6857,7 +6987,7 @@ export default function HelmetBuilder() {
         width:{ value:baseWidth },
         height:{ value:baseHeight },
         depth:{ value:projectionDepth },
-        lift:{ value:lift * 1.00 },
+        lift:{ value:lift * 0.78 },
       };
 
       const shadowMat = new THREE.MeshPhysicalMaterial({
@@ -6989,9 +7119,10 @@ export default function HelmetBuilder() {
     makeSticker({ slot:'warning', enabled:rearWarningEnabled, image:rearWarningImageRef.current, ...warningPlacement, color:rearWarningColor });
     makeSticker({ slot:'custom', enabled:rearCustomEnabled, image:rearCustomImageRef.current, ...customPlacement });
 
-    // Do not stencil-mask rear shell decals against the bumpers. They already sit on
-    // the shell, and the screen-space stencil can carve visible gaps in certain views
-    // and especially in high-resolution exports.
+    applyStripeBumperStencilMask(
+      partObjectsRef.current,
+      rearStickerMaterialsRef.current
+    );
 
     return cleanup;
   }, [
