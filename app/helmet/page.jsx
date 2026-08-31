@@ -6710,12 +6710,10 @@ export default function HelmetBuilder() {
     const model = modelRef.current;
     if (!loaded || !scene || !model) return;
 
-    // Rear decals use the same filled baked Decal Surface as side logos/stripes.
-    // That carrier bridges vents/cutouts so artwork behaves like one continuous vinyl
-    // sticker instead of being clipped by the visible shell topology.
-    let shellRoots = decalSurfaceObjectsRef.current.length
-      ? decalSurfaceObjectsRef.current
-      : (partObjectsRef.current[partKey('Shell')] || []);
+    // Rear decals render more reliably on the actual visible Shell meshes.
+    // Unlike crown stripes they do not need cutout-bridging coverage, and using the
+    // real shell avoids the extra rear clipping/grazing artifacts seen on exports.
+    let shellRoots = partObjectsRef.current[partKey('Shell')] || [];
 
     if (!shellRoots.length) {
       const shellKey = partKey('Shell');
@@ -6834,8 +6832,8 @@ export default function HelmetBuilder() {
       helper.rotateZ(rotation * Math.PI / 180);
       const orientation = new THREE.Euler().setFromQuaternion(helper.quaternion, 'XYZ');
 
-      const lift = Math.max(boundsModel.width * 0.00072, 0.00024);
-      const projectionDepth = Math.max(boundsModel.depth * 0.18, baseHeight * 0.9, 0.05);
+      const lift = Math.max(boundsModel.width * 0.00105, 0.00034);
+      const projectionDepth = Math.max(boundsModel.depth * 0.26, baseHeight * 1.08, 0.08);
 
       const frameQuat = helper.quaternion.clone();
       const frameRight = new THREE.Vector3(1, 0, 0).applyQuaternion(frameQuat).normalize();
@@ -6849,7 +6847,7 @@ export default function HelmetBuilder() {
         width:{ value:baseWidth * 1.018 },
         height:{ value:baseHeight * 1.018 },
         depth:{ value:projectionDepth },
-        lift:{ value:lift * 0.22 },
+        lift:{ value:lift * 0.28 },
       };
       const mainUniforms = {
         center:{ value:projectorPosition },
@@ -6859,7 +6857,7 @@ export default function HelmetBuilder() {
         width:{ value:baseWidth },
         height:{ value:baseHeight },
         depth:{ value:projectionDepth },
-        lift:{ value:lift * 0.78 },
+        lift:{ value:lift * 1.00 },
       };
 
       const shadowMat = new THREE.MeshPhysicalMaterial({
@@ -6991,10 +6989,9 @@ export default function HelmetBuilder() {
     makeSticker({ slot:'warning', enabled:rearWarningEnabled, image:rearWarningImageRef.current, ...warningPlacement, color:rearWarningColor });
     makeSticker({ slot:'custom', enabled:rearCustomEnabled, image:rearCustomImageRef.current, ...customPlacement });
 
-    applyStripeBumperStencilMask(
-      partObjectsRef.current,
-      rearStickerMaterialsRef.current
-    );
+    // Do not stencil-mask rear shell decals against the bumpers. They already sit on
+    // the shell, and the screen-space stencil can carve visible gaps in certain views
+    // and especially in high-resolution exports.
 
     return cleanup;
   }, [
