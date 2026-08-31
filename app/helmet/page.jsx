@@ -3830,7 +3830,7 @@ export default function HelmetBuilder() {
   const [carbonFiberSize, setCarbonFiberSize] = useState(1.0);
   const satinMicroTextureRef                = useRef(null);
   const carbonWeaveTextureRef               = useRef(null);
-  const [facemaskFinish, setFacemaskFinish] = useState('gloss'); // gloss | matte
+  const [facemaskFinish, setFacemaskFinish] = useState('gloss'); // gloss | satin | matte | chrome
 
   const [wrapEnabled, setWrapEnabled]       = useState(false);
   const [wrapPreviewUrl, setWrapPreviewUrl] = useState(null);
@@ -7485,10 +7485,24 @@ export default function HelmetBuilder() {
           mat.metalness = 1.0;
           mat.clearcoat = 0.0;
           mat.clearcoatRoughness = 0.0;
+        } else if (facemaskFinish === 'satin') {
+          // Mid-sheen powder-coat look: noticeably softer than Gloss, but still
+          // catches controlled highlights unlike Matte.
+          mat.roughness = 0.42;
+          mat.metalness = 0.1;
+          mat.clearcoat = 0.42;
+          mat.clearcoatRoughness = 0.30;
+        } else if (facemaskFinish === 'matte') {
+          mat.roughness = 0.9;
+          mat.metalness = 0.1;
+          mat.clearcoat = 0.0;
+          mat.clearcoatRoughness = 1.0;
         } else {
-          mat.roughness = facemaskFinish === 'matte' ? 0.9 : 0.1;
-          mat.metalness = 0.1; // reset back down in case it was chrome (metalness=1) before
-          mat.clearcoat = facemaskFinish === 'matte' ? 0.0 : 0.8;
+          // Gloss
+          mat.roughness = 0.1;
+          mat.metalness = 0.1;
+          mat.clearcoat = 0.8;
+          mat.clearcoatRoughness = 0.08;
         }
         mat.needsUpdate = true;
       });
@@ -9323,7 +9337,7 @@ export default function HelmetBuilder() {
                 </CollapsibleSection>
                 <CollapsibleSection title="FACEMASK FINISH">
                 <div style={{ display:'flex', gap:6 }}>
-                  {['gloss','matte','chrome'].map(f => (
+                  {['gloss','satin','matte','chrome'].map(f => (
                     <button key={f} onClick={() => setFacemaskFinish(f)} style={{ flex:1, background:facemaskFinish===f?'rgba(239,255,0,0.1)':'rgba(255,255,255,0.04)', border:facemaskFinish===f?'1px solid rgba(239,255,0,0.4)':'1px solid rgba(255,255,255,0.08)', borderRadius:6, padding:'8px 4px', cursor:'pointer', fontSize:10, fontWeight:700, fontFamily:"'Barlow Condensed',sans-serif", color:facemaskFinish===f?'#efff00':'#9ca3af' }}>{f.toUpperCase()}</button>
                   ))}
                 </div>
