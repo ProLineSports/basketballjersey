@@ -1214,29 +1214,44 @@ function createSideLogoTexturePack(image, options = {}) {
   baseCtx.drawImage(image, -drawW / 2, -drawH / 2, drawW, drawH);
   baseCtx.restore();
 
-  const makeExpandedAlphaCanvas = (radiusPx, colorHex, opacityValue, cutCenter = false) => {
+  const makeExpandedAlphaCanvas = (
+    radiusPx,
+    colorHex,
+    opacityValue,
+    cutCenter = false,
+    offsetXPx = 0,
+    offsetYPx = 0,
+  ) => {
     const out = document.createElement('canvas');
     out.width = canvasWidth;
     out.height = canvasHeight;
     const ctx = out.getContext('2d');
     if (!ctx) return out;
+
     const radius = Math.max(0, radiusPx);
     const steps = Math.max(12, Math.ceil(radius * 12));
-    for (let i = 0; i < steps; i++) {
-      const angle = (i / steps) * Math.PI * 2;
-      const dx = Math.cos(angle) * radius;
-      const dy = Math.sin(angle) * radius;
-      ctx.drawImage(baseCanvas, dx, dy);
+    if (radius <= 0.001) {
+      ctx.drawImage(baseCanvas, offsetXPx, offsetYPx);
+    } else {
+      for (let i = 0; i < steps; i++) {
+        const angle = (i / steps) * Math.PI * 2;
+        const dx = Math.cos(angle) * radius + offsetXPx;
+        const dy = Math.sin(angle) * radius + offsetYPx;
+        ctx.drawImage(baseCanvas, dx, dy);
+      }
     }
+
     ctx.globalCompositeOperation = 'source-in';
     ctx.globalAlpha = opacityValue;
     ctx.fillStyle = colorHex;
     ctx.fillRect(0, 0, canvasWidth, canvasHeight);
     ctx.globalAlpha = 1;
+
     if (cutCenter) {
       ctx.globalCompositeOperation = 'destination-out';
       ctx.drawImage(baseCanvas, 0, 0);
     }
+
     ctx.globalCompositeOperation = 'source-over';
     return out;
   };
@@ -1252,15 +1267,36 @@ function createSideLogoTexturePack(image, options = {}) {
   }
   finalCtx.drawImage(baseCanvas, 0, 0);
 
-  const rimCanvas = makeExpandedAlphaCanvas(
-    Math.max(2, strokeEnabled ? strokeThickness * 0.65 : 4),
+  // Tighter directional edge treatments read more like a thin decal film sitting on
+  // the shell: a darker, slightly offset shadow on one side and a brighter highlight
+  // on the opposite edge. The spreads are intentionally narrower than before so the
+  // depth effect hugs the artwork instead of looking like a wide halo.
+  const shadowRadius = Math.max(1.4, strokeEnabled ? strokeThickness * 0.42 : 2.4);
+  const glowRadius = Math.max(0.9, strokeEnabled ? strokeThickness * 0.26 : 1.5);
+  const shadowOffset = shadowRadius * 0.36;
+  const glowOffset = glowRadius * 0.28;
+
+  const shadowCanvas = makeExpandedAlphaCanvas(
+    shadowRadius,
     '#000000',
-    strokeEnabled ? 0.16 : 0.12,
-    true
+    strokeEnabled ? 0.24 : 0.20,
+    true,
+    shadowOffset,
+    shadowOffset,
+  );
+
+  const glowCanvas = makeExpandedAlphaCanvas(
+    glowRadius,
+    '#ffffff',
+    strokeEnabled ? 0.22 : 0.18,
+    true,
+    -glowOffset,
+    -glowOffset,
   );
 
   const warpedFinalCanvas = warpCanvasArc(finalCanvas, arcCompensation);
-  const warpedRimCanvas = warpCanvasArc(rimCanvas, arcCompensation);
+  const warpedShadowCanvas = warpCanvasArc(shadowCanvas, arcCompensation);
+  const warpedGlowCanvas = warpCanvasArc(glowCanvas, arcCompensation);
 
   const mainTexture = new THREE.CanvasTexture(warpedFinalCanvas);
   mainTexture.colorSpace = THREE.SRGBColorSpace;
@@ -1271,19 +1307,31 @@ function createSideLogoTexturePack(image, options = {}) {
   mainTexture.anisotropy = 16;
   mainTexture.needsUpdate = true;
 
-  const rimTexture = new THREE.CanvasTexture(warpedRimCanvas);
-  rimTexture.colorSpace = THREE.SRGBColorSpace;
-  rimTexture.wrapS = rimTexture.wrapT = THREE.ClampToEdgeWrapping;
-  rimTexture.minFilter = THREE.LinearMipmapLinearFilter;
-  rimTexture.magFilter = THREE.LinearFilter;
-  rimTexture.generateMipmaps = true;
-  rimTexture.anisotropy = 16;
-  rimTexture.needsUpdate = true;
+  const shadowTexture = new THREE.CanvasTexture(warpedShadowCanvas);
+  shadowTexture.colorSpace = THREE.SRGBColorSpace;
+  shadowTexture.wrapS = shadowTexture.wrapT = THREE.ClampToEdgeWrapping;
+  shadowTexture.minFilter = THREE.LinearMipmapLinearFilter;
+  shadowTexture.magFilter = THREE.LinearFilter;
+  shadowTexture.generateMipmaps = true;
+  shadowTexture.anisotropy = 16;
+  shadowTexture.needsUpdate = true;
+
+  const glowTexture = new THREE.CanvasTexture(warpedGlowCanvas);
+  glowTexture.colorSpace = THREE.SRGBColorSpace;
+  glowTexture.wrapS = glowTexture.wrapT = THREE.ClampToEdgeWrapping;
+  glowTexture.minFilter = THREE.LinearMipmapLinearFilter;
+  glowTexture.magFilter = THREE.LinearFilter;
+  glowTexture.generateMipmaps = true;
+  glowTexture.anisotropy = 16;
+  glowTexture.needsUpdate = true;
 
   return {
     aspect: image.naturalWidth / Math.max(1, image.naturalHeight),
     mainTexture,
-    rimTexture,
+    shadowTexture,
+    glowTexture,
+    // Backward-compatible alias for any older call sites that still expect rimTexture.
+    rimTexture: shadowTexture,
   };
 }
 
@@ -2961,6 +3009,80 @@ function applyDecalFinishToMaterials(materials, scene, finishId) {
     // Non-chrome decals use scene.environment for realistic IBL; Chrome keeps its
     // dedicated reflection map and stronger response.
     mat.envMapIntensity = finishId === 'chrome' ? 1.6 : 1.0;
+    mat.needsUpdate = true;
+  });
+}
+
+
+// Full wraps are shell artwork, not a separate vinyl-finish choice. The visible wrap
+// is rendered on a thin carrier above the shell, so copy the shell's current physical
+// response onto that carrier. This keeps Matte matte, Satin satin, Chrome reflective,
+// and also lets Car Paint / Carbon Fiber share the shell's active surface maps without
+// regenerating duplicate GPU textures.
+function syncWrapFinishToShell(materialsMap, wrapMaterials, scene, finishId) {
+  const shellMat = SHELL_MATERIAL_NAMES
+    .flatMap(name => materialsMap?.[name] || [])
+    .find(Boolean);
+
+  const fallback = FINISHES.find(f => f.id === finishId) || FINISHES[0];
+
+  (wrapMaterials || []).forEach(mat => {
+    if (!mat) return;
+
+    if (shellMat) {
+      const scalarProps = [
+        'roughness',
+        'metalness',
+        'clearcoat',
+        'clearcoatRoughness',
+        'iridescence',
+        'iridescenceIOR',
+        'emissiveIntensity',
+        'envMapIntensity',
+        'bumpScale',
+        'specularIntensity',
+        'sheen',
+        'sheenRoughness',
+      ];
+
+      scalarProps.forEach(prop => {
+        if (prop in shellMat && prop in mat && shellMat[prop] != null) {
+          mat[prop] = shellMat[prop];
+        }
+      });
+
+      if ('iridescenceThicknessRange' in mat && shellMat.iridescenceThicknessRange) {
+        mat.iridescenceThicknessRange = Array.isArray(shellMat.iridescenceThicknessRange)
+          ? [...shellMat.iridescenceThicknessRange]
+          : shellMat.iridescenceThicknessRange;
+      }
+
+      // Reuse the shell's already-generated finish textures. These are shared
+      // references only; the wrap carrier never owns or disposes them.
+      mat.roughnessMap = shellMat.roughnessMap || null;
+      mat.metalnessMap = shellMat.metalnessMap || null;
+      mat.bumpMap = shellMat.bumpMap || null;
+      mat.emissiveMap = shellMat.emissiveMap || null;
+
+      if (mat.emissive && shellMat.emissive) {
+        mat.emissive.copy(shellMat.emissive);
+      }
+
+      mat.envMap = shellMat.envMap || null;
+    } else {
+      mat.roughness = fallback.roughness;
+      mat.metalness = fallback.metalness;
+      mat.clearcoat = fallback.clearcoat || 0;
+      mat.clearcoatRoughness = fallback.clearcoatRoughness || 0;
+      mat.iridescence = fallback.iridescence || 0;
+      mat.envMap = finishId === 'chrome'
+        ? (scene?.userData?.chromeEnvTexture || scene?.userData?.envTexture || null)
+        : finishId === 'carpaint'
+          ? (scene?.userData?.envTexture || null)
+          : null;
+      mat.envMapIntensity = finishId === 'chrome' ? 1.6 : finishId === 'carpaint' ? 0.85 : 1.0;
+    }
+
     mat.needsUpdate = true;
   });
 }
@@ -5054,10 +5176,16 @@ export default function HelmetBuilder() {
         // Refresh in case Chrome is already the active finish and materials already exist
         applyShellEnvMap(materialsRef.current, scene, finishRef.current);
         applyFacemaskEnvMap(materialsRef.current, scene, facemaskFinishRef.current);
+        syncWrapFinishToShell(
+          materialsRef.current,
+          decalOverlayMaterialsRef.current,
+          scene,
+          finishRef.current
+        );
         applyDecalFinishToMaterials([
-          ...decalOverlayMaterialsRef.current,
           ...stripeCarrierOverlayMaterialsRef.current,
           ...sideLogoMaterialsRef.current.filter(mat => mat.userData?.sideLogoMainMaterial),
+          ...rearStickerMaterialsRef.current.filter(mat => mat.userData?.rearStickerMainMaterial),
         ], scene, decalFinishRef.current);
         applyDecalFinishToMaterials([
           ...bumperLogoMaterialsRef.current.filter(mat => mat.userData?.bumperLogoMainMaterial),
@@ -5434,8 +5562,13 @@ export default function HelmetBuilder() {
         stripeCarrierOverlayMaterialsRef.current = stripeFallback.materials;
       }
 
+      syncWrapFinishToShell(
+        materialsRef.current,
+        decalOverlayMaterialsRef.current,
+        scene,
+        finishRef.current
+      );
       applyDecalFinishToMaterials([
-        ...decalOverlayMaterialsRef.current,
         ...stripeCarrierOverlayMaterialsRef.current,
       ], scene, decalFinishRef.current);
 
@@ -5454,6 +5587,12 @@ export default function HelmetBuilder() {
       // (scoped to car paint / chrome only — see applyShellEnvMap above).
       applyShellEnvMap(materialsRef.current, scene, finishRef.current);
       applyFacemaskEnvMap(materialsRef.current, scene, facemaskFinishRef.current);
+      syncWrapFinishToShell(
+        materialsRef.current,
+        decalOverlayMaterialsRef.current,
+        scene,
+        finishRef.current
+      );
 
       const modelSetupDoneAt = performance.now();
       debugTimingRef.current.modelSetupDone = modelSetupDoneAt;
@@ -5588,10 +5727,16 @@ export default function HelmetBuilder() {
       applyShellEnvMap(materialsRef.current, scene, finishRef.current);
       applyFacemaskEnvMap(materialsRef.current, scene, facemaskFinishRef.current);
 
+      syncWrapFinishToShell(
+        materialsRef.current,
+        decalOverlayMaterialsRef.current,
+        scene,
+        finishRef.current
+      );
       applyDecalFinishToMaterials([
-        ...decalOverlayMaterialsRef.current,
         ...stripeCarrierOverlayMaterialsRef.current,
         ...sideLogoMaterialsRef.current.filter(mat => mat.userData?.sideLogoMainMaterial),
+        ...rearStickerMaterialsRef.current.filter(mat => mat.userData?.rearStickerMainMaterial),
       ], scene, decalFinishRef.current);
 
       applyDecalFinishToMaterials([
@@ -6208,10 +6353,23 @@ export default function HelmetBuilder() {
         right: { value: frameRight },
         up: { value: frameUp },
         normal: { value: worldNormal },
-        width: { value: baseWidth * 1.03 },
-        height: { value: baseHeight * 1.03 },
+        width: { value: baseWidth * 1.012 },
+        height: { value: baseHeight * 1.012 },
         depth: { value: projectionDepth },
-        lift: { value: physicalDepth * 0.68 },
+        lift: { value: physicalDepth * 0.62 },
+        medianOrigin: { value: medianOriginWorld },
+        medianNormal: { value: medianNormalWorld },
+        medianSide: { value: medianSideSign },
+      };
+      const glowUniforms = {
+        center: { value: logoCenter },
+        right: { value: frameRight },
+        up: { value: frameUp },
+        normal: { value: worldNormal },
+        width: { value: baseWidth * 1.006 },
+        height: { value: baseHeight * 1.006 },
+        depth: { value: projectionDepth },
+        lift: { value: physicalDepth * 0.86 },
         medianOrigin: { value: medianOriginWorld },
         medianNormal: { value: medianNormalWorld },
         medianSide: { value: medianSideSign },
@@ -6232,10 +6390,10 @@ export default function HelmetBuilder() {
 
       const shadowMat = new THREE.MeshPhysicalMaterial({
         color: 0x000000,
-        map: pack.rimTexture,
+        map: pack.shadowTexture,
         transparent: true,
         alphaTest: 0.01,
-        opacity: 0.43,
+        opacity: 0.58,
         side: THREE.DoubleSide,
         depthWrite: false,
         depthTest: true,
@@ -6245,7 +6403,24 @@ export default function HelmetBuilder() {
         roughness: 0.95,
         metalness: 0.0,
       });
-      installSideLogoSurfaceProjection(shadowMat, shadowUniforms, `side-logo-shadow-v4-${side}`);
+      installSideLogoSurfaceProjection(shadowMat, shadowUniforms, `side-logo-shadow-v5-${side}`);
+
+      const glowMat = new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        map: pack.glowTexture,
+        transparent: true,
+        alphaTest: 0.01,
+        opacity: 0.30,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        depthTest: true,
+        blending: THREE.AdditiveBlending,
+        toneMapped: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -7,
+        polygonOffsetUnits: -7,
+      });
+      installSideLogoSurfaceProjection(glowMat, glowUniforms, `side-logo-glow-v1-${side}`);
 
       const mainMat = new THREE.MeshPhysicalMaterial({
         color: 0xffffff,
@@ -6261,14 +6436,15 @@ export default function HelmetBuilder() {
         polygonOffsetUnits: -8,
       });
       mainMat.userData.sideLogoMainMaterial = true;
-      installSideLogoSurfaceProjection(mainMat, mainUniforms, `side-logo-main-v4-${side}`);
+      installSideLogoSurfaceProjection(mainMat, mainUniforms, `side-logo-main-v5-${side}`);
       applyDecalFinishToMaterials([mainMat], scene, decalFinishRef.current);
 
       const shadowMeshes = createCarrierSurfaceLogoMeshes(scene, shellMeshes, shadowMat, side, 'Shadow', 39);
-      const artworkMeshes = createCarrierSurfaceLogoMeshes(scene, shellMeshes, mainMat, side, 'Artwork', 40);
-      sideLogoMeshesRef.current.push(...shadowMeshes, ...artworkMeshes);
-      sideLogoMaterialsRef.current.push(shadowMat, mainMat);
-      sideLogoTexturesRef.current.push(pack.rimTexture, pack.mainTexture);
+      const glowMeshes = createCarrierSurfaceLogoMeshes(scene, shellMeshes, glowMat, side, 'Glow', 40);
+      const artworkMeshes = createCarrierSurfaceLogoMeshes(scene, shellMeshes, mainMat, side, 'Artwork', 41);
+      sideLogoMeshesRef.current.push(...shadowMeshes, ...glowMeshes, ...artworkMeshes);
+      sideLogoMaterialsRef.current.push(shadowMat, glowMat, mainMat);
+      sideLogoTexturesRef.current.push(pack.shadowTexture, pack.glowTexture, pack.mainTexture);
 
       // Use a simple invisible tangent-plane hit target so clicking/dragging is limited
       // to the logo's footprint rather than the entire carrier shell.
@@ -6692,6 +6868,8 @@ export default function HelmetBuilder() {
 
       if (!cache || cache.key !== key) {
         cache?.pack?.mainTexture?.dispose?.();
+        cache?.pack?.shadowTexture?.dispose?.();
+        cache?.pack?.glowTexture?.dispose?.();
         cache?.pack?.rimTexture?.dispose?.();
 
         const pack = createSideLogoTexturePack(image, {
@@ -6754,7 +6932,13 @@ export default function HelmetBuilder() {
         hit.object,
         projectorPosition,
         orientation,
-        new THREE.Vector3(baseWidth * 1.018, baseHeight * 1.018, projectionDepth),
+        new THREE.Vector3(baseWidth * 1.012, baseHeight * 1.012, projectionDepth),
+      );
+      const glowGeo = new DecalGeometry(
+        hit.object,
+        projectorPosition,
+        orientation,
+        new THREE.Vector3(baseWidth * 1.006, baseHeight * 1.006, projectionDepth),
       );
       const mainGeo = new DecalGeometry(
         hit.object,
@@ -6765,17 +6949,18 @@ export default function HelmetBuilder() {
       // Rear decals are true curved DecalGeometry. Give the decal film a stable
       // separation from shell/wrap depth so sections cannot disappear by view angle.
       const lift = Math.max(boundsModel.width * 0.0022, 0.00080);
-      offsetGeometryAlongNormals(shadowGeo, lift * 0.68);
+      offsetGeometryAlongNormals(shadowGeo, lift * 0.58);
+      offsetGeometryAlongNormals(glowGeo, lift * 0.86);
       offsetGeometryAlongNormals(mainGeo, lift * 1.00);
 
       const slotOrder = slot === 'flag' ? 0 : slot === 'custom' ? 1 : 2;
 
       const shadowMat = new THREE.MeshPhysicalMaterial({
         color:0x000000,
-        map:pack.rimTexture,
+        map:pack.shadowTexture,
         transparent:true,
         alphaTest:0.01,
-        opacity:0.22,
+        opacity:0.38,
         side:THREE.DoubleSide,
         depthWrite:false,
         depthTest:true,
@@ -6784,6 +6969,22 @@ export default function HelmetBuilder() {
         polygonOffset:true,
         polygonOffsetFactor:-5,
         polygonOffsetUnits:-5,
+      });
+
+      const glowMat = new THREE.MeshBasicMaterial({
+        color:0xffffff,
+        map:pack.glowTexture,
+        transparent:true,
+        alphaTest:0.01,
+        opacity:0.24,
+        side:THREE.DoubleSide,
+        depthWrite:false,
+        depthTest:true,
+        blending:THREE.AdditiveBlending,
+        toneMapped:false,
+        polygonOffset:true,
+        polygonOffsetFactor:-7,
+        polygonOffsetUnits:-7,
       });
 
       const mainMat = new THREE.MeshPhysicalMaterial({
@@ -6804,19 +7005,30 @@ export default function HelmetBuilder() {
       rearStickerMainMaterialsRef.current[slot] = mainMat;
       applyDecalFinishToMaterials([mainMat], scene, decalFinishRef.current);
 
+      const layerBaseOrder = 44 + slotOrder * 3;
+
       const shadowMesh = new THREE.Mesh(shadowGeo, shadowMat);
       shadowMesh.name = `RearSticker_${slot}_Shadow`;
       shadowMesh.userData.rearStickerSlot = slot;
-      shadowMesh.renderOrder = 44 + slotOrder * 2;
+      shadowMesh.renderOrder = layerBaseOrder;
       shadowMesh.frustumCulled = false;
       shadowMesh.castShadow = false;
       shadowMesh.receiveShadow = false;
       scene.add(shadowMesh);
 
+      const glowMesh = new THREE.Mesh(glowGeo, glowMat);
+      glowMesh.name = `RearSticker_${slot}_Glow`;
+      glowMesh.userData.rearStickerSlot = slot;
+      glowMesh.renderOrder = layerBaseOrder + 1;
+      glowMesh.frustumCulled = false;
+      glowMesh.castShadow = false;
+      glowMesh.receiveShadow = false;
+      scene.add(glowMesh);
+
       const mainMesh = new THREE.Mesh(mainGeo, mainMat);
       mainMesh.name = `RearSticker_${slot}_Artwork`;
       mainMesh.userData.rearStickerSlot = slot;
-      mainMesh.renderOrder = 45 + slotOrder * 2;
+      mainMesh.renderOrder = layerBaseOrder + 2;
       mainMesh.frustumCulled = false;
       mainMesh.castShadow = false;
       mainMesh.receiveShadow = false;
@@ -6848,8 +7060,8 @@ export default function HelmetBuilder() {
       hitProxy.renderOrder = 96;
       scene.add(hitProxy);
 
-      rearStickerMeshesRef.current.push(shadowMesh, mainMesh, hitProxy);
-      rearStickerMaterialsRef.current.push(shadowMat, mainMat, hitProxyMat);
+      rearStickerMeshesRef.current.push(shadowMesh, glowMesh, mainMesh, hitProxy);
+      rearStickerMaterialsRef.current.push(shadowMat, glowMat, mainMat, hitProxyMat);
 
       if (selectedEditableDecalRef.current === editableId) {
         const selectionTex = createSelectionBoxTexture();
@@ -6915,7 +7127,9 @@ export default function HelmetBuilder() {
   useEffect(() => () => {
     Object.values(rearStickerPackCacheRef.current).forEach(cache => {
       cache?.pack?.mainTexture?.dispose?.();
-      cache?.pack?.rimTexture?.dispose?.();
+      cache?.pack?.shadowTexture?.dispose?.();
+        cache?.pack?.glowTexture?.dispose?.();
+        cache?.pack?.rimTexture?.dispose?.();
     });
     rearStickerPackCacheRef.current = { flag:null, warning:null, custom:null };
   }, []);
@@ -7005,6 +7219,8 @@ export default function HelmetBuilder() {
       let cache = bumperLogoPackCacheRef.current[cacheSlot];
       if (!cache || cache.key !== cacheKey) {
         cache?.pack?.mainTexture?.dispose?.();
+        cache?.pack?.shadowTexture?.dispose?.();
+        cache?.pack?.glowTexture?.dispose?.();
         cache?.pack?.rimTexture?.dispose?.();
         const nextPack = createSideLogoTexturePack(image, {
           strokeEnabled:false,
@@ -7053,8 +7269,13 @@ export default function HelmetBuilder() {
 
         const shadowUniforms = {
           center:{ value:center }, right:{ value:right }, up:{ value:up }, normal:{ value:frontNormal },
-          width:{ value:projectedWidth * 1.018 }, height:{ value:projectedHeight * 1.018 },
-          depth:{ value:projectionDepth }, lift:{ value:lift * 0.20 },
+          width:{ value:projectedWidth * 1.012 }, height:{ value:projectedHeight * 1.012 },
+          depth:{ value:projectionDepth }, lift:{ value:lift * 0.16 },
+        };
+        const glowUniforms = {
+          center:{ value:center }, right:{ value:right }, up:{ value:up }, normal:{ value:frontNormal },
+          width:{ value:projectedWidth * 1.006 }, height:{ value:projectedHeight * 1.006 },
+          depth:{ value:projectionDepth }, lift:{ value:lift * 0.40 },
         };
         const mainUniforms = {
           center:{ value:center }, right:{ value:right }, up:{ value:up }, normal:{ value:frontNormal },
@@ -7063,23 +7284,31 @@ export default function HelmetBuilder() {
         };
 
         const shadowMat = new THREE.MeshPhysicalMaterial({
-          color:0x000000, map:pack.rimTexture, transparent:true, alphaTest:0.01, opacity:0.28,
+          color:0x000000, map:pack.shadowTexture, transparent:true, alphaTest:0.01, opacity:0.40,
           side:THREE.DoubleSide, depthWrite:false, depthTest:true, roughness:0.95, metalness:0,
           polygonOffset:true, polygonOffsetFactor:-1, polygonOffsetUnits:-1,
         });
-          installSideLogoSurfaceProjection(shadowMat, shadowUniforms, 'bumper-logo-front-shadow-surface-v2');
+          installSideLogoSurfaceProjection(shadowMat, shadowUniforms, 'bumper-logo-front-shadow-surface-v3');
+
+        const glowMat = new THREE.MeshBasicMaterial({
+          color:0xffffff, map:pack.glowTexture, transparent:true, alphaTest:0.01, opacity:0.22,
+          side:THREE.DoubleSide, depthWrite:false, depthTest:true, blending:THREE.AdditiveBlending,
+          toneMapped:false, polygonOffset:true, polygonOffsetFactor:-2, polygonOffsetUnits:-2,
+        });
+          installSideLogoSurfaceProjection(glowMat, glowUniforms, 'bumper-logo-front-glow-surface-v1');
 
         const mainMat = new THREE.MeshPhysicalMaterial({
           color:0xffffff, map:pack.mainTexture, transparent:true, alphaTest:0.01, opacity:1,
           side:THREE.DoubleSide, depthWrite:false, depthTest:true,
-          polygonOffset:true, polygonOffsetFactor:-2, polygonOffsetUnits:-2,
+          polygonOffset:true, polygonOffsetFactor:-3, polygonOffsetUnits:-3,
         });
         mainMat.userData.bumperLogoMainMaterial = true;
-          installSideLogoSurfaceProjection(mainMat, mainUniforms, 'bumper-logo-front-main-surface-v2');
+          installSideLogoSurfaceProjection(mainMat, mainUniforms, 'bumper-logo-front-main-surface-v3');
         applyDecalFinishToMaterials([mainMat], scene, bumperLogoFinishRef.current);
 
         const shadowMeshes = createCarrierSurfaceLogoMeshes(scene, bumperMeshes, shadowMat, 'bumper-front', 'Shadow', 34);
-        const mainMeshes = createCarrierSurfaceLogoMeshes(scene, bumperMeshes, mainMat, 'bumper-front', 'Artwork', 35);
+        const glowMeshes = createCarrierSurfaceLogoMeshes(scene, bumperMeshes, glowMat, 'bumper-front', 'Glow', 35);
+        const mainMeshes = createCarrierSurfaceLogoMeshes(scene, bumperMeshes, mainMat, 'bumper-front', 'Artwork', 36);
         const frameQuat = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, frontNormal));
         const frameCenter = center.clone().addScaledVector(frontNormal, lift * 1.6);
         const halfW = projectedWidth * 0.50, halfH = projectedHeight * 0.50;
@@ -7099,8 +7328,8 @@ export default function HelmetBuilder() {
         hitProxy.userData.editableDecalId = editableId;
         hitProxy.userData.editableDecalMain = true;
         hitProxy.position.copy(frameCenter); hitProxy.quaternion.copy(frameQuat); hitProxy.renderOrder = 96; scene.add(hitProxy);
-        bumperLogoMeshesRef.current.push(...shadowMeshes, ...mainMeshes, hitProxy);
-        bumperLogoMaterialsRef.current.push(shadowMat, mainMat, hitProxyMat);
+        bumperLogoMeshesRef.current.push(...shadowMeshes, ...glowMeshes, ...mainMeshes, hitProxy);
+        bumperLogoMaterialsRef.current.push(shadowMat, glowMat, mainMat, hitProxyMat);
         if (selectedEditableDecalRef.current === editableId) {
           const selectionTex = createSelectionBoxTexture();
           const selectionGeo = new THREE.PlaneGeometry(projectedWidth * 1.10, projectedHeight * 1.10, 1, 1);
@@ -7129,7 +7358,13 @@ export default function HelmetBuilder() {
         hit.object,
         projectorPosition,
         orientation,
-        new THREE.Vector3(baseWidth * 1.018, baseHeight * 1.018, projectorDepth),
+        new THREE.Vector3(baseWidth * 1.012, baseHeight * 1.012, projectorDepth),
+      );
+      const glowGeo = new DecalGeometry(
+        hit.object,
+        projectorPosition,
+        orientation,
+        new THREE.Vector3(baseWidth * 1.006, baseHeight * 1.006, projectorDepth),
       );
       const mainGeo = new DecalGeometry(
         hit.object,
@@ -7138,19 +7373,26 @@ export default function HelmetBuilder() {
         new THREE.Vector3(baseWidth, baseHeight, projectorDepth),
       );
       const lift = Math.max(boundsModel.width * 0.00085, 0.00030);
-      offsetGeometryAlongNormals(shadowGeo, lift * 0.25);
-      offsetGeometryAlongNormals(mainGeo, lift * 0.85);
+      offsetGeometryAlongNormals(shadowGeo, lift * 0.22);
+      offsetGeometryAlongNormals(glowGeo, lift * 0.62);
+      offsetGeometryAlongNormals(mainGeo, lift * 0.90);
 
       const shadowMat = new THREE.MeshPhysicalMaterial({
-        color:0x000000, map:pack.rimTexture, transparent:true, alphaTest:0.01, opacity:0.28,
+        color:0x000000, map:pack.shadowTexture, transparent:true, alphaTest:0.01, opacity:0.40,
         side:THREE.DoubleSide, depthWrite:false, depthTest:true, roughness:0.95, metalness:0,
         polygonOffset:true, polygonOffsetFactor:-1, polygonOffsetUnits:-1,
+      });
+
+      const glowMat = new THREE.MeshBasicMaterial({
+        color:0xffffff, map:pack.glowTexture, transparent:true, alphaTest:0.01, opacity:0.22,
+        side:THREE.DoubleSide, depthWrite:false, depthTest:true, blending:THREE.AdditiveBlending,
+        toneMapped:false, polygonOffset:true, polygonOffsetFactor:-2, polygonOffsetUnits:-2,
       });
 
       const mainMat = new THREE.MeshPhysicalMaterial({
         color:0xffffff, map:pack.mainTexture, transparent:true, alphaTest:0.01, opacity:1,
         side:THREE.DoubleSide, depthWrite:false, depthTest:true,
-        polygonOffset:true, polygonOffsetFactor:-2, polygonOffsetUnits:-2,
+        polygonOffset:true, polygonOffsetFactor:-3, polygonOffsetUnits:-3,
       });
       mainMat.userData.bumperLogoMainMaterial = true;
       applyDecalFinishToMaterials([mainMat], scene, bumperLogoFinishRef.current);
@@ -7162,9 +7404,16 @@ export default function HelmetBuilder() {
       shadowMesh.receiveShadow = false;
       scene.add(shadowMesh);
 
+      const glowMesh = new THREE.Mesh(glowGeo, glowMat);
+      glowMesh.name = `BumperLogo_${slot}_Glow`;
+      glowMesh.renderOrder = 35;
+      glowMesh.castShadow = false;
+      glowMesh.receiveShadow = false;
+      scene.add(glowMesh);
+
       const mainMesh = new THREE.Mesh(mainGeo, mainMat);
       mainMesh.name = `BumperLogo_${slot}_Artwork`;
-      mainMesh.renderOrder = 35;
+      mainMesh.renderOrder = 36;
       mainMesh.castShadow = false;
       mainMesh.receiveShadow = false;
       scene.add(mainMesh);
@@ -7188,8 +7437,8 @@ export default function HelmetBuilder() {
       const hitProxy = new THREE.Mesh(hitProxyGeo, hitProxyMat);
       hitProxy.name = 'BumperLogo_rear_HitProxy'; hitProxy.userData.editableDecalId = editableId; hitProxy.userData.editableDecalMain = true;
       hitProxy.position.copy(frameCenter); hitProxy.quaternion.copy(frameQuat); hitProxy.renderOrder = 96; scene.add(hitProxy);
-      bumperLogoMeshesRef.current.push(shadowMesh, mainMesh, hitProxy);
-      bumperLogoMaterialsRef.current.push(shadowMat, mainMat, hitProxyMat);
+      bumperLogoMeshesRef.current.push(shadowMesh, glowMesh, mainMesh, hitProxy);
+      bumperLogoMaterialsRef.current.push(shadowMat, glowMat, mainMat, hitProxyMat);
       if (selectedEditableDecalRef.current === editableId) {
         const selectionTex = createSelectionBoxTexture();
         const selectionGeo = new THREE.PlaneGeometry(baseWidth * 1.10, baseHeight * 1.10, 1, 1);
@@ -7224,7 +7473,9 @@ export default function HelmetBuilder() {
   useEffect(() => () => {
     Object.values(bumperLogoPackCacheRef.current).forEach(cache => {
       cache?.pack?.mainTexture?.dispose?.();
-      cache?.pack?.rimTexture?.dispose?.();
+      cache?.pack?.shadowTexture?.dispose?.();
+        cache?.pack?.glowTexture?.dispose?.();
+        cache?.pack?.rimTexture?.dispose?.();
     });
     bumperLogoPackCacheRef.current = { front:null, rear:null };
   }, []);
@@ -7378,10 +7629,10 @@ export default function HelmetBuilder() {
     return()=>{ canvas.removeEventListener('pointerdown',onPointerDown,true); canvas.removeEventListener('pointermove',onPointerMove); canvas.removeEventListener('pointerup',endInteraction); canvas.removeEventListener('pointercancel',endInteraction); if (controlsRef.current) controlsRef.current.enabled=true; };
   }, [loaded, commitEditableDecalPlacement, pushEditableDecalUndo]);
 
-  // ── MAIN DECAL FINISH — wraps + stripes + side logos ─────────────────────────
+  // ── MAIN DECAL FINISH — stripes + side/rear logos ───────────────────────────
+  // Full wraps inherit the Shell finish and are intentionally excluded here.
   useEffect(() => {
     applyDecalFinishToMaterials([
-      ...decalOverlayMaterialsRef.current,
       ...stripeCarrierOverlayMaterialsRef.current,
       ...sideLogoMaterialsRef.current.filter(mat => mat.userData?.sideLogoMainMaterial),
       ...rearStickerMaterialsRef.current.filter(mat => mat.userData?.rearStickerMainMaterial),
@@ -7636,6 +7887,18 @@ export default function HelmetBuilder() {
     });
   }, [glitter, glitterSize, satinMetallic, satinTexture, carbonFiberSize, finish, loaded]);
 
+  // The full-wrap carrier is physically separate from the shell so it can sit over
+  // cutouts and under bumpers, but visually it should be the same painted surface.
+  useEffect(() => {
+    if (!loaded) return;
+    syncWrapFinishToShell(
+      materialsRef.current,
+      decalOverlayMaterialsRef.current,
+      sceneRef.current,
+      finish
+    );
+  }, [finish, glitter, glitterSize, glitterColor, satinMetallic, satinTexture, carbonFiberSize, loaded]);
+
   // Sparkle Color is intentionally isolated from the expensive texture-generation
   // effect above. Native color inputs can emit many changes per second; here each one
   // only updates the existing MeshPhysicalMaterial emissive uniform.
@@ -7649,6 +7912,12 @@ export default function HelmetBuilder() {
         mat.emissive.set(glitterColor);
       });
     });
+    syncWrapFinishToShell(
+      materialsRef.current,
+      decalOverlayMaterialsRef.current,
+      sceneRef.current,
+      finish
+    );
   }, [glitterColor, finish, loaded]);
 
   useEffect(() => () => {
