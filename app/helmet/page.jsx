@@ -9050,6 +9050,13 @@ export default function HelmetBuilder({ demoMode = false }) {
         color:'#F5F2EA',
         fontFamily:"'Barlow', Arial, sans-serif",
       }}>
+        <style>{`
+          @media (max-width: 760px) {
+            .pl-demo-desktop-hint {
+              display: none !important;
+            }
+          }
+        `}</style>
         <div style={{
           position:'relative',
           width:'100%',
@@ -9125,14 +9132,17 @@ export default function HelmetBuilder({ demoMode = false }) {
                 }}>
                   Actual Helmet Builder Engine
                 </div>
-                <div style={{
-                  marginTop:5,
-                  color:'rgba(245,242,234,0.52)',
-                  fontFamily:"'Barlow Condensed', Arial, sans-serif",
-                  fontSize:9,
-                  letterSpacing:'0.10em',
-                  textTransform:'uppercase',
-                }}>
+                <div
+                  className="pl-demo-desktop-hint"
+                  style={{
+                    marginTop:5,
+                    color:'rgba(245,242,234,0.52)',
+                    fontFamily:"'Barlow Condensed', Arial, sans-serif",
+                    fontSize:9,
+                    letterSpacing:'0.10em',
+                    textTransform:'uppercase',
+                  }}
+                >
                   Drag to rotate · Scroll to zoom
                 </div>
               </div>
