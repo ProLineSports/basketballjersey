@@ -4981,144 +4981,41 @@ export default function HelmetBuilder({ demoMode = false }) {
     }
   }, [applyViewPreset, demoMode]);
 
-  // Landing-page demo: use the production model/material/decal pipeline, but initialize
-  // a fixed ProLine showcase helmet and leave the visitor with camera controls only.
-  useEffect(() => {
-    if (!demoMode || !loaded || demoInitializedRef.current) return;
-    demoInitializedRef.current = true;
 
-    setColors(current => ({
-      ...current,
-      shell: '#101214',
-      bumpers: '#F5F2EA',
-      facemask: '#EFFF00',
-      facemaskclips: '#101214',
-      facemaskhardware: '#FCFCFC',
-      innerpads: '#151515',
-      visor: '#0B0D0F',
-      visorclips: '#EFFF00',
-      chinguardinner: '#FCFCFC',
-      chinguardouter: '#101214',
-      metalparts: '#FCFCFC',
-      strapclipslower: '#151515',
-      strapclipsupper: '#101214',
-      straps: '#FCFCFC',
-    }));
+// Landing-page demo: load one sanitized public snapshot exported from the normal
+// authenticated builder flow, then rebuild it through the same production restore
+// pipeline used for saved designs.
+useEffect(() => {
+  if (!demoMode || !loaded || demoInitializedRef.current) return;
+  demoInitializedRef.current = true;
 
-    setFinish('carpaint');
-    setFacemaskFinish('gloss');
-    setVisorOn(true);
-    setGlitter(0.18);
-    setGlitterSize(0.44);
-    setGlitterColor('#ffffff');
+  let cancelled = false;
 
-    setHelmetStripesEnabled(true);
-    setHelmetStripePreset('fivePiped');
-    setHelmetStripeWidth(2.35);
-    setHelmetStripeLength(0.94);
-    setHelmetStripeOuterColor('#EFFF00');
-    setHelmetStripeCenterColor('#F5F2EA');
-    setHelmetStripePipingColor('#101214');
-    setDecalFinish('satin');
-
-    setSideLogoIndependent(false);
-    setSideLogoLeftVisible(true);
-    setSideLogoRightVisible(true);
-    setSideLogoLeftMirror(false);
-    setSideLogoRightMirror(true);
-    setSideLogoStrokeEnabled(true);
-    setSideLogoStrokeColor('#101214');
-    setSideLogoStrokeThickness(5);
-    setSideLogoStrokeOpacity(0.72);
-    setSideLogoScale(1.08);
-    setSideLogoFrontBack(-3);
-    setSideLogoUpDown(1);
-    setSideLogoLocked(true);
-    sideLogoPlacementRef.current.left = { ...cloneDefaultSideLogoPlacement(), scale: 1.05 };
-    sideLogoPlacementRef.current.right = { ...cloneDefaultSideLogoPlacement(), scale: 1.05 };
-
-    setRearFlagEnabled(true);
-    setRearWarningEnabled(true);
-    setRearFlagLocked(true);
-    setRearWarningLocked(true);
-    setBumperLogoFrontLocked(true);
-    setBumperLogoRearLocked(true);
-    setBumperLogoFinish('satin');
-
-    setViewportBgColor('#121210');
-    setTransparentBg(false);
-    setHdriPreset('studio01');
-    setHdriIntensity(0.82);
-    setSceneExposure(1.42);
-    setStudioLightStrength(1.05);
-    setRimLightColor('#EFFF00');
-    setShowShadows(true);
-    setShadowOpacity(0.40);
-    setShadowSoftness(0.58);
-
-    const makeLogoDataUrl = ({ width, height, bumper = false }) => {
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      ctx.clearRect(0, 0, width, height);
-
-      if (bumper) {
-        ctx.fillStyle = '#101214';
-        ctx.font = `900 ${Math.round(height * 0.55)}px Arial Black, Arial, sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('PROLINE', width / 2, height * 0.50);
-      } else {
-        const pad = Math.round(height * 0.12);
-        ctx.fillStyle = '#EFFF00';
-        ctx.beginPath();
-        ctx.moveTo(pad, height * 0.50);
-        ctx.lineTo(width * 0.25, pad);
-        ctx.lineTo(width - pad, pad);
-        ctx.lineTo(width * 0.82, height - pad);
-        ctx.lineTo(width * 0.16, height - pad);
-        ctx.closePath();
-        ctx.fill();
-
-        ctx.fillStyle = '#101214';
-        ctx.font = `900 ${Math.round(height * 0.33)}px Arial Black, Arial, sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('PROLINE', width * 0.51, height * 0.50);
+  const initializeDemoFromSnapshot = async () => {
+    try {
+      const response = await fetch('/proline-landing-page-demo.json', { cache: 'no-store' });
+      const snapshot = await response.json().catch(() => null);
+      if (!response.ok || !snapshot?.designData) {
+        throw new Error('Could not load the landing-page demo helmet snapshot.');
       }
-      return canvas.toDataURL('image/png');
-    };
+      if (cancelled) return;
 
-    const loadDemoImage = (src, onReady) => {
-      const img = new Image();
-      img.onload = () => onReady(img, src);
-      img.src = src;
-    };
+      restoreHelmetDesignSnapshot(snapshot.designData, snapshot.assetUrls || {});
+      setLoadedDesignName(snapshot?.sourceDesign?.name || 'LANDING PAGE DEMO');
+      window.setTimeout(() => applyViewPreset('hero'), 0);
+    } catch (error) {
+      console.error('[Helmet demo] Failed to initialize from snapshot:', error);
+      window.setTimeout(() => applyViewPreset('hero'), 0);
+    }
+  };
 
-    loadDemoImage(makeLogoDataUrl({ width: 1200, height: 520 }), (img, src) => {
-      sideLogoSharedImageRef.current = img;
-      setSideLogoSharedPreviewUrl(src);
-      setSideLogoSharedFileName('proline-demo-side-logo.png');
-      setSideLogoRevision(value => value + 1);
-    });
+  initializeDemoFromSnapshot();
 
-    const bumperSrc = makeLogoDataUrl({ width: 1200, height: 260, bumper: true });
-    loadDemoImage(bumperSrc, (img, src) => {
-      bumperLogoFrontImageRef.current = img;
-      bumperLogoRearImageRef.current = img;
-      setBumperLogoFrontPreviewUrl(src);
-      setBumperLogoRearPreviewUrl(src);
-      setBumperLogoFrontFileName('proline-demo-bumper.png');
-      setBumperLogoRearFileName('proline-demo-bumper.png');
-      setBumperLogoFrontScale(6.1);
-      setBumperLogoRearScale(5.0);
-      setBumperLogoRearVertical(-26);
-      setBumperLogoRevision(value => value + 1);
-    });
+  return () => {
+    cancelled = true;
+  };
+}, [demoMode, loaded, applyViewPreset, restoreHelmetDesignSnapshot]);
 
-    window.setTimeout(() => applyViewPreset('hero'), 0);
-  }, [demoMode, loaded, applyViewPreset]);
 
   // Give the demo a subtle showroom motion until the visitor touches the real controls.
   useEffect(() => {
