@@ -9062,7 +9062,14 @@ export default function HelmetBuilder({ demoMode = false }) {
           <div
             ref={mountRef}
             aria-label="Interactive ProLine football helmet demo. Drag to rotate and scroll to zoom."
-            style={{ width:'100%', height:'100%', cursor:'grab' }}
+            style={{
+              width:'100%',
+              height:'100%',
+              cursor:'grab',
+              touchAction:'none',
+              userSelect:'none',
+              WebkitUserSelect:'none',
+            }}
           />
 
           {!loaded && (
