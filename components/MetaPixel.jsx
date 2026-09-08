@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useSyncExternalStore } from 'react';
+import { usePathname } from 'next/navigation';
 import Script from 'next/script';
 import {
   META_PIXEL_ID,
@@ -57,6 +58,9 @@ function prepareMetaQueue() {
 }
 
 export default function MetaPixel() {
+  const pathname = usePathname();
+  const isPublicHelmetDemo = pathname === '/helmet/demo';
+
   const consent = useSyncExternalStore(
     subscribeMetaConsent,
     getMetaConsent,
@@ -64,15 +68,20 @@ export default function MetaPixel() {
   );
 
   useEffect(() => {
+    if (isPublicHelmetDemo) return;
     if (consent !== 'granted') return;
     if (!prepareMetaQueue()) return;
 
     flushPendingMetaEvents();
-  }, [consent]);
+  }, [consent, isPublicHelmetDemo]);
 
   const chooseConsent = (choice) => {
     saveMetaConsent(choice);
   };
+
+  // The embedded landing-page demo is intentionally measurement-neutral.
+  // The outer Squarespace landing page owns marketing analytics/consent.
+  if (isPublicHelmetDemo) return null;
 
   return (
     <>
