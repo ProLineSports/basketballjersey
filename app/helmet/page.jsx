@@ -4982,39 +4982,6 @@ export default function HelmetBuilder({ demoMode = false }) {
   }, [applyViewPreset, demoMode]);
 
 
-// Landing-page demo: load one sanitized public snapshot exported from the normal
-// authenticated builder flow, then rebuild it through the same production restore
-// pipeline used for saved designs.
-useEffect(() => {
-  if (!demoMode || !loaded || demoInitializedRef.current) return;
-  demoInitializedRef.current = true;
-
-  let cancelled = false;
-
-  const initializeDemoFromSnapshot = async () => {
-    try {
-      const response = await fetch('/proline-landing-page-demo.json', { cache: 'no-store' });
-      const snapshot = await response.json().catch(() => null);
-      if (!response.ok || !snapshot?.designData) {
-        throw new Error('Could not load the landing-page demo helmet snapshot.');
-      }
-      if (cancelled) return;
-
-      restoreHelmetDesignSnapshot(snapshot.designData, snapshot.assetUrls || {});
-      setLoadedDesignName(snapshot?.sourceDesign?.name || 'LANDING PAGE DEMO');
-      window.setTimeout(() => applyViewPreset('hero'), 0);
-    } catch (error) {
-      console.error('[Helmet demo] Failed to initialize from snapshot:', error);
-      window.setTimeout(() => applyViewPreset('hero'), 0);
-    }
-  };
-
-  initializeDemoFromSnapshot();
-
-  return () => {
-    cancelled = true;
-  };
-}, [demoMode, loaded, applyViewPreset, restoreHelmetDesignSnapshot]);
 
 
   // Give the demo a subtle showroom motion until the visitor touches the real controls.
@@ -8623,6 +8590,40 @@ useEffect(() => {
     removeSideLogoUpload, removeRearCustomSticker, removeBumperLogo,
     clearSideLogoUndoHistory, applyViewPreset, loadSavedArtworkImage, loadPrivateArtworkBlob,
   ]);
+
+  // Landing-page demo: load one sanitized public snapshot exported from the normal
+  // authenticated builder flow, then rebuild it through the same production restore
+  // pipeline used for saved designs.
+  useEffect(() => {
+    if (!demoMode || !loaded || demoInitializedRef.current) return;
+    demoInitializedRef.current = true;
+
+    let cancelled = false;
+
+    const initializeDemoFromSnapshot = async () => {
+      try {
+        const response = await fetch('/proline-landing-page-demo.json', { cache: 'no-store' });
+        const snapshot = await response.json().catch(() => null);
+        if (!response.ok || !snapshot?.designData) {
+          throw new Error('Could not load the landing-page demo helmet snapshot.');
+        }
+        if (cancelled) return;
+
+        restoreHelmetDesignSnapshot(snapshot.designData, snapshot.assetUrls || {});
+        setLoadedDesignName(snapshot?.sourceDesign?.name || 'LANDING PAGE DEMO');
+        window.setTimeout(() => applyViewPreset('hero'), 0);
+      } catch (error) {
+        console.error('[Helmet demo] Failed to initialize from snapshot:', error);
+        window.setTimeout(() => applyViewPreset('hero'), 0);
+      }
+    };
+
+    initializeDemoFromSnapshot();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [demoMode, loaded, applyViewPreset, restoreHelmetDesignSnapshot]);
 
   const requestDesignApi = useCallback(async (path, options = {}) => {
     const response = await fetch(path, { cache: 'no-store', ...options });
