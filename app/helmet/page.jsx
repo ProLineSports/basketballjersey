@@ -8593,7 +8593,23 @@ export default function HelmetBuilder({ demoMode = false }) {
 
         restoreHelmetDesignSnapshot(snapshot.designData, snapshot.assetUrls || {});
         setLoadedDesignName(snapshot?.sourceDesign?.name || 'LANDING PAGE DEMO');
-        window.setTimeout(() => applyViewPreset('hero'), 0);
+
+        // Demo-only composition polish: keep the helmet visually clear of the
+        // camera-control / CTA stack at the bottom of the embedded viewer.
+        window.setTimeout(() => {
+          applyViewPreset('hero');
+
+          const camera = cameraRef.current;
+          const controls = controlsRef.current;
+          if (camera && controls) {
+            // Aim slightly below the helmet center. That shifts the helmet upward
+            // in the viewport without moving the model or disturbing decals.
+            controls.target.y -= 0.22;
+            camera.lookAt(controls.target);
+            camera.updateProjectionMatrix();
+            controls.update();
+          }
+        }, 0);
       } catch (error) {
         console.error('[Helmet demo] Failed to initialize from snapshot:', error);
         window.setTimeout(() => applyViewPreset('hero'), 0);
