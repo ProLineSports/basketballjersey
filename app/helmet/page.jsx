@@ -3504,13 +3504,7 @@ export default function HelmetBuilder({ demoMode = false }) {
   }, [openSignUp]);
 
   useEffect(() => {
-    if (demoMode) {
-      trackMetaCustomEvent('HelmetDemoView', {
-        builder: 'helmet',
-        placement: 'landing_page_embed',
-      });
-      return;
-    }
+    if (demoMode) return;
 
     trackMetaEvent('ViewContent', {
       content_ids: ['helmet_builder'],
@@ -3518,6 +3512,75 @@ export default function HelmetBuilder({ demoMode = false }) {
       content_category: 'Online Builder',
       content_type: 'product',
     });
+  }, [demoMode]);
+
+  // The landing-page iframe has its own narrow viewport and third-party storage
+  // context. Global app chrome can therefore mistake it for a mobile device and
+  // can also show the builder-domain measurement-consent prompt. Neither belongs
+  // inside this read-only marketing demo. Keep the full builder behavior unchanged.
+  useEffect(() => {
+    if (!demoMode || typeof document === 'undefined') return;
+
+    document.documentElement.setAttribute('data-proline-helmet-demo', '1');
+    document.body?.setAttribute('data-proline-helmet-demo', '1');
+
+    const phrases = [
+      'ProLine Builder is optimized for desktop',
+      'Help us measure what works',
+    ];
+
+    const hideMatchingOverlay = (phrase) => {
+      const nodes = Array.from(document.body?.querySelectorAll('*') || []);
+      const deepestMatches = nodes.filter((node) => {
+        const text = node.textContent || '';
+        if (!text.includes(phrase)) return false;
+        return !Array.from(node.children || []).some((child) =>
+          (child.textContent || '').includes(phrase)
+        );
+      });
+
+      deepestMatches.forEach((match) => {
+        let node = match;
+        let overlay = null;
+
+        while (node && node !== document.body && node !== document.documentElement) {
+          const style = window.getComputedStyle(node);
+          if (
+            style.position === 'fixed' ||
+            style.position === 'sticky' ||
+            node.getAttribute('role') === 'dialog' ||
+            node.getAttribute('aria-modal') === 'true'
+          ) {
+            overlay = node;
+          }
+          node = node.parentElement;
+        }
+
+        const target = overlay || match.parentElement || match;
+        target.style.setProperty('display', 'none', 'important');
+        target.setAttribute('aria-hidden', 'true');
+      });
+    };
+
+    const sweep = () => phrases.forEach(hideMatchingOverlay);
+    sweep();
+
+    const observer = new MutationObserver(sweep);
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    const timers = [
+      window.setTimeout(sweep, 0),
+      window.setTimeout(sweep, 150),
+      window.setTimeout(sweep, 500),
+      window.setTimeout(sweep, 1200),
+    ];
+
+    return () => {
+      observer.disconnect();
+      timers.forEach(window.clearTimeout);
+      document.documentElement.removeAttribute('data-proline-helmet-demo');
+      document.body?.removeAttribute('data-proline-helmet-demo');
+    };
   }, [demoMode]);
 
   useEffect(() => {
@@ -4973,13 +5036,7 @@ export default function HelmetBuilder({ demoMode = false }) {
     if (controlsRef.current) controlsRef.current.autoRotate = false;
     applyViewPreset(presetId);
 
-    if (demoMode) {
-      trackMetaCustomEvent('HelmetDemoViewPreset', {
-        builder: 'helmet',
-        preset: presetId,
-      });
-    }
-  }, [applyViewPreset, demoMode]);
+  }, [applyViewPreset]);
 
 
 
@@ -4995,13 +5052,7 @@ export default function HelmetBuilder({ demoMode = false }) {
 
     const stopAutoRotate = () => {
       controls.autoRotate = false;
-      if (!demoInteractionTrackedRef.current) {
-        demoInteractionTrackedRef.current = true;
-        trackMetaCustomEvent('HelmetDemoInteraction', {
-          builder: 'helmet',
-          interaction: 'orbit',
-        });
-      }
+      demoInteractionTrackedRef.current = true;
     };
 
     controls.addEventListener('start', stopAutoRotate);
@@ -9212,10 +9263,6 @@ export default function HelmetBuilder({ demoMode = false }) {
                 <a
                   href="/helmet"
                   target="_top"
-                  onClick={() => trackMetaCustomEvent('HelmetDemoCTA', {
-                    builder:'helmet',
-                    placement:'embedded_viewer',
-                  })}
                   style={{
                     display:'flex',
                     alignItems:'center',
