@@ -8604,7 +8604,7 @@ export default function HelmetBuilder({ demoMode = false }) {
           if (camera && controls) {
             // Aim slightly below the helmet center. That shifts the helmet upward
             // in the viewport without moving the model or disturbing decals.
-            controls.target.y -= 0.22;
+            controls.target.y -= 0.12;
             camera.lookAt(controls.target);
             camera.updateProjectionMatrix();
             controls.update();
@@ -9040,14 +9040,6 @@ export default function HelmetBuilder({ demoMode = false }) {
   const TAB_LABELS = { presets: 'Presets', colors: 'Colors', finish: 'Finish', decals: 'Decals' };
 
   if (demoMode) {
-    const demoViews = [
-      { id:'sideA', label:'RIGHT' },
-      { id:'front', label:'FRONT' },
-      { id:'hero',  label:'HERO' },
-      { id:'sideB', label:'LEFT' },
-      { id:'back',  label:'BACK' },
-    ];
-
     return (
       <div style={{
         width:'100%',
@@ -9164,71 +9156,39 @@ export default function HelmetBuilder({ demoMode = false }) {
                 </span>
               </div>
 
-              <div style={{
-                position:'absolute',
-                left:'50%',
-                bottom:18,
-                transform:'translateX(-50%)',
-                zIndex:7,
-                width:'min(760px, calc(100% - 32px))',
-                display:'flex',
-                flexDirection:'column',
-                alignItems:'stretch',
-                gap:10,
-              }}>
-                <div style={{
-                  display:'grid',
-                  gridTemplateColumns:'repeat(5, minmax(0, 1fr))',
-                  gap:6,
-                  padding:6,
-                  background:'rgba(18,18,16,0.76)',
-                  border:'1px solid rgba(245,242,234,0.13)',
-                  backdropFilter:'blur(9px)',
-                }}>
-                  {demoViews.map(view => (
-                    <button
-                      key={view.id}
-                      type="button"
-                      onClick={() => applyDemoViewPreset(view.id)}
-                      style={{
-                        minHeight:36,
-                        border:activeViewPreset === view.id ? '1px solid #EFFF00' : '1px solid rgba(245,242,234,0.12)',
-                        background:activeViewPreset === view.id ? 'rgba(239,255,0,0.11)' : 'rgba(255,255,255,0.025)',
-                        color:activeViewPreset === view.id ? '#EFFF00' : '#F5F2EA',
-                        cursor:'pointer',
-                        fontFamily:"'Barlow Condensed', Arial, sans-serif",
-                        fontSize:9,
-                        fontWeight:900,
-                        letterSpacing:'0.10em',
-                      }}
-                    >
-                      {view.label}
-                    </button>
-                  ))}
-                </div>
-
-                <a
-                  href="/helmet"
-                  target="_top"
-                  style={{
-                    display:'flex',
-                    alignItems:'center',
-                    justifyContent:'center',
-                    minHeight:44,
-                    padding:'0 18px',
-                    background:'#EFFF00',
-                    color:'#0A0A0A',
-                    textDecoration:'none',
-                    fontFamily:"'Barlow Condensed', Arial, sans-serif",
-                    fontSize:11,
-                    fontWeight:900,
-                    letterSpacing:'0.12em',
-                    textTransform:'uppercase',
-                  }}
-                >
-                  Customize this helmet →
-                </a>
-              </div>
+<div style={{
+  position:'absolute',
+  left:'50%',
+  bottom:18,
+  transform:'translateX(-50%)',
+  zIndex:7,
+  width:'min(520px, calc(100% - 32px))',
+  display:'flex',
+  justifyContent:'center',
+}}>
+  <a
+    href="/helmet"
+    target="_top"
+    style={{
+      display:'flex',
+      alignItems:'center',
+      justifyContent:'center',
+      minHeight:44,
+      width:'100%',
+      padding:'0 18px',
+      background:'#EFFF00',
+      color:'#0A0A0A',
+      textDecoration:'none',
+      fontFamily:"'Barlow Condensed', Arial, sans-serif",
+      fontSize:11,
+      fontWeight:900,
+      letterSpacing:'0.12em',
+      textTransform:'uppercase',
+    }}
+  >
+    Customize this helmet →
+  </a>
+</div>
             </>
           )}
         </div>
