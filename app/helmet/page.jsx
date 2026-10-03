@@ -9,7 +9,17 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { EXRLoader } from 'three/addons/loaders/EXRLoader.js';
 import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { TrackballControls } from 'three/addons/controls/TrackballControls.js';
 import { DecalGeometry } from 'three/addons/geometries/DecalGeometry.js';
+import {
+  HELMET_VIEWS,
+  normalizeHelmetOrientation,
+  setHelmetView,
+  recenterHelmet,
+  rollHelmetView,
+  levelHelmetView,
+  squareViewportSize,
+} from './viewport-controls';
 import {
   getMetaConsent,
   trackMetaCustomEvent,
@@ -3604,6 +3614,8 @@ export default function HelmetBuilder({ demoMode = false }) {
   }, [isLoaded, isSignedIn]);
 
   const mountRef    = useRef(null);
+  const layoutRef   = useRef(null);
+  const [viewportSize, setViewportSize] = useState(null);
   const sceneRef    = useRef(null);
   const modelRef    = useRef(null);
   const cameraRef   = useRef(null);
@@ -5011,32 +5023,37 @@ export default function HelmetBuilder({ demoMode = false }) {
     const controls = controlsRef.current;
     if (!camera || !controls) return;
 
-    const target = new THREE.Vector3(0, 0.05, 0);
-    const presets = {
-      sideA: { position: [-3.2, 0.1, 0.0], up: [0, 1, 0] },
-      sideB: { position: [3.2, 0.1, 0.0], up: [0, 1, 0] },
-      front: { position: [0.0, 0.08, 3.15], up: [0, 1, 0] },
-      back:  { position: [0.0, 0.08, -3.15], up: [0, 1, 0] },
-
-      // Keep the top view near-overhead rather than perfectly pole-on. OrbitControls
-      // becomes unintuitive at the exact pole because azimuth loses meaning there.
-      // A small forward offset preserves a clear "top" preset while letting the user
-      // drag naturally into a custom angle afterwards.
-      top:   { position: [0.0, 3.2, 0.42], up: [0, 1, 0] },
-
-      // Side-forward hero angle: keep the premium 3/4 presentation but reveal more
-      // of the helmet's side profile, closer to a traditional equipment beauty shot.
-      hero:  { position: [-2.18, 0.92, 1.88], up: [0, 1, 0] },
-    };
-
-    const preset = presets[presetId] || presets.sideA;
-    camera.up.set(...preset.up);
-    camera.position.set(...preset.position);
-    controls.target.copy(target);
-    camera.lookAt(target);
-    controls.update();
+    setHelmetView(camera, controls, modelRef.current, presetId);
     setActiveViewPreset(presetId);
   }, []);
+
+  const recenterView = useCallback(() => {
+    if (!cameraRef.current || !controlsRef.current) return;
+    recenterHelmet(cameraRef.current, controlsRef.current, modelRef.current);
+  }, []);
+
+  const rollView = useCallback((degrees) => {
+    if (!cameraRef.current || !controlsRef.current) return;
+    rollHelmetView(cameraRef.current, controlsRef.current, THREE.MathUtils.degToRad(degrees));
+    setActiveViewPreset(null);
+  }, []);
+
+  const levelView = useCallback(() => {
+    if (!cameraRef.current || !controlsRef.current) return;
+    levelHelmetView(cameraRef.current, controlsRef.current);
+    setActiveViewPreset(null);
+  }, []);
+
+  useEffect(() => {
+    const layout = layoutRef.current;
+    if (!layout || demoMode) return;
+    const observer = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect;
+      setViewportSize(squareViewportSize(width, height));
+    });
+    observer.observe(layout);
+    return () => observer.disconnect();
+  }, [demoMode]);
 
   const applyDemoViewPreset = useCallback((presetId) => {
     if (controlsRef.current) controlsRef.current.autoRotate = false;
@@ -5188,16 +5205,28 @@ export default function HelmetBuilder({ demoMode = false }) {
     el.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
-    // Orbit controls
-    const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.05;
-    controls.minDistance = 1.0;
-    controls.maxDistance = 5.0;
+    // The editor uses a free trackball so custom views can pass over either
+    // pole and retain camera roll. The landing-page demo keeps its auto-orbit.
+    const controls = demoMode
+      ? new OrbitControls(camera, renderer.domElement)
+      : new TrackballControls(camera, renderer.domElement);
+    if (demoMode) {
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.05;
+    } else {
+      controls.staticMoving = true;
+      controls.rotateSpeed = 1.5;
+      controls.panSpeed = 0.65;
+      controls.zoomSpeed = 1.2;
+      // Avoid letter-key navigation taking over while typing artwork/settings.
+      controls.keys = [];
+    }
     controls.target.set(0, 0.05, 0);
     controls.minDistance = 1.5;
     controls.maxDistance = 8.0;
     controlsRef.current = controls;
+    const onCameraInteraction = () => setActiveViewPreset(null);
+    if (!demoMode) controls.addEventListener('start', onCameraInteraction);
 
     // ── PREMIUM STUDIO LIGHTING RIG ───────────────────────────────────────────
     // HDRI supplies the overall image-based lighting/reflections. These large area
@@ -5320,6 +5349,7 @@ export default function HelmetBuilder({ demoMode = false }) {
       } catch {}
 
       const model = gltf.scene;
+      normalizeHelmetOrientation(model, activeHelmetConfig.family);
       const baseStats = getBaseModelStats(model);
       debugStaticRef.current.modelMeshes = baseStats.meshes;
       debugStaticRef.current.modelTriangles = baseStats.triangles;
@@ -5575,6 +5605,8 @@ export default function HelmetBuilder({ demoMode = false }) {
       );
 
       scene.add(model);
+      setHelmetView(camera, controls, model, 'sideA');
+      setActiveViewPreset('sideA');
       // Now that all shell/facemask materials exist, route env maps per current finish
       // (scoped to car paint / chrome only — see applyShellEnvMap above).
       applyShellEnvMap(materialsRef.current, scene, finishRef.current);
@@ -5632,12 +5664,15 @@ export default function HelmetBuilder({ demoMode = false }) {
 
     // Resize handler
     const onResize = () => {
-      if (!el) return;
+      if (!el || disposed || !el.clientWidth || !el.clientHeight) return;
       camera.aspect = el.clientWidth / el.clientHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(el.clientWidth, el.clientHeight);
+      controls.handleResize?.();
     };
     window.addEventListener('resize', onResize);
+    const viewportObserver = new ResizeObserver(onResize);
+    viewportObserver.observe(el);
 
     return () => {
       disposed = true;
@@ -5646,6 +5681,8 @@ export default function HelmetBuilder({ demoMode = false }) {
       hdriCacheRef.current.clear();
       cancelAnimationFrame(frameRef.current);
       window.removeEventListener('resize', onResize);
+      viewportObserver.disconnect();
+      controls.removeEventListener('start', onCameraInteraction);
       controls.dispose();
       decalOverlayMeshesRef.current.forEach(mesh => { mesh.parent?.remove(mesh); mesh.geometry?.dispose?.(); });
       decalOverlayMaterialsRef.current.forEach(mat => mat.dispose());
@@ -8669,7 +8706,7 @@ export default function HelmetBuilder({ demoMode = false }) {
     } else if (cameraSettings.activeViewPreset) {
       applyViewPreset(cameraSettings.activeViewPreset);
     }
-    setActiveViewPreset(cameraSettings.activeViewPreset || 'sideA');
+    setActiveViewPreset(cameraSettings.activeViewPreset ?? null);
 
     setDesignAssets(assetManifest);
 
@@ -9464,8 +9501,9 @@ export default function HelmetBuilder({ demoMode = false }) {
         </div>
       </div>
 
-      {/* MAIN LAYOUT — same 3-column grid as /jersey: left tool panel · viewport · right summary panel */}
-      <div style={{ flex: 1, display: 'grid', gridTemplateColumns: 'min(272px,22vw) 1fr min(252px,20vw)', overflow: 'hidden', minHeight: 0 }}>
+      {/* The square takes the available height/width; both tool panels share
+          the remaining space with at least 300px each on desktop. */}
+      <div ref={layoutRef} style={{ flex: 1, display: 'grid', gridTemplateColumns: `minmax(0,1fr) ${viewportSize ? `${viewportSize}px` : 'min(calc(100dvh - 48px), max(1px, calc(100vw - 600px)))'} minmax(0,1fr)`, overflow: 'hidden', minHeight: 0 }}>
 
         {/* LEFT PANEL */}
         <div style={{ background: '#161314', borderRight: '1px solid rgba(255,255,255,0.07)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -10357,7 +10395,7 @@ export default function HelmetBuilder({ demoMode = false }) {
         </div>
 
         {/* 3D VIEWPORT */}
-        <div style={{ position: 'relative', overflow: 'hidden', background: transparentBg ? 'transparent' : viewportBgColor, backgroundImage: transparentBg ? 'linear-gradient(45deg, rgba(255,255,255,0.06) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.06) 75%, rgba(255,255,255,0.06)), linear-gradient(45deg, rgba(255,255,255,0.06) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.06) 75%, rgba(255,255,255,0.06))' : 'none', backgroundSize: transparentBg ? '24px 24px' : 'auto', backgroundPosition: transparentBg ? '0 0, 12px 12px' : '0 0' }}>
+        <div data-testid="helmet-viewport" style={{ position: 'relative', width: '100%', height: viewportSize || undefined, aspectRatio: '1 / 1', alignSelf: 'center', minWidth: 0, overflow: 'hidden', background: transparentBg ? 'transparent' : viewportBgColor, backgroundImage: transparentBg ? 'linear-gradient(45deg, rgba(255,255,255,0.06) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.06) 75%, rgba(255,255,255,0.06)), linear-gradient(45deg, rgba(255,255,255,0.06) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.06) 75%, rgba(255,255,255,0.06))' : 'none', backgroundSize: transparentBg ? '24px 24px' : 'auto', backgroundPosition: transparentBg ? '0 0, 12px 12px' : '0 0' }}>
           <div ref={mountRef} style={{ width: '100%', height: '100%' }} />
 
           {/* Loading overlay */}
@@ -10452,46 +10490,18 @@ export default function HelmetBuilder({ demoMode = false }) {
             </div>
           )}
 
-          {/* Preset view buttons */}
+          {/* Centering is available without opening the camera panel. */}
           {loaded && (
-            <div style={{ position:'absolute', top:16, right:16, width:180, background:'rgba(0,0,0,0.45)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:10, padding:'10px 10px 9px', backdropFilter:'blur(6px)' }}>
-              <div style={{ fontSize:9, color:'#6b7280', letterSpacing:'0.12em', fontFamily:"'Barlow Condensed',sans-serif", marginBottom:8 }}>PRESET VIEWS</div>
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:6 }}>
-                {[
-                  { id:'sideA', label:'SIDE A' },
-                  { id:'sideB', label:'SIDE B' },
-                  { id:'front', label:'FRONT' },
-                  { id:'back', label:'BACK' },
-                  { id:'top', label:'TOP' },
-                  { id:'hero', label:'HERO' },
-                ].map(view => (
-                  <button
-                    key={view.id}
-                    onClick={() => applyViewPreset(view.id)}
-                    style={{
-                      background: activeViewPreset === view.id ? 'rgba(239,255,0,0.12)' : 'rgba(255,255,255,0.04)',
-                      border: activeViewPreset === view.id ? '1px solid rgba(239,255,0,0.45)' : '1px solid rgba(255,255,255,0.10)',
-                      borderRadius: 7,
-                      padding: '7px 6px',
-                      cursor: 'pointer',
-                      color: activeViewPreset === view.id ? '#efff00' : '#9ca3af',
-                      fontSize: 9,
-                      fontWeight: 700,
-                      fontFamily: "'Barlow Condensed', sans-serif",
-                      letterSpacing: '0.06em'
-                    }}
-                  >
-                    {view.label}
-                  </button>
-                ))}
-              </div>
-            </div>
+            <button type="button" onClick={recenterView} title="Center the visible helmet while keeping your angle and zoom"
+              style={{ position:'absolute', top:16, right:16, background:'rgba(0,0,0,0.5)', border:'1px solid rgba(239,255,0,0.28)', borderRadius:8, padding:'7px 12px', cursor:'pointer', fontSize:10, fontWeight:800, color:'#efff00', fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.06em' }}>
+              CENTER HELMET
+            </button>
           )}
 
           {/* Viewport hint — export now lives in the right panel, matching /jersey */}
           {loaded && (
             <div style={{ position:'absolute', bottom:16, left:'50%', transform:'translateX(-50%)', fontSize:10, color:'#374151', letterSpacing:'0.1em', fontFamily:"'Barlow Condensed',sans-serif", pointerEvents:'none', whiteSpace:'nowrap' }}>
-              DRAG TO ROTATE · SCROLL TO ZOOM · RIGHT-CLICK TO PAN
+              FREE ROTATE · SCROLL TO ZOOM · RIGHT-DRAG TO PAN
             </div>
           )}
 
@@ -10523,6 +10533,35 @@ export default function HelmetBuilder({ demoMode = false }) {
           </div>
 
           <div style={{ padding:'5px 14px 10px', overflowY:'auto', flex:1, minHeight:0 }}>
+            <CollapsibleSection title="VIEW & ROTATION" defaultOpen={true}>
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(3, minmax(0,1fr))', gap:6, marginBottom:10 }}>
+                {Object.entries(HELMET_VIEWS).map(([id, view]) => (
+                  <button type="button" key={id} onClick={() => applyViewPreset(id)} disabled={!loaded} aria-pressed={activeViewPreset === id}
+                    style={{ background:activeViewPreset === id?'rgba(239,255,0,0.12)':'rgba(255,255,255,0.04)', border:activeViewPreset === id?'1px solid rgba(239,255,0,0.45)':'1px solid rgba(255,255,255,0.10)', borderRadius:7, padding:'9px 6px', cursor:loaded?'pointer':'default', opacity:loaded?1:0.45, color:activeViewPreset === id?'#efff00':'#9ca3af', fontSize:10, fontWeight:700, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.06em' }}>
+                    {view.label}
+                  </button>
+                ))}
+              </div>
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(3, minmax(0,1fr))', gap:6, marginBottom:8 }}>
+                {[
+                  { label:'↶ ROLL', title:'Roll left 15 degrees', action:() => rollView(-15) },
+                  { label:'LEVEL', title:'Level the view without changing its angle or zoom', action:levelView },
+                  { label:'ROLL ↷', title:'Roll right 15 degrees', action:() => rollView(15) },
+                ].map(control => (
+                  <button type="button" key={control.label} title={control.title} aria-label={control.title} onClick={control.action} disabled={!loaded}
+                    style={{ background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.10)', borderRadius:7, padding:'8px 4px', cursor:loaded?'pointer':'default', opacity:loaded?1:0.45, color:'#d1d5db', fontSize:10, fontWeight:700, fontFamily:"'Barlow Condensed',sans-serif" }}>
+                    {control.label}
+                  </button>
+                ))}
+              </div>
+              <button type="button" onClick={recenterView} disabled={!loaded}
+                style={{ width:'100%', background:'rgba(239,255,0,0.08)', border:'1px solid rgba(239,255,0,0.28)', borderRadius:7, padding:'9px 8px', cursor:loaded?'pointer':'default', opacity:loaded?1:0.45, color:'#efff00', fontSize:10, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.06em' }}>
+                CENTER HELMET
+              </button>
+              <div style={{ fontSize:10, color:'#9ca3af', lineHeight:1.6, marginTop:8 }}>
+                Drag to rotate freely, including over the top and underneath. Right-drag to pan; scroll to zoom. Roll tilts the view. Center keeps your angle and zoom.
+              </div>
+            </CollapsibleSection>
             <CollapsibleSection title="CURRENT COLORS" defaultOpen={false}>
               <div style={{ display:'flex', gap:5, flexWrap:'wrap', paddingBottom:3 }}>
                 {activeZones.map(zone => (
