@@ -6,8 +6,10 @@ import { useRouter } from 'next/navigation';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
-import { decalCarrierRoots, createWrapSurfaceSampler, applyCompatibleWrapUV } from './wrap-surface';
+import { decalCarrierRoots, createWrapSurfaceSampler, applyCompatibleWrapUV, AXIOM_WRAP_FORWARD_SHIFT } from './wrap-surface';
 import { raisedDecalCanvases } from './decal-appearance';
+import { applyShellDecalOcclusion } from './decal-occlusion';
+import { projectSelectionFrame, updateSelectionOutline } from './selection-outline';
 import { EXRLoader } from 'three/addons/loaders/EXRLoader.js';
 import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
@@ -1251,35 +1253,6 @@ function subdivideGeometryWithAttributes(geometry, iterations = 1) {
   return working;
 }
 
-function createSelectionBoxTexture() {
-  const size = 512;
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d');
-  ctx.clearRect(0, 0, size, size);
-  ctx.strokeStyle = '#efff00';
-  ctx.lineWidth = 2.5;
-  ctx.setLineDash([9, 7]);
-  ctx.strokeRect(12, 12, size - 24, size - 24);
-  ctx.setLineDash([]);
-  const handle = 14;
-  [[12,12],[size-12,12],[12,size-12],[size-12,size-12]].forEach(([x,y]) => {
-    ctx.fillStyle = '#111111';
-    ctx.strokeStyle = '#efff00';
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    ctx.rect(x - handle/2, y - handle/2, handle, handle);
-    ctx.fill();
-    ctx.stroke();
-  });
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
-  tex.needsUpdate = true;
-  return tex;
-}
-
 const imageContentBoundsCache = new WeakMap();
 function imageContentBounds(image) {
   const cached = imageContentBoundsCache.get(image);
@@ -1331,6 +1304,7 @@ function createSideLogoTexturePack(image, options = {}) {
     textureWidth = null,
     textureHeight = null,
     arcCompensation = 0,
+    shadowProfile = 'decal',
   } = options;
 
   const size = Math.max(512, textureSize | 0);
@@ -1398,7 +1372,7 @@ function createSideLogoTexturePack(image, options = {}) {
   }
   finalCtx.drawImage(baseCanvas, 0, 0);
 
-  const raised = raisedDecalCanvases(finalCanvas, drawH);
+  const raised = raisedDecalCanvases(finalCanvas, drawH, { shadowProfile });
   const warpedFinalCanvas = warpCanvasArc(raised.artwork, arcCompensation);
   const warpedRimCanvas = warpCanvasArc(raised.shadow, arcCompensation);
 
@@ -3230,62 +3204,7 @@ function applyPremiumPartMaterialCalibration(partsMap) {
 }
 
 function applyStripeBumperStencilMask(partObjectsMap, stripeMaterials) {
-  // The bumper stencil is SCREEN-SPACE, so render order matters.
-  //
-  // Previously the bumper material could write its silhouette into the stencil before
-  // the shell had populated the depth buffer. That meant a bumper on the far side of
-  // the helmet could still punch a bumper-shaped hole in the stripe when viewed from
-  // the opposite side/top — exactly the moving gaps that appeared while orbiting.
-  //
-  // Force the REAL bumper meshes to render after the main opaque helmet surface but
-  // before the transparent stripe carrier (renderOrder 28). Their stencil write only
-  // happens on Z-PASS, so hidden/far-side bumper fragments now fail against the already
-  // rendered shell and cannot mask the stripe. Visible bumper pixels still mask it.
-  const bumperRoots = partObjectsMap[partKey('Bumpers')] || [];
-  const seenMaterials = new Set();
-
-  bumperRoots.forEach(root => {
-    root.traverse(obj => {
-      if (!obj.isMesh) return;
-
-      // Opaque objects are sorted by renderOrder before material/program order.
-      // 26 keeps bumpers after the normal helmet (0) and before stripe overlays (28).
-      obj.renderOrder = 26;
-
-      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
-      mats.forEach(mat => {
-        if (!mat || seenMaterials.has(mat)) return;
-        seenMaterials.add(mat);
-
-        // The stencil must respect actual visibility.
-        mat.depthTest = true;
-        mat.depthWrite = true;
-        mat.stencilWrite = true;
-        mat.stencilWriteMask = 0xff;
-        mat.stencilFunc = THREE.AlwaysStencilFunc;
-        mat.stencilRef = 1;
-        mat.stencilFuncMask = 0xff;
-        mat.stencilFail = THREE.KeepStencilOp;
-        mat.stencilZFail = THREE.KeepStencilOp;
-        mat.stencilZPass = THREE.ReplaceStencilOp;
-        mat.needsUpdate = true;
-      });
-    });
-  });
-
-  stripeMaterials.forEach(mat => {
-    if (!mat) return;
-    // Read the bumper stencil but never modify it from the stripe pass.
-    mat.stencilWrite = true;
-    mat.stencilWriteMask = 0x00;
-    mat.stencilFunc = THREE.NotEqualStencilFunc;
-    mat.stencilRef = 1;
-    mat.stencilFuncMask = 0xff;
-    mat.stencilFail = THREE.KeepStencilOp;
-    mat.stencilZFail = THREE.KeepStencilOp;
-    mat.stencilZPass = THREE.KeepStencilOp;
-    mat.needsUpdate = true;
-  });
+  applyShellDecalOcclusion(partObjectsMap, stripeMaterials);
 }
 
 // ── CAR PAINT GLITTER FLAKE TEXTURES ────────────────────────────────────────
@@ -3745,6 +3664,7 @@ export default function HelmetBuilder({ demoMode = false }) {
   });
   const selectedSideLogoRef = useRef(null);
   const sideLogoWorldFrameRef = useRef({ left:null, right:null });
+  const selectionOverlayRef = useRef(null);
   const sideLogoUndoStackRef = useRef([]);
   const sideLogoInteractionRef = useRef({
     dragging:false,
@@ -5740,6 +5660,10 @@ export default function HelmetBuilder({ demoMode = false }) {
         sparkleLight.position.set(Math.sin(t) * 2, 1.5 + Math.sin(t * 0.7) * 0.5, Math.cos(t) * 2);
       }
       renderer.render(scene, camera);
+      updateSelectionOutline(selectionOverlayRef.current, [
+        sideLogoWorldFrameRef.current[selectedSideLogoRef.current],
+        editableDecalWorldFrameRef.current[selectedEditableDecalRef.current],
+      ], camera, el.clientWidth, el.clientHeight);
       debugFrameRef.current.frames += 1;
 
       if (
@@ -6108,7 +6032,7 @@ export default function HelmetBuilder({ demoMode = false }) {
       renderedWrapRoots.forEach(mesh => { mesh.visible = false; });
       getSpeedflexWrapSampler().then(sampler => {
         if (cancelled) return;
-        applyCompatibleWrapUV([...wrapRoots, ...renderedWrapRoots], sampler);
+        applyCompatibleWrapUV([...wrapRoots, ...renderedWrapRoots], sampler, { forwardShift:AXIOM_WRAP_FORWARD_SHIFT });
         renderedWrapRoots.forEach(mesh => { mesh.visible = true; });
       }).catch(error => {
         if (cancelled) return;
@@ -6493,8 +6417,8 @@ export default function HelmetBuilder({ demoMode = false }) {
         right: { value: frameRight },
         up: { value: frameUp },
         normal: { value: worldNormal },
-        width: { value: baseWidth * 1.03 },
-        height: { value: baseHeight * 1.03 },
+        width: { value: baseWidth },
+        height: { value: baseHeight },
         depth: { value: projectionDepth },
         lift: { value: physicalDepth * 0.68 },
         medianOrigin: { value: medianOriginWorld },
@@ -6577,8 +6501,8 @@ export default function HelmetBuilder({ demoMode = false }) {
       sideLogoMeshesRef.current.push(hitProxy);
       sideLogoMaterialsRef.current.push(hitProxyMat);
 
-      const frameHalfW = baseWidth * 0.50;
-      const frameHalfH = baseHeight * 0.50;
+      const frameHalfW = baseWidth * pack.contentWidthFraction * 0.54;
+      const frameHalfH = baseHeight * pack.contentHeightFraction * 0.54;
       const frameCenter = logoCenter.clone().addScaledVector(worldNormal, physicalDepth * 1.4);
       sideLogoWorldFrameRef.current[side] = {
         center: frameCenter,
@@ -6590,30 +6514,7 @@ export default function HelmetBuilder({ demoMode = false }) {
         ],
       };
 
-      if (selectedSideLogoRef.current === side) {
-        const selectionTex = createSelectionBoxTexture();
-        const selectionGeo = new THREE.PlaneGeometry(baseWidth * 1.10, baseHeight * 1.10, 1, 1);
-        const selectionMat = new THREE.MeshBasicMaterial({
-          map: selectionTex,
-          transparent: true,
-          alphaTest: 0.02,
-          depthTest: false,
-          depthWrite: false,
-          toneMapped: false,
-          side: THREE.DoubleSide,
-        });
-        const selectionMesh = new THREE.Mesh(selectionGeo, selectionMat);
-        selectionMesh.name = `SideLogo_${side}_Selection`;
-        selectionMesh.userData.sideLogoSide = side;
-        selectionMesh.userData.sideLogoSelection = true;
-        selectionMesh.renderOrder = 100;
-        selectionMesh.position.copy(frameCenter);
-        selectionMesh.quaternion.copy(frameQuat);
-        scene.add(selectionMesh);
-        sideLogoMeshesRef.current.push(selectionMesh);
-        sideLogoMaterialsRef.current.push(selectionMat);
-        sideLogoTexturesRef.current.push(selectionTex);
-      }
+
     };
 
     const rebuild = () => {
@@ -6652,7 +6553,8 @@ export default function HelmetBuilder({ demoMode = false }) {
     const getSelectedFrameClient = () => {
       const side = selectedSideLogoRef.current;
       const frame = side ? sideLogoWorldFrameRef.current[side] : null;
-      if (!side || !frame) return null;
+      const rect = canvas.getBoundingClientRect();
+      if (!side || !projectSelectionFrame(frame, camera, rect.width, rect.height)) return null;
       return {
         side,
         center: worldToClient(frame.center),
@@ -7049,7 +6951,7 @@ export default function HelmetBuilder({ demoMode = false }) {
         hit.object,
         projectorPosition,
         orientation,
-        new THREE.Vector3(baseWidth * 1.018, baseHeight * 1.018, projectionDepth),
+        new THREE.Vector3(baseWidth, baseHeight, projectionDepth),
       );
       const mainGeo = new DecalGeometry(
         hit.object,
@@ -7119,8 +7021,8 @@ export default function HelmetBuilder({ demoMode = false }) {
 
       const editableId = `rear-${slot}`;
       const frameCenter = projectorPosition.clone().addScaledVector(worldNormal, lift * 1.8);
-      const halfW = baseWidth * 0.50;
-      const halfH = baseHeight * 0.50;
+      const halfW = baseWidth * pack.contentWidthFraction * 0.54;
+      const halfH = baseHeight * pack.contentHeightFraction * 0.54;
 
       editableDecalWorldFrameRef.current[editableId] = {
         id:editableId, surface:'rear-shell', center:frameCenter,
@@ -7146,22 +7048,7 @@ export default function HelmetBuilder({ demoMode = false }) {
       rearStickerMeshesRef.current.push(shadowMesh, mainMesh, hitProxy);
       rearStickerMaterialsRef.current.push(shadowMat, mainMat, hitProxyMat);
 
-      if (selectedEditableDecalRef.current === editableId) {
-        const selectionTex = createSelectionBoxTexture();
-        const selectionGeo = new THREE.PlaneGeometry(baseWidth * 1.10, baseHeight * 1.10, 1, 1);
-        const selectionMat = new THREE.MeshBasicMaterial({ map:selectionTex, transparent:true, alphaTest:0.02, depthTest:false, depthWrite:false, toneMapped:false, side:THREE.DoubleSide });
-        selectionMat.userData.ownedTexture = selectionTex;
-        const selectionMesh = new THREE.Mesh(selectionGeo, selectionMat);
-        selectionMesh.name = `RearSticker_${slot}_Selection`;
-        selectionMesh.userData.editableDecalId = editableId;
-        selectionMesh.userData.editableDecalSelection = true;
-        selectionMesh.position.copy(frameCenter);
-        selectionMesh.quaternion.copy(frameQuat);
-        selectionMesh.renderOrder = 110;
-        scene.add(selectionMesh);
-        rearStickerMeshesRef.current.push(selectionMesh);
-        rearStickerMaterialsRef.current.push(selectionMat);
-      }
+
     };
 
     const flagPlacement = editableDecalPlacementRef.current['rear-flag'];
@@ -7172,10 +7059,9 @@ export default function HelmetBuilder({ demoMode = false }) {
     makeSticker({ slot:'warning', enabled:rearWarningEnabled, image:rearWarningImageRef.current, ...warningPlacement, color:rearWarningColor });
     makeSticker({ slot:'custom', enabled:rearCustomEnabled, image:rearCustomImageRef.current, ...customPlacement });
 
-    // Rear decals are true DecalGeometry on the curved shell and already use normal
-    // depth testing against the bumper geometry. Do NOT run them through the shared
-    // screen-space bumper stencil: that stencil is camera-dependent and was carving
-    // rectangular pieces out of the flag/warning/custom decals at certain view angles.
+    // Rear artwork still uses geometric bumper depth; only foreground straps and
+    // clips need the extra carrier-occlusion mask here.
+    applyShellDecalOcclusion(partObjectsRef.current, rearStickerMaterialsRef.current, { maskBumpers:false });
 
     return cleanup;
   }, [
@@ -7304,6 +7190,7 @@ export default function HelmetBuilder({ demoMode = false }) {
           textureWidth: Math.min(isFront ? 4096 : 6144, rendererRef.current?.capabilities?.maxTextureSize || 4096),
           textureHeight: Math.min(isFront ? 2048 : 1536, rendererRef.current?.capabilities?.maxTextureSize || 4096),
           arcCompensation: isFront ? 0 : bumperLogoRearCurve,
+          shadowProfile:'bumper',
         });
         cache = { key:cacheKey, pack:nextPack };
         bumperLogoPackCacheRef.current[cacheSlot] = cache;
@@ -7372,7 +7259,7 @@ export default function HelmetBuilder({ demoMode = false }) {
         const mainMeshes = createCarrierSurfaceLogoMeshes(scene, slotBounds.front.meshes, mainMat, 'bumper-front', 'Artwork', 35);
         const frameQuat = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, frontNormal));
         const frameCenter = center.clone().addScaledVector(frontNormal, lift * 1.6);
-        const halfW = projectedWidth * 0.50, halfH = projectedHeight * 0.50;
+        const halfW = projectedWidth * pack.contentWidthFraction * 0.54, halfH = projectedHeight * pack.contentHeightFraction * 0.54;
         editableDecalWorldFrameRef.current[editableId] = {
           id:editableId, surface:'bumper-front', center:frameCenter,
           corners:[
@@ -7391,16 +7278,7 @@ export default function HelmetBuilder({ demoMode = false }) {
         hitProxy.position.copy(frameCenter); hitProxy.quaternion.copy(frameQuat); hitProxy.renderOrder = 96; scene.add(hitProxy);
         bumperLogoMeshesRef.current.push(...shadowMeshes, ...mainMeshes, hitProxy);
         bumperLogoMaterialsRef.current.push(shadowMat, mainMat, hitProxyMat);
-        if (selectedEditableDecalRef.current === editableId) {
-          const selectionTex = createSelectionBoxTexture();
-          const selectionGeo = new THREE.PlaneGeometry(projectedWidth * 1.10, projectedHeight * 1.10, 1, 1);
-          const selectionMat = new THREE.MeshBasicMaterial({ map:selectionTex, transparent:true, alphaTest:0.02, depthTest:false, depthWrite:false, toneMapped:false, side:THREE.DoubleSide });
-          selectionMat.userData.ownedTexture = selectionTex;
-          const selectionMesh = new THREE.Mesh(selectionGeo, selectionMat);
-          selectionMesh.name = 'BumperLogo_front_Selection'; selectionMesh.userData.editableDecalId = editableId; selectionMesh.userData.editableDecalSelection = true;
-          selectionMesh.position.copy(frameCenter); selectionMesh.quaternion.copy(frameQuat); selectionMesh.renderOrder = 110; scene.add(selectionMesh);
-          bumperLogoMeshesRef.current.push(selectionMesh); bumperLogoMaterialsRef.current.push(selectionMat);
-        }
+
         return;
       }
 
@@ -7463,7 +7341,7 @@ export default function HelmetBuilder({ demoMode = false }) {
       const frameRight = new THREE.Vector3(1, 0, 0).applyQuaternion(frameQuat).normalize();
       const frameUp = new THREE.Vector3(0, 1, 0).applyQuaternion(frameQuat).normalize();
       const frameCenter = projectorPosition.clone().addScaledVector(worldNormal, lift * 1.8);
-      const halfW = baseWidth * 0.50, halfH = baseHeight * 0.50;
+      const halfW = baseWidth * pack.contentWidthFraction * 0.54, halfH = baseHeight * pack.contentHeightFraction * 0.54;
       editableDecalWorldFrameRef.current[editableId] = {
         id:editableId, surface:'bumper-rear', center:frameCenter,
         corners:[
@@ -7480,20 +7358,12 @@ export default function HelmetBuilder({ demoMode = false }) {
       hitProxy.position.copy(frameCenter); hitProxy.quaternion.copy(frameQuat); hitProxy.renderOrder = 96; scene.add(hitProxy);
       bumperLogoMeshesRef.current.push(shadowMesh, mainMesh, hitProxy);
       bumperLogoMaterialsRef.current.push(shadowMat, mainMat, hitProxyMat);
-      if (selectedEditableDecalRef.current === editableId) {
-        const selectionTex = createSelectionBoxTexture();
-        const selectionGeo = new THREE.PlaneGeometry(baseWidth * 1.10, baseHeight * 1.10, 1, 1);
-        const selectionMat = new THREE.MeshBasicMaterial({ map:selectionTex, transparent:true, alphaTest:0.02, depthTest:false, depthWrite:false, toneMapped:false, side:THREE.DoubleSide });
-        selectionMat.userData.ownedTexture = selectionTex;
-        const selectionMesh = new THREE.Mesh(selectionGeo, selectionMat);
-        selectionMesh.name = 'BumperLogo_rear_Selection'; selectionMesh.userData.editableDecalId = editableId; selectionMesh.userData.editableDecalSelection = true;
-        selectionMesh.position.copy(frameCenter); selectionMesh.quaternion.copy(frameQuat); selectionMesh.renderOrder = 110; scene.add(selectionMesh);
-        bumperLogoMeshesRef.current.push(selectionMesh); bumperLogoMaterialsRef.current.push(selectionMat);
-      }
+
     };
 
     makeBumperLogo('front');
     makeBumperLogo('rear');
+    applyShellDecalOcclusion(partObjectsRef.current, bumperLogoMaterialsRef.current, { maskBumpers:false });
     return cleanup;
   }, [
     loaded,
@@ -7561,7 +7431,8 @@ export default function HelmetBuilder({ demoMode = false }) {
     };
     const getSelectedFrameClient = () => {
       const id = selectedEditableDecalRef.current, frame = id ? editableDecalWorldFrameRef.current[id] : null;
-      if (!id || !frame) return null;
+      const rect = canvas.getBoundingClientRect();
+      if (!id || !projectSelectionFrame(frame, camera, rect.width, rect.height)) return null;
       return { id, center:worldToClient(frame.center), corners:frame.corners.map(worldToClient) };
     };
     const getCornerInteraction = event => {
@@ -9746,6 +9617,19 @@ export default function HelmetBuilder({ demoMode = false }) {
 
                 </CollapsibleSection>
                 <CollapsibleSection title="BACKGROUND">
+              <div style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:9, padding:'10px 12px' }}>
+                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:10, marginBottom:10 }}>
+                  <div>
+                    <div style={{ fontSize:11, color:'#9ca3af', marginBottom:2 }}>Background Color</div>
+                    <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.4 }}>Turn off for a transparent-background PNG export.</div>
+                  </div>
+                  <button onClick={() => setTransparentBg(v => !v)} style={{ background:!transparentBg?'rgba(239,255,0,0.12)':'rgba(255,255,255,0.06)', border:!transparentBg?'1px solid rgba(239,255,0,0.40)':'1px solid rgba(255,255,255,0.12)', borderRadius:20, padding:'6px 12px', cursor:'pointer', fontSize:10, fontWeight:800, color:!transparentBg?'#efff00':'#9ca3af', fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.08em' }}>{transparentBg ? 'OFF' : 'ON'}</button>
+                </div>
+                <div style={{ opacity: transparentBg ? 0.45 : 1, pointerEvents: transparentBg ? 'none' : 'auto' }}>
+                  <ColorSwatch color={viewportBgColor} onChange={setViewportBgColor} label="Color" />
+                </div>
+              </div>
+                <div style={{ height:1, background:'rgba(255,255,255,0.06)', margin:'12px 0' }} />
                 <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>
                   <span style={{ fontSize:11, color:'#9ca3af' }}>Shadow Surface</span>
                   <button onClick={() => setShowShadows(s => !s)} style={{ background:showShadows?'rgba(239,255,0,0.15)':'rgba(255,255,255,0.06)', border:showShadows?'1px solid rgba(239,255,0,0.5)':'1px solid rgba(255,255,255,0.12)', borderRadius:20, padding:'3px 12px', cursor:'pointer', fontSize:9, fontWeight:700, fontFamily:"'Barlow Condensed',sans-serif", color:showShadows?'#efff00':'#6b7280', letterSpacing:'0.06em' }}>{showShadows?'ON':'OFF'}</button>
@@ -10508,6 +10392,18 @@ export default function HelmetBuilder({ demoMode = false }) {
         {/* 3D VIEWPORT */}
         <div data-testid="helmet-viewport" style={{ position: 'relative', width: '100%', height: viewportSize || undefined, aspectRatio: '1 / 1', alignSelf: 'center', minWidth: 0, overflow: 'hidden', background: transparentBg ? 'transparent' : viewportBgColor, backgroundImage: transparentBg ? 'linear-gradient(45deg, rgba(255,255,255,0.06) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.06) 75%, rgba(255,255,255,0.06)), linear-gradient(45deg, rgba(255,255,255,0.06) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.06) 75%, rgba(255,255,255,0.06))' : 'none', backgroundSize: transparentBg ? '24px 24px' : 'auto', backgroundPosition: transparentBg ? '0 0, 12px 12px' : '0 0' }}>
           <div ref={mountRef} style={{ width: '100%', height: '100%' }} />
+          <svg ref={selectionOverlayRef} data-testid="decal-selection-outline" aria-hidden="true"
+            style={{ position:'absolute', inset:0, width:'100%', height:'100%', pointerEvents:'none', overflow:'hidden' }}>
+            {[0, 1].map(index => (
+              <g key={index} style={{ display:'none' }}>
+                <path fill="none" stroke="#111111" strokeWidth="3.5" strokeLinejoin="round" opacity="0.8" vectorEffect="non-scaling-stroke" />
+                <path fill="none" stroke="#efff00" strokeWidth="1.5" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+                {[0, 1, 2, 3].map(corner => (
+                  <rect key={corner} width="8" height="8" rx="1" fill="#161314" stroke="#efff00" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+                ))}
+              </g>
+            ))}
+          </svg>
 
           {/* Loading overlay */}
           {!loaded && (
@@ -10673,31 +10569,7 @@ export default function HelmetBuilder({ demoMode = false }) {
                 Drag to rotate freely, including over the top and underneath. Right-drag to pan; scroll to zoom. Roll tilts the view. Center keeps your angle and zoom.
               </div>
             </CollapsibleSection>
-            <CollapsibleSection title="CURRENT COLORS" defaultOpen={false}>
-              <div style={{ display:'flex', gap:5, flexWrap:'wrap', paddingBottom:3 }}>
-                {activeZones.map(zone => (
-                  <div key={zone.id} style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:3 }}>
-                    <div style={{ width:24, height:24, borderRadius:5, background:colors[zone.id], border:'1px solid rgba(255,255,255,0.12)' }} title={zone.label} />
-                    <span style={{ fontSize:7, color:'#6b7280', fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.03em', textTransform:'uppercase', maxWidth:30, textAlign:'center', lineHeight:1.1 }}>{zone.label.split(' ')[0]}</span>
-                  </div>
-                ))}
-              </div>
-            </CollapsibleSection>
 
-            <CollapsibleSection title="BACKGROUND" defaultOpen={false}>
-              <div style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:9, padding:'10px 12px' }}>
-                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:10, marginBottom:10 }}>
-                  <div>
-                    <div style={{ fontSize:11, color:'#9ca3af', marginBottom:2 }}>Background Color</div>
-                    <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.4 }}>Turn off for a transparent-background PNG export.</div>
-                  </div>
-                  <button onClick={() => setTransparentBg(v => !v)} style={{ background:!transparentBg?'rgba(239,255,0,0.12)':'rgba(255,255,255,0.06)', border:!transparentBg?'1px solid rgba(239,255,0,0.40)':'1px solid rgba(255,255,255,0.12)', borderRadius:20, padding:'6px 12px', cursor:'pointer', fontSize:10, fontWeight:800, color:!transparentBg?'#efff00':'#9ca3af', fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.08em' }}>{transparentBg ? 'OFF' : 'ON'}</button>
-                </div>
-                <div style={{ opacity: transparentBg ? 0.45 : 1, pointerEvents: transparentBg ? 'none' : 'auto' }}>
-                  <ColorSwatch color={viewportBgColor} onChange={setViewportBgColor} label="Color" />
-                </div>
-              </div>
-            </CollapsibleSection>
 
             <CollapsibleSection title="STUDIO LIGHTING" defaultOpen={false}>
               <div style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:9, padding:'10px 12px' }}>

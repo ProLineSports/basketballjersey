@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 
 const key = name => name.toLowerCase().replace(/[^a-z0-9]/g, '');
+export const AXIOM_WRAP_FORWARD_SHIFT = 0.10;
 
 export function decalCarrierRoots(model) {
   const roots = [];
@@ -104,7 +105,7 @@ export function createWrapSurfaceSampler(roots) {
   };
 }
 
-export function applyCompatibleWrapUV(roots, sampler) {
+export function applyCompatibleWrapUV(roots, sampler, { forwardShift = 0 } = {}) {
   const { meshes, normalize } = normalizedSurface(roots);
   const point = new THREE.Vector3(), uv = new THREE.Vector2();
   const cache = new Map();
@@ -113,11 +114,14 @@ export function applyCompatibleWrapUV(roots, sampler) {
     // Keep the retargeted coordinates separate from the original atlas and from
     // panoramic UVs, so toggling wrap modes never overwrites either source.
     let transferred = geometry.getAttribute('helmetCompatibleWrapUv');
-    if (!transferred) {
+    if (!transferred || geometry.userData.helmetWrapForwardShift !== forwardShift) {
       const position = geometry.attributes.position;
       const values = new Float32Array(position.count * 2);
       for (let i = 0; i < position.count; i++) {
         normalize(point.fromBufferAttribute(position, i).applyMatrix4(mesh.matrixWorld));
+        // Sampling slightly behind each target point carries the reference pattern
+        // toward the front (+Z), along the shell rather than shifting UV islands.
+        point.z = THREE.MathUtils.clamp(point.z - forwardShift, 0, 1);
         const id = point.toArray().map(value => Math.round(value * 1e6)).join(',');
         let cached = cache.get(id);
         if (!cached) { sampler.sample(point, uv); cached = uv.toArray(); cache.set(id, cached); }
@@ -125,6 +129,7 @@ export function applyCompatibleWrapUV(roots, sampler) {
       }
       transferred = new THREE.BufferAttribute(values, 2);
       geometry.setAttribute('helmetCompatibleWrapUv', transferred);
+      geometry.userData.helmetWrapForwardShift = forwardShift;
     }
     geometry.setAttribute('helmetWrapUv', transferred.clone());
     geometry.attributes.helmetWrapUv.needsUpdate = true;

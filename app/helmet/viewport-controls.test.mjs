@@ -8,7 +8,9 @@ import {TrackballControls} from 'three/addons/controls/TrackballControls.js';
 import {HELMET_VIEWS, normalizeHelmetOrientation, visibleHelmetBounds, setHelmetView, recenterHelmet, rollHelmetView, levelHelmetView, squareViewportSize} from './viewport-controls.js';
 import {DEFAULT_SIDE_LOGO_PLACEMENT, rearDecalDefaults, rearBumperDefaultVertical, separateAxiomRearBumper, positionShadowFloor, textureFootprint, rearStickerBaseHeight, bumperSurfaceBounds, shadowFloorIsVisible} from './model-adjustments.js';
 import {DecalGeometry} from 'three/addons/geometries/DecalGeometry.js';
-import {decalCarrierRoots, createWrapSurfaceSampler, applyCompatibleWrapUV} from './wrap-surface.js';
+import {decalCarrierRoots, createWrapSurfaceSampler, applyCompatibleWrapUV, AXIOM_WRAP_FORWARD_SHIFT} from './wrap-surface.js';
+import {applyShellDecalOcclusion} from './decal-occlusion.js';
+import {projectSelectionFrame, updateSelectionOutline} from './selection-outline.js';
 const dracoSource=fs.readFileSync('node_modules/three/examples/jsm/loaders/DRACOLoader.js','utf8');
 const decoderSource=fs.readFileSync('node_modules/three/examples/jsm/libs/draco/gltf/draco_decoder.js','utf8');
 const callbacks=new Map();let taskId=0;
@@ -159,7 +161,7 @@ const referenceRoots=decalCarrierRoots(speedflex),axiomRoots=decalCarrierRoots(m
 const sampler=createWrapSurfaceSampler(referenceRoots);
 const originalSpeedflexUVs=speedflexCarrier.map(mesh=>Array.from(mesh.geometry.attributes.uv.array));
 const mappingStarted=performance.now();
-applyCompatibleWrapUV(axiomRoots,sampler);
+applyCompatibleWrapUV(axiomRoots,sampler,{forwardShift:AXIOM_WRAP_FORWARD_SHIFT});
 applyCompatibleWrapUV(referenceRoots,sampler);
 assert.ok(performance.now()-mappingStarted<10000,'surface mapping completes without a long UI stall');
 let compatibleCount=0,originalDifferences=0;
@@ -175,4 +177,68 @@ surfaces.forEach(mesh=>{
 });
 assert.ok(originalDifferences/compatibleCount>.1,'Axiom uses the SpeedFlex-compatible atlas instead of its unrelated islands');
 speedflexCarrier.forEach((mesh,index)=>assert.deepEqual(Array.from(mesh.geometry.attributes.uv.array),originalSpeedflexUVs[index],'SpeedFlex authored UVs unchanged'));
-console.log('PASS: actual-model views, controls, rear/bumper decal targets, native artwork proportions and fixed shadows; compatible Axiom authored-wrap mapping; SpeedFlex authored UVs unchanged.');
+
+// Shell artwork must remain underneath visible straps/clips. Bumper logos use the
+// hardware bit alone, so writing the bumper silhouette cannot erase its own logo.
+for(const helmet of [model,speedflex]){
+  const parts={};helmet.traverse(object=>{const name=key(object.name);(parts[name]??=[]).push(object)});
+  const shellArtwork=new THREE.MeshBasicMaterial(),bumperArtwork=new THREE.MeshBasicMaterial();
+  applyShellDecalOcclusion(parts,[shellArtwork]);
+  applyShellDecalOcclusion(parts,[bumperArtwork],{maskBumpers:false});
+  const accepts=(material,stencil)=>(stencil&material.stencilFuncMask)===(material.stencilRef&material.stencilFuncMask);
+  assert.ok(accepts(shellArtwork,0)&&!accepts(shellArtwork,1)&&!accepts(shellArtwork,2)&&!accepts(shellArtwork,3),'wraps and side decals stay under bumpers and hardware');
+  assert.ok(accepts(bumperArtwork,0)&&accepts(bumperArtwork,1)&&!accepts(bumperArtwork,2),'bumper logo survives its own bumper stencil');
+  assert.ok(parts.straps?.length,'actual strap meshes exist');
+  for(const name of ['straps','strapclipslower','strapclipsupper','facemaskclips','facemaskclipshardware','axiomhardware']){
+    (parts[name]||[]).forEach(root=>root.traverse(mesh=>{
+      if(!mesh.isMesh)return;
+      assert.equal(mesh.renderOrder,26,'hardware draws after opaque shell and before artwork');
+      for(const material of Array.isArray(mesh.material)?mesh.material:[mesh.material]){
+        assert.equal(material.stencilWriteMask,3,'depth-passing hardware replaces the foreground classification');
+        assert.equal(material.stencilZFail,THREE.KeepStencilOp,'hidden far-side hardware cannot cut holes');
+        assert.equal(material.stencilZPass,THREE.ReplaceStencilOp,'visible strap silhouette masks artwork');
+        assert.ok(material.depthTest&&material.depthWrite);
+      }
+    }));
+  }
+  const strapMaterial=parts.straps[0].material;
+  const bumperRoot=parts.bumpers[0];let physicalBumper;
+  bumperRoot.traverse(mesh=>{if(mesh.isMesh&&!physicalBumper)physicalBumper=mesh});
+  const bumperMaterial=physicalBumper.material;
+  const drawPixel=(fragments)=>{
+    let depth=3,stencil=0;
+    for(const {material,distance} of fragments){
+      if(distance>depth)continue;
+      depth=distance;stencil=(stencil&~material.stencilWriteMask)|(material.stencilRef&material.stencilWriteMask);
+    }
+    return stencil;
+  };
+  for(const fragments of [
+    [{material:strapMaterial,distance:2},{material:bumperMaterial,distance:1}],
+    [{material:bumperMaterial,distance:1},{material:strapMaterial,distance:2}],
+  ])assert.ok(accepts(bumperArtwork,drawPixel(fragments)),'hardware behind the bumper cannot erase its logo, regardless of draw order');
+  assert.ok(!accepts(bumperArtwork,drawPixel([{material:bumperMaterial,distance:1},{material:strapMaterial,distance:.5}])),'foreground strap still covers bumper artwork');
+}
+
+// The SVG handles use exactly the projected manipulation corners, including wide
+// logos at oblique angles. Their eight-pixel size does not change with camera zoom.
+const outlineFrame={center:new THREE.Vector3(),corners:[new THREE.Vector3(-.6,.12,0),new THREE.Vector3(.6,.12,0),new THREE.Vector3(-.6,-.12,0),new THREE.Vector3(.6,-.12,0)]};
+const outlineCamera=new THREE.PerspectiveCamera(35,1,0.01,100);
+const element=()=>({style:{},attributes:{},setAttribute(name,value){this.attributes[name]=value}});
+const group=element();group.children=Array.from({length:6},element);const svg={children:[group]};
+for(const position of [[0,0,3],[1,.6,3],[0,0,6]]){
+  outlineCamera.position.set(...position);outlineCamera.lookAt(0,0,0);outlineCamera.updateMatrixWorld(true);
+  const projected=projectSelectionFrame(outlineFrame,outlineCamera,800,800);assert.ok(projected);
+  updateSelectionOutline(svg,[outlineFrame],outlineCamera,800,800);
+  assert.equal(group.style.display,'');
+  outlineFrame.corners.forEach((corner,i)=>{
+    const ndc=corner.clone().project(outlineCamera);
+    assert.ok(Math.abs(projected[i].x-(ndc.x+1)*400)<1e-8);
+    assert.ok(Math.abs(projected[i].y-(1-ndc.y)*400)<1e-8);
+    assert.ok(Math.abs(Number(group.children[i+2].attributes.x)+4-projected[i].x)<.006,'handle agrees with the actual scale/rotate target');
+  });
+}
+outlineCamera.position.set(0,0,-3);outlineCamera.lookAt(0,0,0);outlineCamera.updateMatrixWorld(true);
+assert.equal(projectSelectionFrame(outlineFrame,outlineCamera,800,800),null,'no rear-facing selection overlay');
+updateSelectionOutline(svg,[null],outlineCamera,800,800);assert.equal(group.style.display,'none','deselect clears the outline');
+console.log('PASS: actual-model views/decals; forward Axiom wrap with SpeedFlex UVs preserved; strap occlusion and bumper mask separation; crisp selection handles at varied angles and zoom.');

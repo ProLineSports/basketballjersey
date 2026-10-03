@@ -1,7 +1,7 @@
 // Artwork-space edge shading follows every outline, including holes in letters.
 // Its footprint is based on visible artwork height, so wide wordmarks and small
 // rear decals retain the same restrained vinyl edge instead of a broad glow.
-export function raisedDecalCanvases(source, artworkHeight) {
+export function raisedDecalCanvases(source, artworkHeight, { shadowProfile = 'decal' } = {}) {
   const canvas = () => {
     const result = document.createElement('canvas');
     result.width = source.width; result.height = source.height;
@@ -26,8 +26,10 @@ export function raisedDecalCanvases(source, artworkHeight) {
   // original silhouette so shading cannot enlarge or thicken the user's artwork.
   artCtx.globalCompositeOperation = 'destination-in'; artCtx.drawImage(source, 0, 0);
   const shadow = canvas(), shadowCtx = shadow.getContext('2d');
-  shadowCtx.filter = `blur(${Math.max(0.5, edge * 0.65)}px)`;
-  shadowCtx.drawImage(source, -edge * 1.4, edge * 1.4);
+  const bumper = shadowProfile === 'bumper';
+  const distance = edge * (bumper ? 1.4 : 0.45);
+  shadowCtx.filter = `blur(${Math.max(0.35, edge * (bumper ? 0.65 : 0.18))}px)`;
+  shadowCtx.drawImage(source, -distance, distance);
   shadowCtx.filter = 'none'; shadowCtx.globalCompositeOperation = 'source-in';
   shadowCtx.globalAlpha = 0.7; shadowCtx.fillStyle = '#000000';
   shadowCtx.fillRect(0, 0, shadow.width, shadow.height);
