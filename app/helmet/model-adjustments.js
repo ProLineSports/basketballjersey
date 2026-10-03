@@ -3,10 +3,22 @@ import { visibleHelmetBounds } from './viewport-controls.js';
 
 export const DEFAULT_SIDE_LOGO_PLACEMENT = Object.freeze({ yNorm: 0.65, zNorm: 0.03, scale: 1, rotation: -Math.PI / 6 });
 export const DEFAULT_STRIPE_WIDTH = 2.5;
-export const DEFAULT_REAR_DECAL_PLACEMENTS = Object.freeze({
-  flag: Object.freeze({ scale:5, rotation:20, across:-62, vertical:20 }),
-  warning: Object.freeze({ scale:5, rotation:-20, across:58, vertical:20 }),
+const AXIOM_REAR_DECAL_PLACEMENTS = Object.freeze({
+  flag: Object.freeze({ scale:5, rotation:20, across:-62, vertical:-10 }),
+  warning: Object.freeze({ scale:5, rotation:-20, across:58, vertical:-10 }),
 });
+const SPEEDFLEX_REAR_DECAL_PLACEMENTS = Object.freeze({
+  flag: Object.freeze({ scale:5, rotation:0, across:-62, vertical:-38 }),
+  warning: Object.freeze({ scale:5, rotation:0, across:58, vertical:-38 }),
+});
+
+export function rearDecalDefaults(family) {
+  return family === 'axiom' ? AXIOM_REAR_DECAL_PLACEMENTS : SPEEDFLEX_REAR_DECAL_PLACEMENTS;
+}
+
+export function rearBumperDefaultVertical(family) {
+  return family === 'axiom' ? 0 : -60;
+}
 
 export function textureFootprint(artworkWidth, pack) {
   const artworkHeight = artworkWidth / pack.aspect;

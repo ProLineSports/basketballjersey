@@ -6,7 +6,7 @@ import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {DRACOLoader} from 'three/addons/loaders/DRACOLoader.js';
 import {TrackballControls} from 'three/addons/controls/TrackballControls.js';
 import {HELMET_VIEWS, normalizeHelmetOrientation, visibleHelmetBounds, setHelmetView, recenterHelmet, rollHelmetView, levelHelmetView, squareViewportSize} from './viewport-controls.js';
-import {DEFAULT_SIDE_LOGO_PLACEMENT, DEFAULT_REAR_DECAL_PLACEMENTS, separateAxiomRearBumper, positionShadowFloor, textureFootprint, rearStickerBaseHeight, bumperSurfaceBounds, shadowFloorIsVisible} from './model-adjustments.js';
+import {DEFAULT_SIDE_LOGO_PLACEMENT, rearDecalDefaults, rearBumperDefaultVertical, separateAxiomRearBumper, positionShadowFloor, textureFootprint, rearStickerBaseHeight, bumperSurfaceBounds, shadowFloorIsVisible} from './model-adjustments.js';
 import {DecalGeometry} from 'three/addons/geometries/DecalGeometry.js';
 const dracoSource=fs.readFileSync('node_modules/three/examples/jsm/loaders/DRACOLoader.js','utf8');
 const decoderSource=fs.readFileSync('node_modules/three/examples/jsm/libs/draco/gltf/draco_decoder.js','utf8');
@@ -70,7 +70,7 @@ for(const sign of [-1,1]){
 assert.ok(Math.abs(defaultLogoHits[0].y-defaultLogoHits[1].y)<1e-8);
 assert.ok(Math.abs(defaultLogoHits[0].z-defaultLogoHits[1].z)<1e-8);
 // The formerly invisible flag/warning targets were below Axiom's open rear shell.
-for(const {across,vertical,rotation} of [...Object.values(DEFAULT_REAR_DECAL_PLACEMENTS),{across:0,vertical:20,rotation:0}]){
+for(const {across,vertical,rotation} of [...Object.values(rearDecalDefaults('axiom')),{across:0,vertical:20,rotation:0}]){
   const origin=new THREE.Vector3(shellCenter.x-across/100*carrierSize.x*.34,carrierBox.min.y+carrierSize.y*(rearStickerBaseHeight('axiom')+vertical/100*.24),-3);
   const hit=new THREE.Raycaster(origin,new THREE.Vector3(0,0,1)).intersectObjects(surfaces,false)[0];
   assert.ok(hit,'rear sticker target intersects the carrier');
@@ -138,7 +138,20 @@ const speedflexBumpers=[];speedflex.traverse(o=>{if(key(o.name)==='bumpers')o.tr
 assert.ok(speedflexBumpers.length);
 for(const slot of ['front','rear']){
   const bounds=bumperSurfaceBounds(speedflex,speedflexBumpers,slot),sign=slot==='front'?1:-1;
-  const origin=speedflex.localToWorld(new THREE.Vector3(bounds.centerX,bounds.centerY,sign*(Math.max(Math.abs(bounds.minZ),Math.abs(bounds.maxZ))+1)));
+  const vertical=slot==='rear'?rearBumperDefaultVertical('speedflex'):0;
+  const origin=speedflex.localToWorld(new THREE.Vector3(bounds.centerX,bounds.centerY+vertical/100*bounds.height*.35,sign*(Math.max(Math.abs(bounds.minZ),Math.abs(bounds.maxZ))+1)));
   assert.ok(new THREE.Raycaster(origin,new THREE.Vector3(0,0,-sign)).intersectObjects(bounds.meshes,false).length,'SpeedFlex '+slot+' bumper center');
+}
+const speedflexCarrier=[];
+speedflex.traverse(o=>{if(key(o.name)==='decalsurface')o.traverse(child=>{if(child.isMesh){child.material.side=THREE.DoubleSide;speedflexCarrier.push(child)}})});
+assert.ok(speedflexCarrier.length,'SpeedFlex decal carrier');
+const speedflexCarrierBounds=new THREE.Box3();
+speedflexCarrier.forEach(mesh=>speedflexCarrierBounds.union(new THREE.Box3().setFromObject(mesh)));
+const speedflexCarrierSize=speedflexCarrierBounds.getSize(new THREE.Vector3());
+const speedflexCarrierCenter=speedflexCarrierBounds.getCenter(new THREE.Vector3());
+for(const {across,vertical} of Object.values(rearDecalDefaults('speedflex'))){
+  const origin=new THREE.Vector3(speedflexCarrierCenter.x-across/100*speedflexCarrierSize.x*.34,
+    speedflexCarrierBounds.min.y+speedflexCarrierSize.y*(rearStickerBaseHeight('speedflex')+vertical/100*.24),-3);
+  assert.ok(new THREE.Raycaster(origin,new THREE.Vector3(0,0,1)).intersectObjects(speedflexCarrier,false).length,'restored SpeedFlex rear sticker hits its carrier');
 }
 console.log('PASS: actual Axiom orientation, side/rear decal raycasts, all six preset directions, exact perspective centering, preserved angle/zoom/roll, level at both poles, square viewport sizing, unchanged SpeedFlex orientation; rear bumper geometry/normals/colors; forward default logos; fixed shadow floor; visible rear sticker/bumper geometry; native artwork proportions; roll arrow direction; no ceiling shadow.');

@@ -22,7 +22,8 @@ import {
 } from './viewport-controls';
 import {
   DEFAULT_SIDE_LOGO_PLACEMENT,
-  DEFAULT_REAR_DECAL_PLACEMENTS,
+  rearDecalDefaults,
+  rearBumperDefaultVertical,
   DEFAULT_STRIPE_WIDTH,
   separateAxiomRearBumper,
   positionShadowFloor,
@@ -3755,11 +3756,11 @@ export default function HelmetBuilder({ demoMode = false }) {
   // Direct-manipulation state shared by rear decals + bumper logos.
   // Placements live in refs while dragging so React state does not interrupt pointer capture.
   const editableDecalPlacementRef = useRef({
-    'rear-flag':    { ...DEFAULT_REAR_DECAL_PLACEMENTS.flag },
-    'rear-warning': { ...DEFAULT_REAR_DECAL_PLACEMENTS.warning },
+    'rear-flag':    { ...rearDecalDefaults('speedflex').flag },
+    'rear-warning': { ...rearDecalDefaults('speedflex').warning },
     'rear-custom':  { scale:5.40, rotation:0, across:  0, vertical:20 },
     'bumper-front': { scale:6.6,  rotation:0, across:  0, vertical:0 },
-    'bumper-rear':  { scale:5.35, rotation:0, across:  0, vertical:0 },
+    'bumper-rear':  { scale:5.35, rotation:0, across:  0, vertical:rearBumperDefaultVertical('speedflex') },
   });
   const editableDecalWorldFrameRef = useRef({});
   const selectedEditableDecalRef = useRef(null);
@@ -3834,6 +3835,7 @@ export default function HelmetBuilder({ demoMode = false }) {
   const [activeNflPresetId, setActiveNflPresetId] = useState(null);
   const [helmetSelection, setHelmetSelection] = useState('speedflex');
   const activeHelmetConfig = HELMET_CONFIGS[helmetSelection] || HELMET_CONFIGS.speedflex;
+  const rearDefaults = rearDecalDefaults(activeHelmetConfig.family);
   const activeZones = activeHelmetConfig.zones;
   const activeModelUrl = activeHelmetConfig.url;
   const [colors, setColors]           = useState(() => Object.fromEntries(ALL_ZONE_DEFS.map(z => [z.id, z.defaultColor])));
@@ -4041,17 +4043,17 @@ export default function HelmetBuilder({ demoMode = false }) {
   const [sideLogoUndoCount, setSideLogoUndoCount] = useState(0);
 
   const [rearFlagEnabled, setRearFlagEnabled] = useState(false);
-  const [rearFlagScale, setRearFlagScale] = useState(DEFAULT_REAR_DECAL_PLACEMENTS.flag.scale);
-  const [rearFlagRotation, setRearFlagRotation] = useState(DEFAULT_REAR_DECAL_PLACEMENTS.flag.rotation);
-  const [rearFlagAcross, setRearFlagAcross] = useState(DEFAULT_REAR_DECAL_PLACEMENTS.flag.across);
-  const [rearFlagVertical, setRearFlagVertical] = useState(DEFAULT_REAR_DECAL_PLACEMENTS.flag.vertical);
+  const [rearFlagScale, setRearFlagScale] = useState(rearDefaults.flag.scale);
+  const [rearFlagRotation, setRearFlagRotation] = useState(rearDefaults.flag.rotation);
+  const [rearFlagAcross, setRearFlagAcross] = useState(rearDefaults.flag.across);
+  const [rearFlagVertical, setRearFlagVertical] = useState(rearDefaults.flag.vertical);
 
   const [rearWarningEnabled, setRearWarningEnabled] = useState(false);
   const [rearWarningColor, setRearWarningColor] = useState('#FFFFFF');
-  const [rearWarningScale, setRearWarningScale] = useState(DEFAULT_REAR_DECAL_PLACEMENTS.warning.scale);
-  const [rearWarningRotation, setRearWarningRotation] = useState(DEFAULT_REAR_DECAL_PLACEMENTS.warning.rotation);
-  const [rearWarningAcross, setRearWarningAcross] = useState(DEFAULT_REAR_DECAL_PLACEMENTS.warning.across);
-  const [rearWarningVertical, setRearWarningVertical] = useState(DEFAULT_REAR_DECAL_PLACEMENTS.warning.vertical);
+  const [rearWarningScale, setRearWarningScale] = useState(rearDefaults.warning.scale);
+  const [rearWarningRotation, setRearWarningRotation] = useState(rearDefaults.warning.rotation);
+  const [rearWarningAcross, setRearWarningAcross] = useState(rearDefaults.warning.across);
+  const [rearWarningVertical, setRearWarningVertical] = useState(rearDefaults.warning.vertical);
 
   const [rearCustomEnabled, setRearCustomEnabled] = useState(false);
   const [rearCustomPreviewUrl, setRearCustomPreviewUrl] = useState(null);
@@ -4090,9 +4092,36 @@ export default function HelmetBuilder({ demoMode = false }) {
   const [bumperLogoFrontAcross, setBumperLogoFrontAcross] = useState(0);
   const [bumperLogoRearAcross, setBumperLogoRearAcross] = useState(0);
   const [bumperLogoFrontVertical, setBumperLogoFrontVertical] = useState(0);
-  const [bumperLogoRearVertical, setBumperLogoRearVertical] = useState(0);
+  const [bumperLogoRearVertical, setBumperLogoRearVertical] = useState(rearBumperDefaultVertical(activeHelmetConfig.family));
   const [bumperLogoRearCurve, setBumperLogoRearCurve] = useState(-135);
   const [bumperLogoRevision, setBumperLogoRevision] = useState(0);
+
+  // Keep adjustments with their helmet family when switching models.
+  const rearPlacementByFamilyRef = useRef({});
+  const selectHelmetModel = (selection) => {
+    const currentFamily = activeHelmetConfig.family;
+    const nextFamily = HELMET_CONFIGS[selection].family;
+    if (currentFamily !== nextFamily) {
+      rearPlacementByFamilyRef.current[currentFamily] = {
+        flag:{ scale:rearFlagScale, rotation:rearFlagRotation, across:rearFlagAcross, vertical:rearFlagVertical },
+        warning:{ scale:rearWarningScale, rotation:rearWarningRotation, across:rearWarningAcross, vertical:rearWarningVertical },
+        bumperVertical:bumperLogoRearVertical,
+      };
+      const next = rearPlacementByFamilyRef.current[nextFamily] || {
+        ...rearDecalDefaults(nextFamily), bumperVertical:rearBumperDefaultVertical(nextFamily),
+      };
+      setRearFlagScale(next.flag.scale); setRearFlagRotation(next.flag.rotation);
+      setRearFlagAcross(next.flag.across); setRearFlagVertical(next.flag.vertical);
+      setRearWarningScale(next.warning.scale); setRearWarningRotation(next.warning.rotation);
+      setRearWarningAcross(next.warning.across); setRearWarningVertical(next.warning.vertical);
+      setBumperLogoRearVertical(next.bumperVertical);
+      for (const slot of ['rear-flag', 'rear-warning', 'bumper-rear']) {
+        editableDecalUndoStacksRef.current[slot].length = 0;
+      }
+      setEditableDecalUndoCounts(current => ({ ...current, 'rear-flag':0, 'rear-warning':0, 'bumper-rear':0 }));
+    }
+    setHelmetSelection(selection);
+  };
 
   const finishRef = useRef(finish);
   useEffect(() => { finishRef.current = finish; }, [finish]);
@@ -8488,6 +8517,9 @@ export default function HelmetBuilder({ demoMode = false }) {
       ? snapshot.assets
       : {};
     const savedHelmetSelection = snapshot.version >= 3 ? snapshot.model?.selection : 'speedflex';
+    const savedFamily = (HELMET_CONFIGS[savedHelmetSelection] || HELMET_CONFIGS.speedflex).family;
+    const savedRearDefaults = rearDecalDefaults(savedFamily);
+    rearPlacementByFamilyRef.current = {};
     setHelmetSelection(HELMET_CONFIGS[savedHelmetSelection] ? savedHelmetSelection : 'speedflex');
     const getSavedAssetUrl = (slot) => {
       const path = assetManifest[slot]?.path;
@@ -8677,17 +8709,17 @@ export default function HelmetBuilder({ demoMode = false }) {
     const warning = rear.warning || {};
     const custom = rear.custom || {};
     setRearFlagEnabled(!!flag.enabled);
-    setRearFlagScale(flag.scale ?? DEFAULT_REAR_DECAL_PLACEMENTS.flag.scale);
-    setRearFlagRotation(flag.rotation ?? DEFAULT_REAR_DECAL_PLACEMENTS.flag.rotation);
-    setRearFlagAcross(flag.across ?? DEFAULT_REAR_DECAL_PLACEMENTS.flag.across);
-    setRearFlagVertical(flag.vertical ?? DEFAULT_REAR_DECAL_PLACEMENTS.flag.vertical);
+    setRearFlagScale(flag.scale ?? savedRearDefaults.flag.scale);
+    setRearFlagRotation(flag.rotation ?? savedRearDefaults.flag.rotation);
+    setRearFlagAcross(flag.across ?? savedRearDefaults.flag.across);
+    setRearFlagVertical(flag.vertical ?? savedRearDefaults.flag.vertical);
     setRearFlagLocked(!!flag.locked);
     setRearWarningEnabled(!!warning.enabled);
     setRearWarningColor(warning.color || '#FFFFFF');
-    setRearWarningScale(warning.scale ?? DEFAULT_REAR_DECAL_PLACEMENTS.warning.scale);
-    setRearWarningRotation(warning.rotation ?? DEFAULT_REAR_DECAL_PLACEMENTS.warning.rotation);
-    setRearWarningAcross(warning.across ?? DEFAULT_REAR_DECAL_PLACEMENTS.warning.across);
-    setRearWarningVertical(warning.vertical ?? DEFAULT_REAR_DECAL_PLACEMENTS.warning.vertical);
+    setRearWarningScale(warning.scale ?? savedRearDefaults.warning.scale);
+    setRearWarningRotation(warning.rotation ?? savedRearDefaults.warning.rotation);
+    setRearWarningAcross(warning.across ?? savedRearDefaults.warning.across);
+    setRearWarningVertical(warning.vertical ?? savedRearDefaults.warning.vertical);
     setRearWarningLocked(!!warning.locked);
     setRearCustomEnabled(!!(custom.enabled && getSavedAssetUrl('rearCustom')));
     setRearCustomScale(custom.scale ?? 5.4);
@@ -8708,7 +8740,7 @@ export default function HelmetBuilder({ demoMode = false }) {
     setBumperLogoRearScale(rearBumper.scale ?? 5.35);
     setBumperLogoRearRotation(rearBumper.rotation ?? 0);
     setBumperLogoRearAcross(rearBumper.across ?? 0);
-    setBumperLogoRearVertical(rearBumper.vertical ?? 0);
+    setBumperLogoRearVertical(rearBumper.vertical ?? rearBumperDefaultVertical(savedFamily));
     setBumperLogoRearCurve(rearBumper.curve ?? -135);
     setBumperLogoRearLocked(!!rearBumper.locked);
 
@@ -9441,7 +9473,7 @@ export default function HelmetBuilder({ demoMode = false }) {
                     <button
                       key={option.id}
                       onClick={() => {
-                        setHelmetSelection(option.id);
+                        selectHelmetModel(option.id);
                         setShowProductMenu(false);
                       }}
                       style={{
