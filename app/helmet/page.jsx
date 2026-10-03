@@ -6,6 +6,8 @@ import { useRouter } from 'next/navigation';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { decalCarrierRoots, createWrapSurfaceSampler, applyCompatibleWrapUV } from './wrap-surface';
+import { raisedDecalCanvases } from './decal-appearance';
 import { EXRLoader } from 'three/addons/loaders/EXRLoader.js';
 import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
@@ -243,6 +245,26 @@ function disposeHelmetObject(root) {
   });
   geometries.forEach(geometry => geometry.dispose());
   materials.forEach(material => material.dispose());
+}
+
+let speedflexWrapSamplerPromise = null;
+function getSpeedflexWrapSampler() {
+  if (!speedflexWrapSamplerPromise) {
+    const decoder = new DRACOLoader().setDecoderPath(DRACO_DECODER_PATH);
+    // Only surface coordinates are needed; avoid decoding the reference model's
+    // embedded material images or keeping a second rendered helmet in memory.
+    const loader = new GLTFLoader().setDRACOLoader(decoder).register(() => ({
+      name:'WrapReferenceGeometry', loadMaterial:() => Promise.resolve(new THREE.MeshBasicMaterial()),
+    }));
+    speedflexWrapSamplerPromise = loader.loadAsync(SPEEDFLEX_MODEL_URL).then(gltf => {
+      try { return createWrapSurfaceSampler(decalCarrierRoots(gltf.scene)); }
+      finally { disposeHelmetObject(gltf.scene); }
+    }).finally(() => decoder.dispose()).catch(error => {
+      speedflexWrapSamplerPromise = null;
+      throw error;
+    });
+  }
+  return speedflexWrapSamplerPromise;
 }
 
 function indexLoadedParts(model, partsMap, objectsMap, zones = SPEEDFLEX_ZONES) {
@@ -1376,15 +1398,9 @@ function createSideLogoTexturePack(image, options = {}) {
   }
   finalCtx.drawImage(baseCanvas, 0, 0);
 
-  const rimCanvas = makeExpandedAlphaCanvas(
-    Math.max(2, strokeEnabled ? strokeThickness * 0.65 : 4),
-    '#000000',
-    strokeEnabled ? 0.16 : 0.12,
-    true
-  );
-
-  const warpedFinalCanvas = warpCanvasArc(finalCanvas, arcCompensation);
-  const warpedRimCanvas = warpCanvasArc(rimCanvas, arcCompensation);
+  const raised = raisedDecalCanvases(finalCanvas, drawH);
+  const warpedFinalCanvas = warpCanvasArc(raised.artwork, arcCompensation);
+  const warpedRimCanvas = warpCanvasArc(raised.shadow, arcCompensation);
 
   const mainTexture = new THREE.CanvasTexture(warpedFinalCanvas);
   mainTexture.colorSpace = THREE.SRGBColorSpace;
@@ -6076,7 +6092,7 @@ export default function HelmetBuilder({ demoMode = false }) {
   }, [loaded, colors.shell, wrapEnabled, wrapRevision, wrapScale, wrapScaleX, wrapScaleY, wrapRotation, wrapOffsetX, wrapOffsetY, wrapOpacity, wrapTransparentBackground, wrapFlipY]);
 
   useEffect(() => {
-    if (!loaded || !modelRef.current) return;
+    if (!loaded || !modelRef.current || !wrapEnabled) return;
 
     const model = modelRef.current;
     const shellRoots = partObjectsRef.current[partKey('Shell')] || [];
@@ -6087,7 +6103,24 @@ export default function HelmetBuilder({ demoMode = false }) {
 
     let projection = null;
     const renderedWrapRoots = decalOverlayMeshesRef.current || [];
-    if (wrapProjectionMode === 'longitudinal') {
+    if (wrapProjectionMode === 'authored' && activeHelmetConfig.family === 'axiom') {
+      let cancelled = false;
+      renderedWrapRoots.forEach(mesh => { mesh.visible = false; });
+      getSpeedflexWrapSampler().then(sampler => {
+        if (cancelled) return;
+        applyCompatibleWrapUV([...wrapRoots, ...renderedWrapRoots], sampler);
+        renderedWrapRoots.forEach(mesh => { mesh.visible = true; });
+      }).catch(error => {
+        if (cancelled) return;
+        console.error('[HelmetBuilder] Reference wrap mapping failed:', error);
+        applySavedPanoramicWrapUV(renderedWrapRoots);
+        renderedWrapRoots.forEach(mesh => { mesh.visible = true; });
+      });
+      return () => {
+        cancelled = true;
+        renderedWrapRoots.forEach(mesh => { mesh.visible = true; });
+      };
+    } else if (wrapProjectionMode === 'longitudinal') {
       projection = applyLongitudinalShellWrapUV(model, wrapRoots, { rearAtTop: true });
       // Longitudinal is legacy/experimental; rendered overlays retain their saved
       // panoramic coordinates unless explicitly rebuilt.
@@ -6105,7 +6138,7 @@ export default function HelmetBuilder({ demoMode = false }) {
     if (projection?.centerX != null) {
       shellWrapUniformsRef.current.centerX.value = projection.centerX;
     }
-  }, [loaded, wrapProjectionMode]);
+  }, [loaded, wrapProjectionMode, wrapEnabled, activeHelmetConfig.family]);
 
 
   // ── STRIPE DESIGN TEXTURE ───────────────────────────────────────────────────

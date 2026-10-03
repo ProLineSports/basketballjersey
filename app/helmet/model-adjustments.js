@@ -4,8 +4,8 @@ import { visibleHelmetBounds } from './viewport-controls.js';
 export const DEFAULT_SIDE_LOGO_PLACEMENT = Object.freeze({ yNorm: 0.65, zNorm: 0.03, scale: 1, rotation: -Math.PI / 6 });
 export const DEFAULT_STRIPE_WIDTH = 2.5;
 const AXIOM_REAR_DECAL_PLACEMENTS = Object.freeze({
-  flag: Object.freeze({ scale:5, rotation:20, across:-62, vertical:-10 }),
-  warning: Object.freeze({ scale:5, rotation:-20, across:58, vertical:-10 }),
+  flag: Object.freeze({ scale:5, rotation:10, across:-62, vertical:-10 }),
+  warning: Object.freeze({ scale:5, rotation:-15, across:58, vertical:-10 }),
 });
 const SPEEDFLEX_REAR_DECAL_PLACEMENTS = Object.freeze({
   flag: Object.freeze({ scale:5, rotation:0, across:-62, vertical:-38 }),

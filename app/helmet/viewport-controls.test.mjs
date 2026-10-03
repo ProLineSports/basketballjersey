@@ -8,6 +8,7 @@ import {TrackballControls} from 'three/addons/controls/TrackballControls.js';
 import {HELMET_VIEWS, normalizeHelmetOrientation, visibleHelmetBounds, setHelmetView, recenterHelmet, rollHelmetView, levelHelmetView, squareViewportSize} from './viewport-controls.js';
 import {DEFAULT_SIDE_LOGO_PLACEMENT, rearDecalDefaults, rearBumperDefaultVertical, separateAxiomRearBumper, positionShadowFloor, textureFootprint, rearStickerBaseHeight, bumperSurfaceBounds, shadowFloorIsVisible} from './model-adjustments.js';
 import {DecalGeometry} from 'three/addons/geometries/DecalGeometry.js';
+import {decalCarrierRoots, createWrapSurfaceSampler, applyCompatibleWrapUV} from './wrap-surface.js';
 const dracoSource=fs.readFileSync('node_modules/three/examples/jsm/loaders/DRACOLoader.js','utf8');
 const decoderSource=fs.readFileSync('node_modules/three/examples/jsm/libs/draco/gltf/draco_decoder.js','utf8');
 const callbacks=new Map();let taskId=0;
@@ -154,4 +155,24 @@ for(const {across,vertical} of Object.values(rearDecalDefaults('speedflex'))){
     speedflexCarrierBounds.min.y+speedflexCarrierSize.y*(rearStickerBaseHeight('speedflex')+vertical/100*.24),-3);
   assert.ok(new THREE.Raycaster(origin,new THREE.Vector3(0,0,1)).intersectObjects(speedflexCarrier,false).length,'restored SpeedFlex rear sticker hits its carrier');
 }
-console.log('PASS: actual Axiom orientation, side/rear decal raycasts, all six preset directions, exact perspective centering, preserved angle/zoom/roll, level at both poles, square viewport sizing, unchanged SpeedFlex orientation; rear bumper geometry/normals/colors; forward default logos; fixed shadow floor; visible rear sticker/bumper geometry; native artwork proportions; roll arrow direction; no ceiling shadow.');
+const referenceRoots=decalCarrierRoots(speedflex),axiomRoots=decalCarrierRoots(model);
+const sampler=createWrapSurfaceSampler(referenceRoots);
+const originalSpeedflexUVs=speedflexCarrier.map(mesh=>Array.from(mesh.geometry.attributes.uv.array));
+const mappingStarted=performance.now();
+applyCompatibleWrapUV(axiomRoots,sampler);
+applyCompatibleWrapUV(referenceRoots,sampler);
+assert.ok(performance.now()-mappingStarted<10000,'surface mapping completes without a long UI stall');
+let compatibleCount=0,originalDifferences=0;
+surfaces.forEach(mesh=>{
+  const mapped=mesh.geometry.getAttribute('helmetWrapUv'),original=mesh.geometry.attributes.uv;
+  assert.equal(mapped.count,original.count);
+  for(let i=0;i<mapped.count;i++){
+    assert.ok(Number.isFinite(mapped.getX(i))&&Number.isFinite(mapped.getY(i)),'finite retargeted UVs');
+    assert.ok(mapped.getX(i)>-1e-5&&mapped.getX(i)<1.00001&&mapped.getY(i)>-1e-5&&mapped.getY(i)<1.00001,'reference atlas bounds');
+    compatibleCount++;
+    if(Math.hypot(mapped.getX(i)-original.getX(i),mapped.getY(i)-original.getY(i))>.05)originalDifferences++;
+  }
+});
+assert.ok(originalDifferences/compatibleCount>.1,'Axiom uses the SpeedFlex-compatible atlas instead of its unrelated islands');
+speedflexCarrier.forEach((mesh,index)=>assert.deepEqual(Array.from(mesh.geometry.attributes.uv.array),originalSpeedflexUVs[index],'SpeedFlex authored UVs unchanged'));
+console.log('PASS: actual-model views, controls, rear/bumper decal targets, native artwork proportions and fixed shadows; compatible Axiom authored-wrap mapping; SpeedFlex authored UVs unchanged.');
