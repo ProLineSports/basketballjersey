@@ -21,6 +21,12 @@ import {
   squareViewportSize,
 } from './viewport-controls';
 import {
+  DEFAULT_SIDE_LOGO_PLACEMENT,
+  DEFAULT_STRIPE_WIDTH,
+  separateAxiomRearBumper,
+  positionShadowFloor,
+} from './model-adjustments';
+import {
   getMetaConsent,
   trackMetaCustomEvent,
   trackMetaEvent,
@@ -1491,7 +1497,6 @@ function createCarrierSurfaceLogoMeshes(scene, sourceMeshes, material, side, lay
   return meshes;
 }
 
-const DEFAULT_SIDE_LOGO_PLACEMENT = Object.freeze({ yNorm: 0.64, zNorm: -0.18, scale: 1, rotation: 0 });
 const cloneDefaultSideLogoPlacement = () => ({ ...DEFAULT_SIDE_LOGO_PLACEMENT });
 
 const FINISHES = [
@@ -3942,7 +3947,7 @@ export default function HelmetBuilder({ demoMode = false }) {
 
   const [helmetStripesEnabled, setHelmetStripesEnabled] = useState(false);
   const [helmetStripePreset, setHelmetStripePreset]     = useState('threeEqual');
-  const [helmetStripeWidth, setHelmetStripeWidth]       = useState(2);
+  const [helmetStripeWidth, setHelmetStripeWidth]       = useState(DEFAULT_STRIPE_WIDTH);
   const [helmetStripeLength, setHelmetStripeLength]     = useState(1);
   const [helmetStripeSingleColor, setHelmetStripeSingleColor] = useState('#efff00');
   const [helmetStripeOuterColor, setHelmetStripeOuterColor]   = useState('#efff00');
@@ -5257,7 +5262,7 @@ export default function HelmetBuilder({ demoMode = false }) {
     // light only to generate the contact/floor shadow. Existing shadow controls and
     // high-resolution export shadow maps continue to target this light via keyLight.
     const shadowLight = new THREE.DirectionalLight(0xffffff, 0.55);
-    shadowLight.position.set(3.2, 5.0, 3.0);
+    shadowLight.position.copy(keySoftbox.position);
     shadowLight.target.position.copy(lightTarget);
     scene.add(shadowLight.target);
     shadowLight.castShadow = true;
@@ -5270,6 +5275,7 @@ export default function HelmetBuilder({ demoMode = false }) {
     shadowLight.shadow.camera.top = 3;
     shadowLight.shadow.camera.bottom = -3;
     shadowLight.shadow.radius = 0.5 + shadowSoftness * 11.5;
+    shadowLight.shadow.normalBias = 0.005;
     scene.add(shadowLight);
     scene.userData.keyLight = shadowLight;
     scene.userData.shadowLight = shadowLight;
@@ -5289,16 +5295,6 @@ export default function HelmetBuilder({ demoMode = false }) {
     scene.add(floor);
     scene.userData.floor = floor;
     scene.userData.floorShadowMaterial = floorMat;
-
-    // Optional back wall
-    const wallGeo = new THREE.PlaneGeometry(10, 6);
-    const wallMat = new THREE.ShadowMaterial({ opacity: shadowOpacity * 0.43 });
-    const wall = new THREE.Mesh(wallGeo, wallMat);
-    wall.position.set(0, 1.5, -2.5);
-    wall.receiveShadow = true;
-    scene.add(wall);
-    scene.userData.wall = wall;
-    scene.userData.wallShadowMaterial = wallMat;
 
     // Sparkle point light — close to helmet for flake catchlights
     const sparkleLight = new THREE.PointLight(0xffffff, 8.0, 8);
@@ -5350,6 +5346,9 @@ export default function HelmetBuilder({ demoMode = false }) {
 
       const model = gltf.scene;
       normalizeHelmetOrientation(model, activeHelmetConfig.family);
+      if (activeHelmetConfig.family === 'axiom' && !separateAxiomRearBumper(model)) {
+        console.warn('[HelmetBuilder] Could not separate the Axiom rear bumper.');
+      }
       const baseStats = getBaseModelStats(model);
       debugStaticRef.current.modelMeshes = baseStats.meshes;
       debugStaticRef.current.modelTriangles = baseStats.triangles;
@@ -5605,6 +5604,9 @@ export default function HelmetBuilder({ demoMode = false }) {
       );
 
       scene.add(model);
+      // This floor stays in the studio's world space. Camera rotation, pan, roll,
+      // and re-centering never move it or the shadow-casting light.
+      positionShadowFloor(floor, model);
       setHelmetView(camera, controls, model, 'sideA');
       setActiveViewPreset('sideA');
       // Now that all shell/facemask materials exist, route env maps per current finish
@@ -7587,7 +7589,7 @@ export default function HelmetBuilder({ demoMode = false }) {
   }, [loaded, bumperLogoFinish]);
 
   // ── SHADOW CONTROLS ─────────────────────────────────────────────────────────
-  // Opacity controls the receiving ShadowMaterial surfaces. Softness changes the
+  // Opacity controls the fixed floor's ShadowMaterial. Softness changes the
   // DirectionalLight shadow-kernel radius, giving a harder contact shadow at the low
   // end and a broader, more photographic blur at the high end.
   useEffect(() => {
@@ -7595,19 +7597,11 @@ export default function HelmetBuilder({ demoMode = false }) {
     if (!scene) return;
 
     if (scene.userData.floor) scene.userData.floor.visible = showShadows;
-    if (scene.userData.wall)  scene.userData.wall.visible  = showShadows;
 
     if (scene.userData.floorShadowMaterial) {
       scene.userData.floorShadowMaterial.opacity = shadowOpacity;
       scene.userData.floorShadowMaterial.needsUpdate = true;
     }
-    if (scene.userData.wallShadowMaterial) {
-      // Keep the back-wall shadow lighter than the floor while preserving the
-      // user's overall opacity choice.
-      scene.userData.wallShadowMaterial.opacity = shadowOpacity * 0.43;
-      scene.userData.wallShadowMaterial.needsUpdate = true;
-    }
-
     if (scene.userData.keyLight?.shadow) {
       scene.userData.keyLight.shadow.radius = 0.5 + shadowSoftness * 11.5;
       scene.userData.keyLight.shadow.needsUpdate = true;
@@ -8536,7 +8530,7 @@ export default function HelmetBuilder({ demoMode = false }) {
     removeStripeDesign();
     setHelmetStripesEnabled(!!stripes.enabled);
     setHelmetStripePreset(stripes.preset || 'threeEqual');
-    setHelmetStripeWidth(stripes.width ?? 2);
+    setHelmetStripeWidth(stripes.width ?? DEFAULT_STRIPE_WIDTH);
     setHelmetStripeLength(stripes.length ?? 1);
     setHelmetStripeSingleColor(stripes.singleColor || '#efff00');
     setHelmetStripeOuterColor(stripes.outerColor || '#efff00');
@@ -8550,7 +8544,7 @@ export default function HelmetBuilder({ demoMode = false }) {
         scale: stripeDesign.scale ?? 1,
         scaleX: stripeDesign.scaleX ?? 1,
         scaleY: stripeDesign.scaleY ?? 1,
-        stripeWidth: stripes.width ?? 2,
+        stripeWidth: stripes.width ?? DEFAULT_STRIPE_WIDTH,
         stripeLength: stripes.length ?? 1,
         rotation: stripeDesign.rotation ?? 0,
         offsetX: stripeDesign.offsetX ?? 0,
@@ -8569,7 +8563,7 @@ export default function HelmetBuilder({ demoMode = false }) {
           scale: stripeDesign.scale ?? 1,
           scaleX: stripeDesign.scaleX ?? 1,
           scaleY: stripeDesign.scaleY ?? 1,
-          stripeWidth: stripes.width ?? 2,
+          stripeWidth: stripes.width ?? DEFAULT_STRIPE_WIDTH,
           stripeLength: stripes.length ?? 1,
           rotation: stripeDesign.rotation ?? 0,
           offsetX: stripeDesign.offsetX ?? 0,
@@ -9135,7 +9129,7 @@ export default function HelmetBuilder({ demoMode = false }) {
 
     // Preset bases use the established procedural stripe defaults. Uploaded stripe
     // artwork is only toggled off, not deleted, so the user's upload can be restored.
-    setHelmetStripeWidth(2);
+    setHelmetStripeWidth(DEFAULT_STRIPE_WIDTH);
     setHelmetStripeLength(1);
     setHelmetStripeDesignEnabled(false);
     setHelmetStripeSingleColor('#efff00');
