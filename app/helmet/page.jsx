@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { decalCarrierRoots, createWrapSurfaceSampler, applyCompatibleWrapUV, AXIOM_WRAP_FORWARD_SHIFT } from './wrap-surface';
-import { raisedDecalCanvases } from './decal-appearance';
+import { raisedDecalCanvases, strokeDecalCanvas } from './decal-appearance';
 import { applyShellDecalOcclusion } from './decal-occlusion';
 import { projectSelectionFrame, updateSelectionOutline } from './selection-outline';
 import { EXRLoader } from 'three/addons/loaders/EXRLoader.js';
@@ -1334,45 +1334,10 @@ function createSideLogoTexturePack(image, options = {}) {
   baseCtx.drawImage(image, content.x, content.y, content.width, content.height, -drawW / 2, -drawH / 2, drawW, drawH);
   baseCtx.restore();
 
-  const makeExpandedAlphaCanvas = (radiusPx, colorHex, opacityValue, cutCenter = false) => {
-    const out = document.createElement('canvas');
-    out.width = canvasWidth;
-    out.height = canvasHeight;
-    const ctx = out.getContext('2d');
-    if (!ctx) return out;
-    const radius = Math.max(0, radiusPx);
-    const steps = Math.max(12, Math.ceil(radius * 12));
-    for (let i = 0; i < steps; i++) {
-      const angle = (i / steps) * Math.PI * 2;
-      const dx = Math.cos(angle) * radius;
-      const dy = Math.sin(angle) * radius;
-      ctx.drawImage(baseCanvas, dx, dy);
-    }
-    ctx.globalCompositeOperation = 'source-in';
-    ctx.globalAlpha = opacityValue;
-    ctx.fillStyle = colorHex;
-    ctx.fillRect(0, 0, canvasWidth, canvasHeight);
-    ctx.globalAlpha = 1;
-    if (cutCenter) {
-      ctx.globalCompositeOperation = 'destination-out';
-      ctx.drawImage(baseCanvas, 0, 0);
-    }
-    ctx.globalCompositeOperation = 'source-over';
-    return out;
-  };
-
-  const finalCanvas = document.createElement('canvas');
-  finalCanvas.width = canvasWidth;
-  finalCanvas.height = canvasHeight;
-  const finalCtx = finalCanvas.getContext('2d');
-  if (!finalCtx) return null;
-  if (strokeEnabled && strokeThickness > 0 && strokeOpacity > 0) {
-    const strokeCanvas = makeExpandedAlphaCanvas(strokeThickness, strokeColor, strokeOpacity, true);
-    finalCtx.drawImage(strokeCanvas, 0, 0);
-  }
-  finalCtx.drawImage(baseCanvas, 0, 0);
-
-  const raised = raisedDecalCanvases(finalCanvas, drawH, { shadowProfile });
+  const stroked = strokeDecalCanvas(baseCanvas, {
+    enabled:strokeEnabled, thickness:strokeThickness, color:strokeColor, opacity:strokeOpacity,
+  });
+  const raised = raisedDecalCanvases(stroked.artwork, drawH, { shadowProfile, footprint:stroked.footprint });
   const warpedFinalCanvas = warpCanvasArc(raised.artwork, arcCompensation);
   const warpedRimCanvas = warpCanvasArc(raised.shadow, arcCompensation);
 
@@ -1398,6 +1363,8 @@ function createSideLogoTexturePack(image, options = {}) {
     aspect: content.width / Math.max(1, content.height),
     contentWidthFraction: drawW / canvasWidth,
     contentHeightFraction: drawH / canvasHeight,
+    outlineWidthFraction: Math.min(1, (drawW + (stroked.footprint ? strokeThickness * 2 : 0)) / canvasWidth),
+    outlineHeightFraction: Math.min(1, (drawH + (stroked.footprint ? strokeThickness * 2 : 0)) / canvasHeight),
     mainTexture,
     rimTexture,
   };
@@ -6501,8 +6468,8 @@ export default function HelmetBuilder({ demoMode = false }) {
       sideLogoMeshesRef.current.push(hitProxy);
       sideLogoMaterialsRef.current.push(hitProxyMat);
 
-      const frameHalfW = baseWidth * pack.contentWidthFraction * 0.54;
-      const frameHalfH = baseHeight * pack.contentHeightFraction * 0.54;
+      const frameHalfW = baseWidth * pack.outlineWidthFraction * 0.54;
+      const frameHalfH = baseHeight * pack.outlineHeightFraction * 0.54;
       const frameCenter = logoCenter.clone().addScaledVector(worldNormal, physicalDepth * 1.4);
       sideLogoWorldFrameRef.current[side] = {
         center: frameCenter,
@@ -10162,7 +10129,7 @@ export default function HelmetBuilder({ demoMode = false }) {
                   <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, marginBottom:10 }}>
                     <div>
                       <SectionLabel>Logo Stroke</SectionLabel>
-                      <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.4, marginTop:-4 }}>Outside-aligned stroke for thicker decal builds.</div>
+                      <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.4, marginTop:-4 }}>Depth follows the outer border. Set opacity to 0% for a clear decal edge.</div>
                     </div>
                     <button onClick={() => setSideLogoStrokeEnabled(v => !v)} style={{ background:sideLogoStrokeEnabled?'rgba(239,255,0,0.10)':'rgba(255,255,255,0.04)', border:sideLogoStrokeEnabled?'1px solid rgba(239,255,0,0.35)':'1px solid rgba(255,255,255,0.10)', borderRadius:6, padding:'5px 9px', cursor:'pointer', color:sideLogoStrokeEnabled?'#efff00':'#9ca3af', fontSize:9, fontWeight:800, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.06em' }}>{sideLogoStrokeEnabled?'ON':'OFF'}</button>
                   </div>

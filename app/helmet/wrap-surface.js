@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
 const key = name => name.toLowerCase().replace(/[^a-z0-9]/g, '');
-export const AXIOM_WRAP_FORWARD_SHIFT = 0.10;
+export const AXIOM_WRAP_FORWARD_SHIFT = 0.28;
 
 export function decalCarrierRoots(model) {
   const roots = [];
