@@ -1,8 +1,12 @@
 import * as THREE from 'three';
 import { visibleHelmetBounds } from './viewport-controls.js';
 
-export const DEFAULT_SIDE_LOGO_PLACEMENT = Object.freeze({ yNorm: 0.65, zNorm: 0.03, scale: 1, rotation: 0 });
-export const DEFAULT_STRIPE_WIDTH = 1.5;
+export const DEFAULT_SIDE_LOGO_PLACEMENT = Object.freeze({ yNorm: 0.65, zNorm: 0.03, scale: 1, rotation: -Math.PI / 6 });
+export const DEFAULT_STRIPE_WIDTH = 2.5;
+export const DEFAULT_REAR_DECAL_PLACEMENTS = Object.freeze({
+  flag: Object.freeze({ scale:5, rotation:20, across:-62, vertical:20 }),
+  warning: Object.freeze({ scale:5, rotation:-20, across:58, vertical:20 }),
+});
 
 export function textureFootprint(artworkWidth, pack) {
   const artworkHeight = artworkWidth / pack.aspect;

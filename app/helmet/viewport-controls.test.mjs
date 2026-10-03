@@ -6,7 +6,7 @@ import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {DRACOLoader} from 'three/addons/loaders/DRACOLoader.js';
 import {TrackballControls} from 'three/addons/controls/TrackballControls.js';
 import {HELMET_VIEWS, normalizeHelmetOrientation, visibleHelmetBounds, setHelmetView, recenterHelmet, rollHelmetView, levelHelmetView, squareViewportSize} from './viewport-controls.js';
-import {DEFAULT_SIDE_LOGO_PLACEMENT, separateAxiomRearBumper, positionShadowFloor, textureFootprint, rearStickerBaseHeight, bumperSurfaceBounds, shadowFloorIsVisible} from './model-adjustments.js';
+import {DEFAULT_SIDE_LOGO_PLACEMENT, DEFAULT_REAR_DECAL_PLACEMENTS, separateAxiomRearBumper, positionShadowFloor, textureFootprint, rearStickerBaseHeight, bumperSurfaceBounds, shadowFloorIsVisible} from './model-adjustments.js';
 import {DecalGeometry} from 'three/addons/geometries/DecalGeometry.js';
 const dracoSource=fs.readFileSync('node_modules/three/examples/jsm/loaders/DRACOLoader.js','utf8');
 const decoderSource=fs.readFileSync('node_modules/three/examples/jsm/libs/draco/gltf/draco_decoder.js','utf8');
@@ -70,13 +70,13 @@ for(const sign of [-1,1]){
 assert.ok(Math.abs(defaultLogoHits[0].y-defaultLogoHits[1].y)<1e-8);
 assert.ok(Math.abs(defaultLogoHits[0].z-defaultLogoHits[1].z)<1e-8);
 // The formerly invisible flag/warning targets were below Axiom's open rear shell.
-for(const [across,vertical] of [[-62,-38],[58,-38],[0,20]]){
+for(const {across,vertical,rotation} of [...Object.values(DEFAULT_REAR_DECAL_PLACEMENTS),{across:0,vertical:20,rotation:0}]){
   const origin=new THREE.Vector3(shellCenter.x-across/100*carrierSize.x*.34,carrierBox.min.y+carrierSize.y*(rearStickerBaseHeight('axiom')+vertical/100*.24),-3);
   const hit=new THREE.Raycaster(origin,new THREE.Vector3(0,0,1)).intersectObjects(surfaces,false)[0];
   assert.ok(hit,'rear sticker target intersects the carrier');
   const normal=hit.face.normal.clone().applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld));
   assert.ok(normal.z<-.8,'rear-facing film');
-  const helper=new THREE.Object3D();helper.position.copy(hit.point);helper.lookAt(hit.point.clone().add(normal));
+  const helper=new THREE.Object3D();helper.position.copy(hit.point);helper.lookAt(hit.point.clone().add(normal));helper.rotateZ(THREE.MathUtils.degToRad(rotation));
   const geometry=new DecalGeometry(hit.object,hit.point,new THREE.Euler().setFromQuaternion(helper.quaternion),new THREE.Vector3(.2,.1,.35));
   assert.ok(geometry.attributes.position.count>100,'rear artwork has renderable triangles');geometry.dispose();
 }
