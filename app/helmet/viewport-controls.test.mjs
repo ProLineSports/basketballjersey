@@ -6,7 +6,8 @@ import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {DRACOLoader} from 'three/addons/loaders/DRACOLoader.js';
 import {TrackballControls} from 'three/addons/controls/TrackballControls.js';
 import {HELMET_VIEWS, normalizeHelmetOrientation, visibleHelmetBounds, setHelmetView, recenterHelmet, rollHelmetView, levelHelmetView, squareViewportSize} from './viewport-controls.js';
-import {DEFAULT_SIDE_LOGO_PLACEMENT, separateAxiomRearBumper, positionShadowFloor} from './model-adjustments.js';
+import {DEFAULT_SIDE_LOGO_PLACEMENT, separateAxiomRearBumper, positionShadowFloor, textureFootprint, rearStickerBaseHeight, bumperSurfaceBounds, shadowFloorIsVisible} from './model-adjustments.js';
+import {DecalGeometry} from 'three/addons/geometries/DecalGeometry.js';
 const dracoSource=fs.readFileSync('node_modules/three/examples/jsm/loaders/DRACOLoader.js','utf8');
 const decoderSource=fs.readFileSync('node_modules/three/examples/jsm/libs/draco/gltf/draco_decoder.js','utf8');
 const callbacks=new Map();let taskId=0;
@@ -68,6 +69,41 @@ for(const sign of [-1,1]){
 }
 assert.ok(Math.abs(defaultLogoHits[0].y-defaultLogoHits[1].y)<1e-8);
 assert.ok(Math.abs(defaultLogoHits[0].z-defaultLogoHits[1].z)<1e-8);
+// The formerly invisible flag/warning targets were below Axiom's open rear shell.
+for(const [across,vertical] of [[-62,-38],[58,-38],[0,20]]){
+  const origin=new THREE.Vector3(shellCenter.x-across/100*carrierSize.x*.34,carrierBox.min.y+carrierSize.y*(rearStickerBaseHeight('axiom')+vertical/100*.24),-3);
+  const hit=new THREE.Raycaster(origin,new THREE.Vector3(0,0,1)).intersectObjects(surfaces,false)[0];
+  assert.ok(hit,'rear sticker target intersects the carrier');
+  const normal=hit.face.normal.clone().applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld));
+  assert.ok(normal.z<-.8,'rear-facing film');
+  const helper=new THREE.Object3D();helper.position.copy(hit.point);helper.lookAt(hit.point.clone().add(normal));
+  const geometry=new DecalGeometry(hit.object,hit.point,new THREE.Euler().setFromQuaternion(helper.quaternion),new THREE.Vector3(.2,.1,.35));
+  assert.ok(geometry.attributes.position.count>100,'rear artwork has renderable triangles');geometry.dispose();
+}
+// Fit each bumper separately: the rear is wider than the front, both centers hit.
+for(const slot of ['front','rear']){
+  const bounds=bumperSurfaceBounds(model,[bumper,rearBumper],slot);
+  assert.equal(bounds.meshes.length,1,'only this bumper receives artwork');
+  const sign=slot==='front'?1:-1;
+  const origin=model.localToWorld(new THREE.Vector3(bounds.centerX,bounds.centerY,sign*1));
+  const hit=new THREE.Raycaster(origin,new THREE.Vector3(0,0,-sign)).intersectObjects(bounds.meshes,false)[0];
+  assert.ok(hit,slot+' centered artwork raycast');
+  assert.ok(bounds.worldSize.x>(slot==='front'?.4:.7),'use scaled world size');
+  if(slot==='rear'){
+    const normal=hit.face.normal.clone().applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld));
+    const helper=new THREE.Object3D();helper.position.copy(hit.point);helper.lookAt(hit.point.clone().add(normal));
+    const geometry=new DecalGeometry(hit.object,hit.point,new THREE.Euler().setFromQuaternion(helper.quaternion),new THREE.Vector3(.6,.15,.2));
+    assert.ok(geometry.attributes.position.count>100,'rear bumper wordmark has renderable triangles');geometry.dispose();
+  }
+}
+// Padding and wide texture canvases cannot stretch the source artwork.
+for(const aspect of [.5,1,1.9,4,8,12])for(const [w,h] of [[1024,1024],[1024,512],[4096,2048],[6144,1536]]){
+  const fit=Math.min((w-240)/aspect,h-240);
+  const pack={aspect,contentWidthFraction:fit*aspect/w,contentHeightFraction:fit/h};
+  const footprint=textureFootprint(.35,pack);
+  assert.ok(Math.abs(footprint.width/footprint.height-w/h)<1e-10,'projected canvas preserves its aspect');
+  assert.ok(Math.abs(footprint.width*pack.contentWidthFraction/(footprint.height*pack.contentHeightFraction)-aspect)<1e-10,'visible artwork preserves its native aspect');
+}
 const studio=new THREE.Scene();studio.add(model);
 const floor=new THREE.Mesh(new THREE.PlaneGeometry(10,10),new THREE.ShadowMaterial());studio.add(floor);positionShadowFloor(floor,model);
 assert.ok(Math.abs(floor.position.y-visibleHelmetBounds(model).min.y+.03)<1e-9,'floor just below the helmet');
@@ -81,5 +117,28 @@ for(const sign of [-1,1]){controls.target.set(0,0,0);camera.position.set(0,sign*
 assert.equal(squareViewportSize(1366,720),720);assert.equal(squareViewportSize(1280,800),680);assert.equal(squareViewportSize(1920,1032),1032);assert.ok(!visibleHelmetBounds(model).isEmpty());
 assert.ok(floor.matrixWorld.equals(floorMatrix),'floor stays fixed through presets, pan, roll and centering');
 assert.equal(floor.parent,studio,'floor is independent of the helmet');
+camera.position.set(0,0,3);controls.target.set(0,0,0);camera.up.set(0,1,0);camera.lookAt(controls.target);controls.update();
+assert.equal(shadowFloorIsVisible(camera,floor),true,'upright ground shadow');
+const screenRightPoint=new THREE.Vector3(.3,0,0);rollHelmetView(camera,controls,Math.PI/12);
+assert.ok(screenRightPoint.clone().project(camera).y>0,'left-arrow positive roll moves the helmet counterclockwise');
+rollHelmetView(camera,controls,-Math.PI/12);
+rollHelmetView(camera,controls,Math.PI);
+assert.equal(shadowFloorIsVisible(camera,floor),false,'no ceiling shadow when rolled upside down');
+camera.position.set(0,floor.position.y-.5,3);camera.up.set(0,1,0);camera.lookAt(controls.target);camera.updateMatrixWorld(true);
+assert.equal(shadowFloorIsVisible(camera,floor),false,'no ground shadow while viewing from underneath');
 const legacy=new THREE.Group();legacy.add(new THREE.Mesh(new THREE.BoxGeometry(),new THREE.MeshBasicMaterial()));const original=legacy.children[0];normalizeHelmetOrientation(legacy,'speedflex');assert.equal(legacy.children[0],original);
-console.log('PASS: actual Axiom orientation, side/rear decal raycasts, all six preset directions, exact perspective centering, preserved angle/zoom/roll, level at both poles, square viewport sizing, unchanged SpeedFlex orientation; rear bumper geometry/normals/colors; forward default logos; fixed shadow floor.');
+// The shared projection changes must also land on both SpeedFlex bumpers.
+const speedflexBytes=fs.readFileSync('public/SpeedFlex-draco.glb');
+// Geometry checks need no browser image decoder or embedded textures.
+const speedflexLoader=new GLTFLoader().setDRACOLoader(draco).register(()=>({name:'HeadlessGeometry',loadMaterial:()=>Promise.resolve(new THREE.MeshStandardMaterial())}));
+const speedflex=(await speedflexLoader.parseAsync(speedflexBytes.buffer.slice(speedflexBytes.byteOffset,speedflexBytes.byteOffset+speedflexBytes.byteLength),'')).scene;
+const speedflexBox=new THREE.Box3().setFromObject(speedflex),speedflexSize=speedflexBox.getSize(new THREE.Vector3()),speedflexCenter=speedflexBox.getCenter(new THREE.Vector3());
+const speedflexScale=1.8/Math.max(speedflexSize.x,speedflexSize.y,speedflexSize.z);speedflex.scale.setScalar(speedflexScale);speedflex.position.sub(speedflexCenter.multiplyScalar(speedflexScale));speedflex.updateMatrixWorld(true);
+const speedflexBumpers=[];speedflex.traverse(o=>{if(key(o.name)==='bumpers')o.traverse(child=>{if(child.isMesh)speedflexBumpers.push(child)})});
+assert.ok(speedflexBumpers.length);
+for(const slot of ['front','rear']){
+  const bounds=bumperSurfaceBounds(speedflex,speedflexBumpers,slot),sign=slot==='front'?1:-1;
+  const origin=speedflex.localToWorld(new THREE.Vector3(bounds.centerX,bounds.centerY,sign*(Math.max(Math.abs(bounds.minZ),Math.abs(bounds.maxZ))+1)));
+  assert.ok(new THREE.Raycaster(origin,new THREE.Vector3(0,0,-sign)).intersectObjects(bounds.meshes,false).length,'SpeedFlex '+slot+' bumper center');
+}
+console.log('PASS: actual Axiom orientation, side/rear decal raycasts, all six preset directions, exact perspective centering, preserved angle/zoom/roll, level at both poles, square viewport sizing, unchanged SpeedFlex orientation; rear bumper geometry/normals/colors; forward default logos; fixed shadow floor; visible rear sticker/bumper geometry; native artwork proportions; roll arrow direction; no ceiling shadow.');

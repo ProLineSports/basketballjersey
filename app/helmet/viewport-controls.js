@@ -4,9 +4,9 @@ export const HELMET_VIEWS = {
   sideA: { label: 'SIDE A', offset: [-3.2, 0.05, 0] },
   sideB: { label: 'SIDE B', offset: [3.2, 0.05, 0] },
   front: { label: 'FRONT', offset: [0, 0.03, 3.15] },
-  back: { label: 'BACK', offset: [0, 0.03, -3.15] },
+  back: { label: 'BACK', offset: [0, 0.65, -3.1] },
   top: { label: 'TOP', offset: [0, 3.15, 0.42] },
-  hero: { label: 'HERO', offset: [-2.18, 0.87, 1.88] },
+  hero: { label: 'HERO', offset: [-2.9, 0.42, 1.15] },
 };
 
 // The builder's wrap, stripe, logo raycasts and view presets all use +Z as

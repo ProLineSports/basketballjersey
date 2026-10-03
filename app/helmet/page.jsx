@@ -25,6 +25,10 @@ import {
   DEFAULT_STRIPE_WIDTH,
   separateAxiomRearBumper,
   positionShadowFloor,
+  textureFootprint,
+  rearStickerBaseHeight,
+  bumperSurfaceBounds,
+  shadowFloorIsVisible,
 } from './model-adjustments';
 import {
   getMetaConsent,
@@ -1252,6 +1256,44 @@ function createSelectionBoxTexture() {
   return tex;
 }
 
+const imageContentBoundsCache = new WeakMap();
+function imageContentBounds(image) {
+  const cached = imageContentBoundsCache.get(image);
+  if (cached?.src === image.src) return cached.bounds;
+  const width = image.naturalWidth || image.width;
+  const height = image.naturalHeight || image.height;
+  let bounds = { x:0, y:0, width, height };
+  // Remove transparent padding only. Opaque artwork backgrounds stay intact.
+  // Limit the scan resolution; the source image is still drawn at full resolution.
+  try {
+    const scan = document.createElement('canvas');
+    const ratio = Math.min(1, 2048 / Math.max(width, height));
+    scan.width = Math.max(1, Math.round(width * ratio));
+    scan.height = Math.max(1, Math.round(height * ratio));
+    const ctx = scan.getContext('2d', { willReadFrequently:true });
+    ctx.drawImage(image, 0, 0, scan.width, scan.height);
+    const pixels = ctx.getImageData(0, 0, scan.width, scan.height).data;
+    let minX = scan.width, minY = scan.height, maxX = -1, maxY = -1;
+    for (let y = 0; y < scan.height; y++) {
+      for (let x = 0; x < scan.width; x++) {
+        if (pixels[(y * scan.width + x) * 4 + 3] <= 2) continue;
+        minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+        minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+      }
+    }
+    if (maxX >= minX) {
+      minX = Math.max(0, minX - 1); minY = Math.max(0, minY - 1);
+      maxX = Math.min(scan.width - 1, maxX + 1); maxY = Math.min(scan.height - 1, maxY + 1);
+      bounds = { x:minX / scan.width * width, y:minY / scan.height * height,
+        width:(maxX - minX + 1) / scan.width * width, height:(maxY - minY + 1) / scan.height * height };
+    }
+  } catch {
+    // A cross-origin image without readable pixels still retains its native aspect.
+  }
+  imageContentBoundsCache.set(image, { src:image.src, bounds });
+  return bounds;
+}
+
 function createSideLogoTexturePack(image, options = {}) {
   if (!image) return null;
   const {
@@ -1281,16 +1323,17 @@ function createSideLogoTexturePack(image, options = {}) {
   const pad = 120;
   const fitW = canvasWidth - pad * 2;
   const fitH = canvasHeight - pad * 2;
-  const scale = Math.min(fitW / image.naturalWidth, fitH / image.naturalHeight);
-  const drawW = image.naturalWidth * scale;
-  const drawH = image.naturalHeight * scale;
+  const content = imageContentBounds(image);
+  const scale = Math.min(fitW / content.width, fitH / content.height);
+  const drawW = content.width * scale;
+  const drawH = content.height * scale;
 
   baseCtx.clearRect(0, 0, canvasWidth, canvasHeight);
   baseCtx.save();
   baseCtx.translate(canvasWidth / 2, canvasHeight / 2);
   if (rotate180) baseCtx.rotate(Math.PI);
   baseCtx.scale(mirror ? -1 : 1, 1);
-  baseCtx.drawImage(image, -drawW / 2, -drawH / 2, drawW, drawH);
+  baseCtx.drawImage(image, content.x, content.y, content.width, content.height, -drawW / 2, -drawH / 2, drawW, drawH);
   baseCtx.restore();
 
   const makeExpandedAlphaCanvas = (radiusPx, colorHex, opacityValue, cutCenter = false) => {
@@ -1360,7 +1403,9 @@ function createSideLogoTexturePack(image, options = {}) {
   rimTexture.needsUpdate = true;
 
   return {
-    aspect: image.naturalWidth / Math.max(1, image.naturalHeight),
+    aspect: content.width / Math.max(1, content.height),
+    contentWidthFraction: drawW / canvasWidth,
+    contentHeightFraction: drawH / canvasHeight,
     mainTexture,
     rimTexture,
   };
@@ -3713,7 +3758,7 @@ export default function HelmetBuilder({ demoMode = false }) {
     'rear-warning': { scale:2.70, rotation:0, across: 58, vertical:-38 },
     'rear-custom':  { scale:5.40, rotation:0, across:  0, vertical:20 },
     'bumper-front': { scale:6.6,  rotation:0, across:  0, vertical:0 },
-    'bumper-rear':  { scale:5.35, rotation:0, across:  0, vertical:-30 },
+    'bumper-rear':  { scale:5.35, rotation:0, across:  0, vertical:0 },
   });
   const editableDecalWorldFrameRef = useRef({});
   const selectedEditableDecalRef = useRef(null);
@@ -4044,7 +4089,7 @@ export default function HelmetBuilder({ demoMode = false }) {
   const [bumperLogoFrontAcross, setBumperLogoFrontAcross] = useState(0);
   const [bumperLogoRearAcross, setBumperLogoRearAcross] = useState(0);
   const [bumperLogoFrontVertical, setBumperLogoFrontVertical] = useState(0);
-  const [bumperLogoRearVertical, setBumperLogoRearVertical] = useState(-30);
+  const [bumperLogoRearVertical, setBumperLogoRearVertical] = useState(0);
   const [bumperLogoRearCurve, setBumperLogoRearCurve] = useState(-135);
   const [bumperLogoRevision, setBumperLogoRevision] = useState(0);
 
@@ -5642,6 +5687,7 @@ export default function HelmetBuilder({ demoMode = false }) {
     const animate = () => {
       frameRef.current = requestAnimationFrame(animate);
       controls.update();
+      floor.visible = floor.userData.shadowEnabled !== false && shadowFloorIsVisible(camera, floor);
       // Slowly orbit sparkle light for dynamic catchlights — pauses in place when toggled off
       if (sparkleRotatingRef.current) {
         t += 0.01;
@@ -6360,8 +6406,11 @@ export default function HelmetBuilder({ demoMode = false }) {
       if (!pack) return;
 
       const combinedScale = sideLogoScale * placement.scale;
-      const baseHeight = boundsModel.height * 1.00 * combinedScale;
-      const baseWidth = baseHeight;
+      // Artwork dimensions are WORLD units, just like the projection shader.
+      // Fit the actual alpha-cropped artwork, rather than its padded texture canvas.
+      const artworkHeight = boundsWorld.size.y * 0.40 * combinedScale;
+      const artworkWidth = Math.min(artworkHeight * pack.aspect, boundsWorld.size.z * 0.68 * combinedScale);
+      const { width:baseWidth, height:baseHeight } = textureFootprint(artworkWidth, pack);
 
       const { logoCenter, worldNormal, frameRight, frameUp, frameQuat } = frame;
 
@@ -6370,7 +6419,7 @@ export default function HelmetBuilder({ demoMode = false }) {
       // Keep logo decals clearly above the shell / wrap / stripe depth layers.
       // This remains visually flush, but prevents grazing-angle depth clipping.
       const physicalDepth = Math.max(boundsModel.width * 0.0022, 0.00080);
-      const projectionDepth = Math.max(baseHeight * 0.40, boundsModel.width * 0.14);
+      const projectionDepth = Math.max(baseHeight * 0.60, boundsWorld.size.x * 0.28);
       const medianOriginLocal = new THREE.Vector3(boundsModel.centerX, boundsModel.centerY, boundsModel.centerZ);
       const medianOriginWorld = model.localToWorld(medianOriginLocal.clone());
       const medianNormalWorld = new THREE.Vector3(1, 0, 0).transformDirection(model.matrixWorld).normalize();
@@ -6840,7 +6889,7 @@ export default function HelmetBuilder({ demoMode = false }) {
         // Rear view is mirrored relative to model-local X, so invert this mapping
         // to make the Across slider follow the user's screen direction.
         boundsModel.centerX - (across / 100) * boundsModel.width * 0.34,
-        boundsModel.minY + boundsModel.height * (0.34 + (vertical / 100) * 0.24),
+        boundsModel.minY + boundsModel.height * (rearStickerBaseHeight(activeHelmetConfig.family) + (vertical / 100) * 0.24),
         boundsModel.minZ,
       );
 
@@ -6910,9 +6959,8 @@ export default function HelmetBuilder({ demoMode = false }) {
       const pack = getPack(slot, image);
       if (!pack) return;
 
-      const baseHeight = boundsModel.width * 0.072 * scale;
-      const widthCompensation = slot === 'custom' ? 1.50 : 1.0;
-      const baseWidth = baseHeight * THREE.MathUtils.clamp(pack.aspect, 0.45, 3.5) * widthCompensation;
+      const artworkWidth = boundsWorld.size.x * (slot === 'custom' ? 0.26 : 0.17) * scale / (slot === 'custom' ? 5.4 : 5.0);
+      const { width:baseWidth, height:baseHeight } = textureFootprint(artworkWidth, pack);
 
       const normalMatrix = new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld);
       const fallback = new THREE.Vector3(0, 0, -1).transformDirection(model.matrixWorld).normalize();
@@ -6933,7 +6981,7 @@ export default function HelmetBuilder({ demoMode = false }) {
       // flag, and warning decals on the same surface plane as other decals and avoids
       // the angle-dependent rectangular clipping that came from overlapping transparent
       // full-surface overlays.
-      const projectionDepth = Math.max(boundsModel.depth * 0.20, baseHeight * 0.90, 0.06);
+      const projectionDepth = Math.max(boundsWorld.size.z * 0.20, baseHeight * 0.90, 0.06);
       const shadowGeo = new DecalGeometry(
         hit.object,
         projectorPosition,
@@ -6948,7 +6996,7 @@ export default function HelmetBuilder({ demoMode = false }) {
       );
       // Rear decals are true curved DecalGeometry. Give the decal film a stable
       // separation from shell/wrap depth so sections cannot disappear by view angle.
-      const lift = Math.max(boundsModel.width * 0.0022, 0.00080);
+      const lift = Math.max(boundsWorld.size.x * 0.0022, 0.00080);
       offsetGeometryAlongNormals(shadowGeo, lift * 0.68);
       offsetGeometryAlongNormals(mainGeo, lift * 1.00);
 
@@ -7138,31 +7186,27 @@ export default function HelmetBuilder({ demoMode = false }) {
     };
     cleanup();
 
+    const slotBounds = {
+      front:bumperSurfaceBounds(model, bumperMeshes, 'front'),
+      rear:bumperSurfaceBounds(model, bumperMeshes, 'rear'),
+    };
     const getBumperHit = (slot, across, vertical) => {
+      const bounds = slotBounds[slot];
+      if (!bounds) return null;
       const isFront = slot === 'front';
       const localTarget = new THREE.Vector3(
-        boundsModel.centerX + (across / 100) * boundsModel.width * 0.30,
-        isFront
-          ? boundsModel.maxY - boundsModel.height * (0.10 - (vertical / 100) * 0.12)
-          : boundsModel.minY + boundsModel.height * (0.10 + (vertical / 100) * 0.12),
-        isFront ? boundsModel.maxZ : boundsModel.minZ,
+        bounds.centerX + (across / 100) * bounds.width * 0.30,
+        bounds.centerY + (vertical / 100) * bounds.height * 0.35,
+        isFront ? bounds.maxZ : bounds.minZ,
       );
       const targetWorld = model.localToWorld(localTarget.clone());
-      const outwardLocal = new THREE.Vector3(0, 0, isFront ? 1 : -1);
-      const outwardWorld = outwardLocal.clone().transformDirection(model.matrixWorld).normalize();
+      const outwardWorld = new THREE.Vector3(0, 0, isFront ? 1 : -1).transformDirection(model.matrixWorld).normalize();
       const rayOrigin = targetWorld.clone().addScaledVector(outwardWorld, boundsWorld.size.length() * 0.6);
-      const raycaster = new THREE.Raycaster(
-        rayOrigin,
-        outwardWorld.clone().multiplyScalar(-1),
-        0,
-        boundsWorld.size.length() * 1.5
-      );
-      const hits = raycaster.intersectObjects(bumperMeshes, false);
-      if (!hits.length) return null;
-      const modelInverse = new THREE.Matrix4().copy(model.matrixWorld).invert();
-      return hits.find(hit => {
+      const raycaster = new THREE.Raycaster(rayOrigin, outwardWorld.clone().multiplyScalar(-1), 0, boundsWorld.size.length() * 1.5);
+      const modelInverse = model.matrixWorld.clone().invert();
+      return raycaster.intersectObjects(bounds.meshes, false).find(hit => {
         const local = hit.point.clone().applyMatrix4(modelInverse);
-        return isFront ? local.z >= boundsModel.centerZ : local.z <= boundsModel.centerZ;
+        return isFront ? local.z >= bounds.centerZ : local.z <= bounds.centerZ;
       }) || null;
     };
 
@@ -7204,18 +7248,20 @@ export default function HelmetBuilder({ demoMode = false }) {
       const pack = cache?.pack;
       if (!pack) return;
 
-      let baseHeight = boundsModel.width * (isFront ? 0.068 : 0.080) * scaleValue;
-      let baseWidth = baseHeight * THREE.MathUtils.clamp(pack.aspect, 0.55, 5.0);
+      const surfaceBounds = slotBounds[slot];
+      const scaleRatio = scaleValue / (isFront ? 6.6 : 5.35);
+      const artworkHeight = Math.min(surfaceBounds.worldSize.y * 0.58, surfaceBounds.worldSize.x * 0.72 / pack.aspect) * scaleRatio;
+      const { width:baseWidth, height:baseHeight } = textureFootprint(artworkHeight * pack.aspect, pack);
       // Intentionally no max-width clamp. The physical bumper geometry is the mask,
       // so scaling can continue smoothly until the user visually fills/crops the bumper.
 
-      // Front bumper uses the carrier-surface projection because it tracks that part's
-      // geometry cleanly, but the cylindrical wrap visually compresses artwork width in
-      // the common frontal/hero views. Counter that with a view-calibrated horizontal
-      // expansion while preserving the uploaded artwork's native aspect relationship.
+      // Fit the visible artwork to this bumper's own bounds. The padded texture
+      // rectangle retains its canvas aspect, preserving the original logo proportions.
       if (isFront) {
         const center = hit.point.clone();
-        const frontNormal = new THREE.Vector3(0, 0, 1).transformDirection(model.matrixWorld).normalize();
+        const normalMatrix = new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld);
+        const frontNormal = hit.face?.normal?.clone().applyMatrix3(normalMatrix).normalize()
+          || new THREE.Vector3(0, 0, 1).transformDirection(model.matrixWorld).normalize();
         const modelUp = new THREE.Vector3(0, 1, 0).transformDirection(model.matrixWorld).normalize();
         let right = new THREE.Vector3().crossVectors(modelUp, frontNormal).normalize();
         if (right.lengthSq() < 0.000001) right = new THREE.Vector3(1, 0, 0).transformDirection(model.matrixWorld).normalize();
@@ -7227,13 +7273,10 @@ export default function HelmetBuilder({ demoMode = false }) {
           up.applyAxisAngle(frontNormal, rot);
         }
 
-        // Keep the logo's vertical size true and only compensate horizontally for the
-        // visual narrowing introduced by the bumper's curvature.
-        const frontAspectCompensation = 1.30;
-        const projectedWidth = baseWidth * frontAspectCompensation;
+        const projectedWidth = baseWidth;
         const projectedHeight = baseHeight;
-        const projectionDepth = Math.max(boundsModel.depth * 0.072, projectedHeight * 0.40);
-        const lift = Math.max(boundsModel.width * 0.00045, 0.00018);
+        const projectionDepth = Math.max(surfaceBounds.worldSize.z * 0.35, projectedHeight * 0.40);
+        const lift = Math.max(surfaceBounds.width * 0.00045, 0.00018);
 
         const shadowUniforms = {
           center:{ value:center }, right:{ value:right }, up:{ value:up }, normal:{ value:frontNormal },
@@ -7262,8 +7305,8 @@ export default function HelmetBuilder({ demoMode = false }) {
           installSideLogoSurfaceProjection(mainMat, mainUniforms, 'bumper-logo-front-main-surface-v2');
         applyDecalFinishToMaterials([mainMat], scene, bumperLogoFinishRef.current);
 
-        const shadowMeshes = createCarrierSurfaceLogoMeshes(scene, bumperMeshes, shadowMat, 'bumper-front', 'Shadow', 34);
-        const mainMeshes = createCarrierSurfaceLogoMeshes(scene, bumperMeshes, mainMat, 'bumper-front', 'Artwork', 35);
+        const shadowMeshes = createCarrierSurfaceLogoMeshes(scene, slotBounds.front.meshes, shadowMat, 'bumper-front', 'Shadow', 34);
+        const mainMeshes = createCarrierSurfaceLogoMeshes(scene, slotBounds.front.meshes, mainMat, 'bumper-front', 'Artwork', 35);
         const frameQuat = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, frontNormal));
         const frameCenter = center.clone().addScaledVector(frontNormal, lift * 1.6);
         const halfW = projectedWidth * 0.50, halfH = projectedHeight * 0.50;
@@ -7307,7 +7350,7 @@ export default function HelmetBuilder({ demoMode = false }) {
       helper.lookAt(projectorPosition.clone().add(worldNormal));
       helper.rotateZ(rotationValue * Math.PI / 180);
       const orientation = new THREE.Euler().setFromQuaternion(helper.quaternion, 'XYZ');
-      const projectorDepth = Math.max(boundsModel.depth * 0.20, baseHeight * 0.90, 0.06);
+      const projectorDepth = Math.max(surfaceBounds.worldSize.z * 0.50, baseHeight * 0.90, 0.06);
 
       const shadowGeo = new DecalGeometry(
         hit.object,
@@ -7321,7 +7364,7 @@ export default function HelmetBuilder({ demoMode = false }) {
         orientation,
         new THREE.Vector3(baseWidth, baseHeight, projectorDepth),
       );
-      const lift = Math.max(boundsModel.width * 0.00085, 0.00030);
+      const lift = Math.max(surfaceBounds.worldSize.x * 0.00085, 0.00030);
       offsetGeometryAlongNormals(shadowGeo, lift * 0.25);
       offsetGeometryAlongNormals(mainGeo, lift * 0.85);
 
@@ -7435,6 +7478,10 @@ export default function HelmetBuilder({ demoMode = false }) {
     const shellBounds = computeRootsBoundsInModelSpace(model, shellRoots);
     const bumperBounds = computeRootsBoundsInModelSpace(model, bumperRoots);
     if (!shellBounds || !bumperBounds) return;
+    const bumperDragBounds = {
+      front:bumperSurfaceBounds(model, bumperMeshes, 'front'),
+      rear:bumperSurfaceBounds(model, bumperMeshes, 'rear'),
+    };
 
     const pointer = new THREE.Vector2();
     const raycaster = new THREE.Raycaster();
@@ -7531,11 +7578,12 @@ export default function HelmetBuilder({ demoMode = false }) {
         const local=hit.point.clone(); model.worldToLocal(local);
         if (id.startsWith('rear-')) {
           placement.across=THREE.MathUtils.clamp(-((local.x-shellBounds.centerX)/(shellBounds.width*0.34))*100,-80,80);
-          placement.vertical=THREE.MathUtils.clamp(((((local.y-shellBounds.minY)/shellBounds.height)-0.34)/0.24)*100,-80,80);
+          placement.vertical=THREE.MathUtils.clamp(((((local.y-shellBounds.minY)/shellBounds.height)-rearStickerBaseHeight(activeHelmetConfig.family))/0.24)*100,-80,80);
         } else {
-          placement.across=THREE.MathUtils.clamp(((local.x-bumperBounds.centerX)/(bumperBounds.width*0.30))*100,-80,80);
-          const baseY=id==='bumper-front'?bumperBounds.maxY-bumperBounds.height*0.10:bumperBounds.minY+bumperBounds.height*0.10;
-          placement.vertical=THREE.MathUtils.clamp(((local.y-baseY)/(bumperBounds.height*0.12))*100,-80,80);
+          const bounds=bumperDragBounds[id==='bumper-front'?'front':'rear'];
+          if (!bounds) return;
+          placement.across=THREE.MathUtils.clamp(((local.x-bounds.centerX)/(bounds.width*0.30))*100,-80,80);
+          placement.vertical=THREE.MathUtils.clamp(((local.y-bounds.centerY)/(bounds.height*0.35))*100,-80,80);
         }
         canvas.style.cursor='move';
       } else if (interaction.action==='scale') {
@@ -7596,7 +7644,10 @@ export default function HelmetBuilder({ demoMode = false }) {
     const scene = sceneRef.current;
     if (!scene) return;
 
-    if (scene.userData.floor) scene.userData.floor.visible = showShadows;
+    if (scene.userData.floor) {
+      scene.userData.floor.userData.shadowEnabled = showShadows;
+      scene.userData.floor.visible = showShadows && shadowFloorIsVisible(cameraRef.current, scene.userData.floor);
+    }
 
     if (scene.userData.floorShadowMaterial) {
       scene.userData.floorShadowMaterial.opacity = shadowOpacity;
@@ -8656,7 +8707,7 @@ export default function HelmetBuilder({ demoMode = false }) {
     setBumperLogoRearScale(rearBumper.scale ?? 5.35);
     setBumperLogoRearRotation(rearBumper.rotation ?? 0);
     setBumperLogoRearAcross(rearBumper.across ?? 0);
-    setBumperLogoRearVertical(rearBumper.vertical ?? -30);
+    setBumperLogoRearVertical(rearBumper.vertical ?? 0);
     setBumperLogoRearCurve(rearBumper.curve ?? -135);
     setBumperLogoRearLocked(!!rearBumper.locked);
 
@@ -10538,9 +10589,9 @@ export default function HelmetBuilder({ demoMode = false }) {
               </div>
               <div style={{ display:'grid', gridTemplateColumns:'repeat(3, minmax(0,1fr))', gap:6, marginBottom:8 }}>
                 {[
-                  { label:'↶ ROLL', title:'Roll left 15 degrees', action:() => rollView(-15) },
+                  { label:'↶ ROLL', title:'Roll left 15 degrees', action:() => rollView(15) },
                   { label:'LEVEL', title:'Level the view without changing its angle or zoom', action:levelView },
-                  { label:'ROLL ↷', title:'Roll right 15 degrees', action:() => rollView(15) },
+                  { label:'ROLL ↷', title:'Roll right 15 degrees', action:() => rollView(-15) },
                 ].map(control => (
                   <button type="button" key={control.label} title={control.title} aria-label={control.title} onClick={control.action} disabled={!loaded}
                     style={{ background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.10)', borderRadius:7, padding:'8px 4px', cursor:loaded?'pointer':'default', opacity:loaded?1:0.45, color:'#d1d5db', fontSize:10, fontWeight:700, fontFamily:"'Barlow Condensed',sans-serif" }}>

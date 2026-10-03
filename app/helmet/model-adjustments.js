@@ -2,7 +2,61 @@ import * as THREE from 'three';
 import { visibleHelmetBounds } from './viewport-controls.js';
 
 export const DEFAULT_SIDE_LOGO_PLACEMENT = Object.freeze({ yNorm: 0.65, zNorm: 0.03, scale: 1, rotation: 0 });
-export const DEFAULT_STRIPE_WIDTH = 2.35;
+export const DEFAULT_STRIPE_WIDTH = 1.5;
+
+export function textureFootprint(artworkWidth, pack) {
+  const artworkHeight = artworkWidth / pack.aspect;
+  return {
+    width: artworkWidth / pack.contentWidthFraction,
+    height: artworkHeight / pack.contentHeightFraction,
+  };
+}
+
+export function rearStickerBaseHeight(family) {
+  return family === 'axiom' ? 0.59 : 0.34;
+}
+
+export function bumperSurfaceBounds(model, meshes, slot) {
+  model.updateWorldMatrix(true, true);
+  const named = meshes.filter(mesh => partKey(mesh.name) === `${slot}bumper`);
+  const sources = named.length ? named : meshes;
+  const inverse = model.matrixWorld.clone().invert();
+  const point = new THREE.Vector3();
+  const all = new THREE.Box3();
+  sources.forEach(mesh => {
+    const transform = new THREE.Matrix4().multiplyMatrices(inverse, mesh.matrixWorld);
+    const positions = mesh.geometry.attributes.position;
+    for (let i = 0; i < positions.count; i++) {
+      all.expandByPoint(point.fromBufferAttribute(positions, i).applyMatrix4(transform));
+    }
+  });
+  const bounds = new THREE.Box3();
+  const middleZ = all.getCenter(new THREE.Vector3()).z;
+  sources.forEach(mesh => {
+    const transform = new THREE.Matrix4().multiplyMatrices(inverse, mesh.matrixWorld);
+    const positions = mesh.geometry.attributes.position;
+    for (let i = 0; i < positions.count; i++) {
+      point.fromBufferAttribute(positions, i).applyMatrix4(transform);
+      if (named.length || (slot === 'front' ? point.z >= middleZ : point.z <= middleZ)) bounds.expandByPoint(point);
+    }
+  });
+  if (bounds.isEmpty()) return null;
+  const size = bounds.getSize(new THREE.Vector3());
+  const center = bounds.getCenter(new THREE.Vector3());
+  const worldSize = model.getWorldScale(new THREE.Vector3()).multiply(size);
+  return { meshes:sources, minX:bounds.min.x, maxX:bounds.max.x, minY:bounds.min.y, maxY:bounds.max.y,
+    minZ:bounds.min.z, maxZ:bounds.max.z, centerX:center.x, centerY:center.y, centerZ:center.z,
+    width:size.x, height:size.y, depth:size.z, worldSize };
+}
+
+export function shadowFloorIsVisible(camera, floor) {
+  if (!camera || !floor) return false;
+  camera.updateMatrixWorld(true);
+  // Orbiting beneath the ground or rolling upside down would turn its projection
+  // into a ceiling. Keep the studio plane fixed and omit that ground-only shadow.
+  const screenUp = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
+  return camera.position.y > floor.position.y + 0.01 && screenUp.y >= -0.02;
+}
 
 const partKey = name => name.toLowerCase().replace(/[^a-z0-9]/g, '');
 
