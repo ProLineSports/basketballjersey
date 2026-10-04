@@ -34,12 +34,14 @@ export function strokeDecalCanvas(source, { enabled = false, thickness = 0, colo
 }
 
 // Artwork-space edge shading follows the film outline, including holes in letters.
-// Its footprint is based on visible artwork height, so wide wordmarks and small
-// rear decals retain the same restrained vinyl edge instead of a broad glow.
+// Side/rear films use a fixed two-pixel contact edge. Preserve the approved bumper
+// profile separately, including its artwork-relative sizing.
+export const DECAL_EDGE_SETTINGS = Object.freeze({ distance:2, blur:2, shadowOpacity:0.85, highlightOpacity:0.90 });
 export function raisedDecalCanvases(source, artworkHeight, { shadowProfile = 'decal', footprint = null } = {}) {
   const canvas = () => matchingCanvas(source);
   const boundary = footprint || source;
-  const edge = Math.max(1, artworkHeight * 0.009);
+  const bumper = shadowProfile === 'bumper';
+  const edge = bumper ? Math.max(1, artworkHeight * 0.009) : DECAL_EDGE_SETTINGS.distance;
   const innerEdge = (dx, dy, color, opacity) => {
     const result = canvas(), ctx = result.getContext('2d');
     ctx.drawImage(boundary, 0, 0);
@@ -52,20 +54,29 @@ export function raisedDecalCanvases(source, artworkHeight, { shadowProfile = 'de
   };
   const artwork = canvas(), artCtx = artwork.getContext('2d');
   artCtx.drawImage(source, 0, 0);
-  artCtx.drawImage(innerEdge(edge, -edge, '#000000', 0.24), 0, 0);
-  artCtx.drawImage(innerEdge(-edge, edge, '#ffffff', 0.32), 0, 0);
+  if (bumper) {
+    artCtx.drawImage(innerEdge(edge, -edge, '#000000', 0.24), 0, 0);
+    artCtx.drawImage(innerEdge(-edge, edge, '#ffffff', 0.32), 0, 0);
+  } else {
+    // Apply opacity once, after masking, to avoid squaring alpha in source-in.
+    artCtx.globalAlpha = DECAL_EDGE_SETTINGS.highlightOpacity;
+    artCtx.drawImage(innerEdge(-edge, edge, '#ffffff', 1), 0, 0);
+    artCtx.globalAlpha = 1;
+  }
   // Inner-edge compositing adds opacity at antialiased boundaries; restore the
   // film silhouette. A transparent stroke still retains its thin edge reflection.
   artCtx.globalCompositeOperation = 'destination-in'; artCtx.drawImage(boundary, 0, 0);
   const shadow = canvas(), shadowCtx = shadow.getContext('2d');
-  const bumper = shadowProfile === 'bumper';
-  const distance = edge * (bumper ? 1.4 : 0.45);
-  shadowCtx.filter = `blur(${Math.max(0.35, edge * (bumper ? 0.65 : 0.18))}px)`;
+  const distance = bumper ? edge * 1.4 : DECAL_EDGE_SETTINGS.distance;
+  shadowCtx.filter = `blur(${bumper ? Math.max(0.35, edge * 0.65) : DECAL_EDGE_SETTINGS.blur}px)`;
   shadowCtx.drawImage(boundary, -distance, distance);
   shadowCtx.filter = 'none'; shadowCtx.globalCompositeOperation = 'source-in';
-  shadowCtx.globalAlpha = 0.7; shadowCtx.fillStyle = '#000000';
+  shadowCtx.globalAlpha = bumper ? 0.7 : 1; shadowCtx.fillStyle = '#000000';
   shadowCtx.fillRect(0, 0, shadow.width, shadow.height);
   shadowCtx.globalAlpha = 1; shadowCtx.globalCompositeOperation = 'destination-out';
   shadowCtx.drawImage(boundary, 0, 0);
-  return { artwork, shadow };
+  if (bumper) return { artwork, shadow };
+  const contactShadow = canvas(), contactCtx = contactShadow.getContext('2d');
+  contactCtx.globalAlpha = DECAL_EDGE_SETTINGS.shadowOpacity; contactCtx.drawImage(shadow, 0, 0);
+  return { artwork, shadow:contactShadow };
 }

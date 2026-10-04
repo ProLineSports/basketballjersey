@@ -25,7 +25,7 @@ import {
   squareViewportSize,
 } from './viewport-controls';
 import {
-  DEFAULT_SIDE_LOGO_PLACEMENT,
+  sideLogoDefaults,
   rearDecalDefaults,
   rearBumperDefaultVertical,
   DEFAULT_STRIPE_WIDTH,
@@ -1333,6 +1333,11 @@ function createSideLogoTexturePack(image, options = {}) {
   baseCtx.scale(mirror ? -1 : 1, 1);
   baseCtx.drawImage(image, content.x, content.y, content.width, content.height, -drawW / 2, -drawH / 2, drawW, drawH);
   baseCtx.restore();
+  if (options.tintColor) {
+    baseCtx.globalCompositeOperation = 'source-in';
+    baseCtx.fillStyle = options.tintColor; baseCtx.fillRect(0, 0, canvasWidth, canvasHeight);
+    baseCtx.globalCompositeOperation = 'source-over';
+  }
 
   const stroked = strokeDecalCanvas(baseCanvas, {
     enabled:strokeEnabled, thickness:strokeThickness, color:strokeColor, opacity:strokeOpacity,
@@ -1501,7 +1506,7 @@ function createCarrierSurfaceLogoMeshes(scene, sourceMeshes, material, side, lay
   return meshes;
 }
 
-const cloneDefaultSideLogoPlacement = () => ({ ...DEFAULT_SIDE_LOGO_PLACEMENT });
+const cloneDefaultSideLogoPlacement = family => ({ ...sideLogoDefaults(family) });
 
 const FINISHES = [
   { id: 'gloss',      label: 'Gloss',         roughness: 0.05, metalness: 0.1,  clearcoat: 1.0,  clearcoatRoughness: 0.05, iridescence: 0.0 },
@@ -4001,10 +4006,23 @@ export default function HelmetBuilder({ demoMode = false }) {
 
   // Keep adjustments with their helmet family when switching models.
   const rearPlacementByFamilyRef = useRef({});
+  const sidePlacementByFamilyRef = useRef({});
   const selectHelmetModel = (selection) => {
     const currentFamily = activeHelmetConfig.family;
     const nextFamily = HELMET_CONFIGS[selection].family;
     if (currentFamily !== nextFamily) {
+      sidePlacementByFamilyRef.current[currentFamily] = {
+        left:{ ...sideLogoPlacementRef.current.left }, right:{ ...sideLogoPlacementRef.current.right },
+        scale:sideLogoScale, frontBack:sideLogoFrontBack, upDown:sideLogoUpDown,
+      };
+      const nextSide = sidePlacementByFamilyRef.current[nextFamily] || {
+        left:cloneDefaultSideLogoPlacement(nextFamily), right:cloneDefaultSideLogoPlacement(nextFamily),
+        scale:1, frontBack:0, upDown:0,
+      };
+      sideLogoPlacementRef.current = { left:{ ...nextSide.left }, right:{ ...nextSide.right } };
+      setSideLogoScale(nextSide.scale); setSideLogoFrontBack(nextSide.frontBack); setSideLogoUpDown(nextSide.upDown);
+      clearSideLogoUndoHistory();
+      setSideLogoRevision(value => value + 1);
       rearPlacementByFamilyRef.current[currentFamily] = {
         flag:{ scale:rearFlagScale, rotation:rearFlagRotation, across:rearFlagAcross, vertical:rearFlagVertical },
         warning:{ scale:rearWarningScale, rotation:rearWarningRotation, across:rearWarningAcross, vertical:rearWarningVertical },
@@ -4827,10 +4845,10 @@ export default function HelmetBuilder({ demoMode = false }) {
       target.setPreview(objectUrl);
       target.setName(file.name);
       if (slot === 'shared') {
-        sideLogoPlacementRef.current.left = cloneDefaultSideLogoPlacement();
-        sideLogoPlacementRef.current.right = cloneDefaultSideLogoPlacement();
+        sideLogoPlacementRef.current.left = cloneDefaultSideLogoPlacement(activeHelmetConfig.family);
+        sideLogoPlacementRef.current.right = cloneDefaultSideLogoPlacement(activeHelmetConfig.family);
       } else if (sideLogoPlacementRef.current[slot]) {
-        sideLogoPlacementRef.current[slot] = cloneDefaultSideLogoPlacement();
+        sideLogoPlacementRef.current[slot] = cloneDefaultSideLogoPlacement(activeHelmetConfig.family);
       }
       clearSideLogoUndoHistory();
       setSideLogoError('');
@@ -4841,7 +4859,7 @@ export default function HelmetBuilder({ demoMode = false }) {
       setSideLogoError('That side logo file could not be read. Please try another PNG or JPEG.');
     };
     img.src = objectUrl;
-  }, [clearPersistedDesignAsset, clearSideLogoUndoHistory]);
+  }, [clearPersistedDesignAsset, clearSideLogoUndoHistory, activeHelmetConfig.family]);
 
   const handleSharedSideLogoUpload = useCallback((event) => {
     const file = event.target.files?.[0];
@@ -4995,11 +5013,11 @@ export default function HelmetBuilder({ demoMode = false }) {
   useEffect(() => {
     if (sideLogoIndependent) return;
     const sourceSide = selectedSideLogoRef.current === 'right' ? 'right' : 'left';
-    const sourcePlacement = sideLogoPlacementRef.current[sourceSide] || cloneDefaultSideLogoPlacement();
+    const sourcePlacement = sideLogoPlacementRef.current[sourceSide] || cloneDefaultSideLogoPlacement(activeHelmetConfig.family);
     sideLogoPlacementRef.current.left = { ...sourcePlacement };
     sideLogoPlacementRef.current.right = { ...sourcePlacement };
     setSideLogoRevision(v => v + 1);
-  }, [sideLogoIndependent]);
+  }, [sideLogoIndependent, activeHelmetConfig.family]);
 
   const applyViewPreset = useCallback((presetId) => {
     const camera = cameraRef.current;
@@ -6411,7 +6429,7 @@ export default function HelmetBuilder({ demoMode = false }) {
         map: pack.rimTexture,
         transparent: true,
         alphaTest: 0.01,
-        opacity: 0.43,
+        opacity: 1,
         side: THREE.DoubleSide,
         depthWrite: false,
         depthTest: true,
@@ -6850,9 +6868,9 @@ export default function HelmetBuilder({ demoMode = false }) {
       return { point:targetWorld, face:null, object:shellMeshes[0] };
     };
 
-    const getPack = (slot, image) => {
+    const getPack = (slot, image, color) => {
       if (!image) return null;
-      const key = image.src || `${image.width}x${image.height}`;
+      const key = `${image.src || `${image.width}x${image.height}`}:${slot === 'warning' ? color : ''}`;
       let cache = rearStickerPackCacheRef.current[slot];
 
       if (!cache || cache.key !== key) {
@@ -6861,6 +6879,7 @@ export default function HelmetBuilder({ demoMode = false }) {
 
         const pack = createSideLogoTexturePack(image, {
           strokeEnabled:false,
+          tintColor:slot === 'warning' ? color : null,
           // Rear decals are small in the final frame. The former 3072x1536 pair
           // consumed tens of MB per decal (more with mipmaps) without visible benefit.
           textureWidth:Math.min(1024, rendererRef.current?.capabilities?.maxTextureSize || 1024),
@@ -6888,7 +6907,7 @@ export default function HelmetBuilder({ demoMode = false }) {
       const hit = getRearHit(across, vertical);
       if (!hit) return;
 
-      const pack = getPack(slot, image);
+      const pack = getPack(slot, image, color);
       if (!pack) return;
 
       const artworkWidth = boundsWorld.size.x * (slot === 'custom' ? 0.26 : 0.17) * scale / (slot === 'custom' ? 5.4 : 5.0);
@@ -6939,7 +6958,7 @@ export default function HelmetBuilder({ demoMode = false }) {
         map:pack.rimTexture,
         transparent:true,
         alphaTest:0.01,
-        opacity:0.22,
+        opacity:1,
         side:THREE.DoubleSide,
         depthWrite:false,
         depthTest:true,
@@ -6951,7 +6970,7 @@ export default function HelmetBuilder({ demoMode = false }) {
       });
 
       const mainMat = new THREE.MeshPhysicalMaterial({
-        color:new THREE.Color(color),
+        color:0xffffff,
         map:pack.mainTexture,
         transparent:true,
         alphaTest:0.01,
@@ -7040,6 +7059,7 @@ export default function HelmetBuilder({ demoMode = false }) {
     rearFlagAcross,
     rearFlagVertical,
     rearWarningEnabled,
+    rearWarningColor,
     rearWarningScale,
     rearWarningRotation,
     rearWarningAcross,
@@ -7052,13 +7072,6 @@ export default function HelmetBuilder({ demoMode = false }) {
     selectedEditableDecal,
     editableDecalRevision,
   ]);
-
-  useEffect(() => {
-    const warningMat = rearStickerMainMaterialsRef.current.warning;
-    if (!warningMat) return;
-    warningMat.color.set(rearWarningColor);
-    warningMat.needsUpdate = true;
-  }, [rearWarningColor, rearStickerRevision, loaded]);
 
   useEffect(() => () => {
     Object.values(rearStickerPackCacheRef.current).forEach(cache => {
@@ -8391,6 +8404,7 @@ export default function HelmetBuilder({ demoMode = false }) {
     const savedFamily = (HELMET_CONFIGS[savedHelmetSelection] || HELMET_CONFIGS.speedflex).family;
     const savedRearDefaults = rearDecalDefaults(savedFamily);
     rearPlacementByFamilyRef.current = {};
+    sidePlacementByFamilyRef.current = {};
     setHelmetSelection(HELMET_CONFIGS[savedHelmetSelection] ? savedHelmetSelection : 'speedflex');
     const getSavedAssetUrl = (slot) => {
       const path = assetManifest[slot]?.path;
@@ -8570,8 +8584,8 @@ export default function HelmetBuilder({ demoMode = false }) {
     setSideLogoStrokeThickness(sideLogos.strokeThickness ?? 8);
     setSideLogoStrokeOpacity(sideLogos.strokeOpacity ?? 0.2);
     setSideLogoLocked(!!sideLogos.locked);
-    sideLogoPlacementRef.current.left = { ...cloneDefaultSideLogoPlacement(), ...sideLogos.placements?.left };
-    sideLogoPlacementRef.current.right = { ...cloneDefaultSideLogoPlacement(), ...sideLogos.placements?.right };
+    sideLogoPlacementRef.current.left = { ...cloneDefaultSideLogoPlacement(savedFamily), ...sideLogos.placements?.left };
+    sideLogoPlacementRef.current.right = { ...cloneDefaultSideLogoPlacement(savedFamily), ...sideLogos.placements?.right };
     clearSideLogoUndoHistory();
     setSideLogoRevision(value => value + 1);
 
@@ -10101,8 +10115,8 @@ export default function HelmetBuilder({ demoMode = false }) {
                   <button
                     onClick={() => {
                       clearSideLogoUndoHistory();
-                      sideLogoPlacementRef.current.left = cloneDefaultSideLogoPlacement();
-                      sideLogoPlacementRef.current.right = cloneDefaultSideLogoPlacement();
+                      sideLogoPlacementRef.current.left = cloneDefaultSideLogoPlacement(activeHelmetConfig.family);
+                      sideLogoPlacementRef.current.right = cloneDefaultSideLogoPlacement(activeHelmetConfig.family);
                       setSelectedSideLogo(null);
                       selectedSideLogoRef.current = null;
                       setSideLogoRevision(v => v + 1);

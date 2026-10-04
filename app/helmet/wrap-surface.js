@@ -69,6 +69,14 @@ export function createWrapSurfaceSampler(roots) {
   };
   const tree = build(faces.map((_, index) => index));
   const closest = new THREE.Vector3(), bestPoint = new THREE.Vector3(), barycentric = new THREE.Vector3();
+  const ray = new THREE.Ray(), rayPoint = new THREE.Vector3();
+  const rayCenter = new THREE.Vector3(0.5, 0.5, 0.5);
+  const interpolate = (face, point, result) => {
+    face.triangle.getBarycoord(point, barycentric);
+    result.set(0, 0);
+    face.uv.forEach((uv, index) => result.addScaledVector(uv, barycentric.getComponent(index)));
+    return result;
+  };
   const boxDistance = (box, point) => {
     const x = Math.max(box.min.x - point.x, 0, point.x - box.max.x);
     const y = Math.max(box.min.y - point.y, 0, point.y - box.max.y);
@@ -96,10 +104,27 @@ export function createWrapSurfaceSampler(roots) {
         visit(leftFirst ? node.right : node.left);
       };
       visit(tree);
-      bestFace.triangle.getBarycoord(bestPoint, barycentric);
-      result.set(0, 0);
-      bestFace.uv.forEach((uv, index) => result.addScaledVector(uv, barycentric.getComponent(index)));
-      return result;
+      return interpolate(bestFace, bestPoint, result);
+    },
+    sampleRadial(point, result = new THREE.Vector2()) {
+      ray.origin.copy(rayCenter);
+      ray.direction.copy(point).sub(rayCenter).normalize();
+      let bestDistance = -Infinity, bestFace = null;
+      const visit = node => {
+        if (!ray.intersectsBox(node.box)) return;
+        if (node.indices) {
+          node.indices.forEach(index => {
+            const face = faces[index];
+            if (!ray.intersectTriangle(face.triangle.a, face.triangle.b, face.triangle.c, false, rayPoint)) return;
+            const distance = rayPoint.distanceToSquared(rayCenter);
+            if (distance > bestDistance) {
+              bestDistance = distance; bestFace = face; bestPoint.copy(rayPoint);
+            }
+          });
+        } else { visit(node.left); visit(node.right); }
+      };
+      visit(tree);
+      return bestFace ? interpolate(bestFace, bestPoint, result) : this.sample(point, result);
     },
     triangleCount:faces.length,
   };
@@ -109,6 +134,11 @@ export function applyCompatibleWrapUV(roots, sampler, { forwardShift = 0 } = {})
   const { meshes, normalize } = normalizedSurface(roots);
   const point = new THREE.Vector3(), uv = new THREE.Vector2();
   const cache = new Map();
+  // Convert the desired crown displacement to a rotation around the side axis.
+  // Translating/clamping Z pushed samples inside the reference shell, where the
+  // nearest triangle could jump across atlas islands and leave jagged stripes.
+  const angle = Math.asin(THREE.MathUtils.clamp(forwardShift * 2, -0.98, 0.98));
+  const cos = Math.cos(angle), sin = Math.sin(angle);
   meshes.forEach(mesh => {
     const geometry = mesh.geometry;
     // Keep the retargeted coordinates separate from the original atlas and from
@@ -119,12 +149,19 @@ export function applyCompatibleWrapUV(roots, sampler, { forwardShift = 0 } = {})
       const values = new Float32Array(position.count * 2);
       for (let i = 0; i < position.count; i++) {
         normalize(point.fromBufferAttribute(position, i).applyMatrix4(mesh.matrixWorld));
-        // Sampling slightly behind each target point carries the reference pattern
-        // toward the front (+Z), along the shell rather than shifting UV islands.
-        point.z = THREE.MathUtils.clamp(point.z - forwardShift, 0, 1);
+        if (forwardShift) {
+          const y = point.y - 0.5, z = point.z - 0.5;
+          point.y = 0.5 + y * cos + z * sin;
+          point.z = 0.5 + z * cos - y * sin;
+        }
         const id = point.toArray().map(value => Math.round(value * 1e6)).join(',');
         let cached = cache.get(id);
-        if (!cached) { sampler.sample(point, uv); cached = uv.toArray(); cache.set(id, cached); }
+        if (!cached) {
+          // Project outward along the same shell direction, retaining front/back
+          // correspondence even at strong shifts and on the crown's vent panels.
+          if (forwardShift) sampler.sampleRadial(point, uv); else sampler.sample(point, uv);
+          cached = uv.toArray(); cache.set(id, cached);
+        }
         values[i * 2] = cached[0]; values[i * 2 + 1] = cached[1];
       }
       transferred = new THREE.BufferAttribute(values, 2);

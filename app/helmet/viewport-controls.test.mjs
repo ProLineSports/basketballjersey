@@ -6,7 +6,7 @@ import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {DRACOLoader} from 'three/addons/loaders/DRACOLoader.js';
 import {TrackballControls} from 'three/addons/controls/TrackballControls.js';
 import {HELMET_VIEWS, normalizeHelmetOrientation, visibleHelmetBounds, setHelmetView, recenterHelmet, rollHelmetView, levelHelmetView, squareViewportSize} from './viewport-controls.js';
-import {DEFAULT_SIDE_LOGO_PLACEMENT, rearDecalDefaults, rearBumperDefaultVertical, separateAxiomRearBumper, positionShadowFloor, textureFootprint, rearStickerBaseHeight, bumperSurfaceBounds, shadowFloorIsVisible} from './model-adjustments.js';
+import {sideLogoDefaults, rearDecalDefaults, rearBumperDefaultVertical, separateAxiomRearBumper, positionShadowFloor, textureFootprint, rearStickerBaseHeight, bumperSurfaceBounds, shadowFloorIsVisible} from './model-adjustments.js';
 import {DecalGeometry} from 'three/addons/geometries/DecalGeometry.js';
 import {decalCarrierRoots, createWrapSurfaceSampler, applyCompatibleWrapUV, AXIOM_WRAP_FORWARD_SHIFT} from './wrap-surface.js';
 import {applyShellDecalOcclusion} from './decal-occlusion.js';
@@ -59,12 +59,14 @@ const surfaces=[];carrier.traverse(o=>{if(o.isMesh){o.material.side=THREE.Double
 const shellCenter=new THREE.Box3().setFromObject(carrier).getCenter(new THREE.Vector3());
 for(const sign of [-1,1]){const ray=new THREE.Raycaster(new THREE.Vector3(sign*3,shellCenter.y,shellCenter.z),new THREE.Vector3(-sign,0,0));const hit=ray.intersectObjects(surfaces,false)[0];assert.ok(hit,'side decal raycast');assert.equal(Math.sign(hit.point.x-shellCenter.x),sign);}
 const backHit=new THREE.Raycaster(new THREE.Vector3(shellCenter.x,shellCenter.y,-3),new THREE.Vector3(0,0,1)).intersectObjects(surfaces,false)[0];assert.ok(backHit);assert.ok(backHit.point.z<shellCenter.z);
+assert.deepEqual(sideLogoDefaults('speedflex'),{yNorm:.64,zNorm:-.18,scale:1,rotation:0},'exact pre-Axiom SpeedFlex placement');
+assert.deepEqual(sideLogoDefaults('axiom'),{yNorm:.65,zNorm:.03,scale:1,rotation:-Math.PI/6},'Axiom defaults retained');
 // Default side logos move forward to the marked shell panel on both sides.
 const carrierBox=new THREE.Box3().setFromObject(carrier);
 const carrierSize=carrierBox.getSize(new THREE.Vector3());
 const defaultLogoHits=[];
 for(const sign of [-1,1]){
-  const origin=new THREE.Vector3(sign*3,carrierBox.min.y+carrierSize.y*DEFAULT_SIDE_LOGO_PLACEMENT.yNorm,shellCenter.z+carrierSize.z*DEFAULT_SIDE_LOGO_PLACEMENT.zNorm);
+  const origin=new THREE.Vector3(sign*3,carrierBox.min.y+carrierSize.y*sideLogoDefaults('axiom').yNorm,shellCenter.z+carrierSize.z*sideLogoDefaults('axiom').zNorm);
   const hit=new THREE.Raycaster(origin,new THREE.Vector3(-sign,0,0)).intersectObjects(surfaces,false)[0];
   assert.ok(hit,'default logo hits side panel');defaultLogoHits.push(hit.point);
   const oldHit=new THREE.Raycaster(new THREE.Vector3(sign*3,carrierBox.min.y+carrierSize.y*.64,shellCenter.z-carrierSize.z*.18),new THREE.Vector3(-sign,0,0)).intersectObjects(surfaces,false)[0];
@@ -158,6 +160,20 @@ for(const {across,vertical} of Object.values(rearDecalDefaults('speedflex'))){
   assert.ok(new THREE.Raycaster(origin,new THREE.Vector3(0,0,1)).intersectObjects(speedflexCarrier,false).length,'restored SpeedFlex rear sticker hits its carrier');
 }
 const referenceRoots=decalCarrierRoots(speedflex),axiomRoots=decalCarrierRoots(model);
+// A strong forward shift must stay on the same shell arc, not collapse source
+// samples into the interior where neighboring vertices can jump to another panel.
+const sphere=new THREE.Mesh(new THREE.SphereGeometry(1,16,8));
+let radialSamples=0;
+applyCompatibleWrapUV([sphere],{
+  sample(){assert.fail('forward shift must use outward surface correspondence');},
+  sampleRadial(point,uv){
+    assert.ok(Math.abs(point.distanceTo(new THREE.Vector3(.5,.5,.5))-.5)<1e-6,'forward mapping preserves shell radius');
+    radialSamples++;
+    return uv.set(point.x,point.z);
+  },
+},{forwardShift:AXIOM_WRAP_FORWARD_SHIFT});
+assert.ok(radialSamples>100,'the full shell is sampled along its arc');
+sphere.geometry.dispose();sphere.material.dispose();
 const sampler=createWrapSurfaceSampler(referenceRoots);
 const originalSpeedflexUVs=speedflexCarrier.map(mesh=>Array.from(mesh.geometry.attributes.uv.array));
 const mappingStarted=performance.now();
