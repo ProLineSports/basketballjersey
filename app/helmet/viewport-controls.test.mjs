@@ -6,7 +6,7 @@ import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {DRACOLoader} from 'three/addons/loaders/DRACOLoader.js';
 import {TrackballControls} from 'three/addons/controls/TrackballControls.js';
 import {HELMET_VIEWS, normalizeHelmetOrientation, visibleHelmetBounds, setHelmetView, recenterHelmet, rollHelmetView, levelHelmetView, squareViewportSize} from './viewport-controls.js';
-import {sideLogoDefaults, rearDecalDefaults, rearBumperDefaultVertical, separateAxiomRearBumper, positionShadowFloor, textureFootprint, rearStickerBaseHeight, bumperSurfaceBounds, shadowFloorIsVisible} from './model-adjustments.js';
+import {sideLogoDefaults, rearDecalDefaults, rearBumperDefaultVertical, separateAxiomRearBumper, positionShadowFloor, textureFootprint, rearStickerBaseHeight, bumperSurfaceBounds, shadowFloorIsVisible, DEFAULT_STRIPE_WIDTH, SPEEDFLEX_STRIPE_REFERENCE_WIDTH, stripeWidthModelScale} from './model-adjustments.js';
 import {DecalGeometry} from 'three/addons/geometries/DecalGeometry.js';
 import {decalCarrierRoots, createWrapSurfaceSampler, applyCompatibleWrapUV, AXIOM_WRAP_FORWARD_SHIFT} from './wrap-surface.js';
 import {applyShellDecalOcclusion} from './decal-occlusion.js';
@@ -160,6 +160,61 @@ for(const {across,vertical} of Object.values(rearDecalDefaults('speedflex'))){
   assert.ok(new THREE.Raycaster(origin,new THREE.Vector3(0,0,1)).intersectObjects(speedflexCarrier,false).length,'restored SpeedFlex rear sticker hits its carrier');
 }
 const referenceRoots=decalCarrierRoots(speedflex),axiomRoots=decalCarrierRoots(model);
+// Actual exported units differ. Exercise the compiled stripe expression with every
+// NFL preset and manual width, rather than changing the approved preset values.
+const nativeCarrierWidth=(helmet,roots)=>{
+  helmet.updateMatrixWorld(true);
+  const inverse=helmet.matrixWorld.clone().invert(),point=new THREE.Vector3(),bounds=new THREE.Box3();
+  roots.forEach(root=>root.traverse(mesh=>{
+    if(!mesh.isMesh)return;
+    const transform=new THREE.Matrix4().multiplyMatrices(inverse,mesh.matrixWorld),position=mesh.geometry.attributes.position;
+    for(let i=0;i<position.count;i++)bounds.expandByPoint(point.fromBufferAttribute(position,i).applyMatrix4(transform));
+  }));
+  return bounds.getSize(new THREE.Vector3()).x;
+};
+const referenceWidth=nativeCarrierWidth(speedflex,referenceRoots),axiomWidth=nativeCarrierWidth(model,axiomRoots);
+assert.ok(Math.abs(referenceWidth-SPEEDFLEX_STRIPE_REFERENCE_WIDTH)<1e-9,'calibration matches the shipped SpeedFlex carrier');
+assert.ok(axiomWidth<referenceWidth*.65,'Axiom native shell units are smaller');
+const helmetSource=fs.readFileSync('app/helmet/page.jsx','utf8');
+const installStripeShader=vm.runInNewContext('('+helmetSource.slice(helmetSource.indexOf('function installDecalOverlayShader('),helmetSource.indexOf('function createShellDecalOverlays('))+')');
+const stripeUniformNames=['enabled','baseEnabled','widthScale','modelWidthScale','length','centerX','preset','leftColor','centerColor','rightColor','pipingColor','designEnabled','designMap','wrapEnabled','wrapMap'];
+const stripeUniforms=Object.fromEntries(stripeUniformNames.map(name=>[name,{value:1}]));
+const stripeMaterial=new THREE.MeshPhysicalMaterial();installStripeShader(stripeMaterial,stripeUniforms);
+const stripeShader={uniforms:{},vertexShader:THREE.ShaderLib.physical.vertexShader,fragmentShader:THREE.ShaderLib.physical.fragmentShader};
+stripeMaterial.onBeforeCompile(stripeShader);
+assert.equal(stripeShader.uniforms.uHelmetStripeModelWidthScale,stripeUniforms.modelWidthScale,'shader retains the model calibration uniform');
+assert.ok(stripeShader.fragmentShader.includes('uniform float uHelmetStripeModelWidthScale;'),'GLSL declares calibration');
+const stripeWidthExpression=stripeShader.fragmentShader.match(/float stripeW\s*=\s*([^;]+);/)[1];
+const renderedStripeWidth=(family,nativeWidth,userWidth)=>{
+  stripeUniforms.widthScale.value=userWidth;
+  stripeUniforms.modelWidthScale.value=stripeWidthModelScale(family,nativeWidth);
+  return vm.runInNewContext(stripeWidthExpression,Object.fromEntries(Object.entries(stripeShader.uniforms).map(([name,uniform])=>[name,uniform.value])));
+};
+const teamsPrefix='const NFL_HELMET_PRESETS = ',stripeDesignsPrefix='const BUILT_IN_STRIPE_DESIGNS = ';
+const teams=vm.runInNewContext('('+helmetSource.slice(helmetSource.indexOf(teamsPrefix)+teamsPrefix.length,helmetSource.indexOf('const NFL_HELMET_PRESETS_SORTED')).trim().replace(/;$/,'')+')');
+const builtInStripeDesigns=vm.runInNewContext('('+helmetSource.slice(helmetSource.indexOf(stripeDesignsPrefix)+stripeDesignsPrefix.length,helmetSource.indexOf('const HDRI_PRESETS')).trim().replace(/;$/,'')+')',{DEFAULT_STRIPE_WIDTH});
+assert.equal(teams.length,32,'all NFL presets checked');
+let stripeTeamCount=0,customStripeCount=0;
+for(const team of teams){
+  const design=builtInStripeDesigns[team.stripe?.builtInDesignId];
+  if(!team.stripe?.enabled&&!design)continue;
+  stripeTeamCount++;if(design)customStripeCount++;
+  const widths=new Set([.7,design?.stripeWidth??DEFAULT_STRIPE_WIDTH,7]);
+  for(const width of widths){
+    const envelope=team.stripe?.preset==='single'&&!design?1:3;
+    const reference=renderedStripeWidth('speedflex',referenceWidth,width)*envelope;
+    assert.equal(reference,.020*width*envelope,team.city+' preserves approved SpeedFlex width');
+    for(const variant of ['axiom-a','axiom-b']){
+      const transferred=renderedStripeWidth('axiom',axiomWidth,width)*envelope;
+      assert.ok(Math.abs(reference/referenceWidth-transferred/axiomWidth)<1e-12,team.city+' '+variant+' matches shell-relative stripe width');
+    }
+    assert.equal(renderedStripeWidth('speedflex',referenceWidth,width)*envelope,reference,team.city+' round-trip cannot accumulate calibration');
+  }
+}
+assert.ok(stripeTeamCount>15&&customStripeCount>=7,'procedural and supplied team artwork share the same calibrated zone');
+for(const invalid of [0,-1,NaN,Infinity,undefined])assert.equal(stripeWidthModelScale('axiom',invalid),1,'invalid projection cannot break the shader');
+stripeMaterial.dispose();
+console.log(`PASS: ${teams.length} NFL presets, ${stripeTeamCount} stripe teams, ${customStripeCount} custom designs; both Axiom variants and manual widths preserve SpeedFlex proportions.`);
 // A strong forward shift must stay on the same shell arc, not collapse source
 // samples into the interior where neighboring vertices can jump to another panel.
 const sphere=new THREE.Mesh(new THREE.SphereGeometry(1,16,8));

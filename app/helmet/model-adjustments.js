@@ -8,6 +8,15 @@ export function sideLogoDefaults(family) {
   return family === 'axiom' ? AXIOM_SIDE_LOGO_PLACEMENT : DEFAULT_SIDE_LOGO_PLACEMENT;
 }
 export const DEFAULT_STRIPE_WIDTH = 2.5;
+// Native model-space width of SpeedFlex-draco.glb's filled Decal Surface.
+// Its established 0.020-unit stripe is the reference for every preset and upload.
+export const SPEEDFLEX_STRIPE_REFERENCE_WIDTH = 0.5220989584922789;
+export function stripeWidthModelScale(family, shellWidth) {
+  // Keep the approved SpeedFlex render exactly as it is. Axiom uses a different
+  // export scale, so match stripe width as a proportion of its own decal surface.
+  if (family !== 'axiom' || !Number.isFinite(shellWidth) || shellWidth <= 0) return 1;
+  return shellWidth / SPEEDFLEX_STRIPE_REFERENCE_WIDTH;
+}
 const AXIOM_REAR_DECAL_PLACEMENTS = Object.freeze({
   flag: Object.freeze({ scale:5, rotation:10, across:-62, vertical:-10 }),
   warning: Object.freeze({ scale:5, rotation:-15, across:58, vertical:-10 }),

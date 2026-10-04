@@ -29,6 +29,7 @@ import {
   rearDecalDefaults,
   rearBumperDefaultVertical,
   DEFAULT_STRIPE_WIDTH,
+  stripeWidthModelScale,
   separateAxiomRearBumper,
   positionShadowFloor,
   textureFootprint,
@@ -785,6 +786,7 @@ function installDecalOverlayShader(material, decalUniforms) {
     shader.uniforms.uHelmetStripesEnabled = decalUniforms.enabled;
     shader.uniforms.uHelmetStripeBaseEnabled = decalUniforms.baseEnabled;
     shader.uniforms.uHelmetStripeWidthScale = decalUniforms.widthScale;
+    shader.uniforms.uHelmetStripeModelWidthScale = decalUniforms.modelWidthScale;
     shader.uniforms.uHelmetStripeLength = decalUniforms.length;
     shader.uniforms.uHelmetStripeCenterX = decalUniforms.centerX;
     shader.uniforms.uHelmetStripePreset = decalUniforms.preset;
@@ -826,6 +828,7 @@ varying vec2 vHelmetWrapUv;
 uniform float uHelmetStripesEnabled;
 uniform float uHelmetStripeBaseEnabled;
 uniform float uHelmetStripeWidthScale;
+uniform float uHelmetStripeModelWidthScale;
 uniform float uHelmetStripeLength;
 uniform float uHelmetStripeCenterX;
 uniform float uHelmetStripePreset;
@@ -851,7 +854,7 @@ if (uHelmetWrapEnabled > 0.5) {
 }
 
 if (uHelmetStripesEnabled > 0.5) {
-  float stripeW = 0.020 * uHelmetStripeWidthScale;
+  float stripeW = 0.020 * uHelmetStripeWidthScale * uHelmetStripeModelWidthScale;
   float stripeX = vHelmetModelPosition.x - uHelmetStripeCenterX;
   float absStripeX = abs(stripeX);
 
@@ -951,7 +954,7 @@ diffuseColor.a *= helmetDecal.a;`
       );
   };
 
-  material.customProgramCacheKey = () => 'helmet-decal-overlay-v1';
+  material.customProgramCacheKey = () => 'helmet-decal-overlay-v2';
   material.needsUpdate = true;
 }
 
@@ -3705,6 +3708,7 @@ export default function HelmetBuilder({ demoMode = false }) {
     enabled:         { value: 0 },
     baseEnabled:     { value: 0 },
     widthScale:      { value: 1 },
+    modelWidthScale: { value: 1 },
     length:          { value: 1 },
     centerX:         { value: 0 },
     preset:          { value: 1 },
@@ -3724,6 +3728,7 @@ export default function HelmetBuilder({ demoMode = false }) {
     enabled:         { value: 0 },
     baseEnabled:     { value: 0 },
     widthScale:      { value: 1 },
+    modelWidthScale: { value: 1 },
     length:          { value: 1 },
     centerX:         { value: 0 },
     preset:          { value: 1 },
@@ -5536,6 +5541,13 @@ export default function HelmetBuilder({ demoMode = false }) {
         preserveAuthoredWrapUV(decalSurfaceObjectsRef.current);
         carrierProjection = applyPanoramicShellWrapUV(model, decalSurfaceObjectsRef.current);
       }
+
+      // Preserve the same width slider/preset values while changing model units.
+      // Both procedural stripes and custom team artwork share this calibrated zone.
+      stripeUniformsRef.current.modelWidthScale.value = stripeWidthModelScale(
+        activeHelmetConfig.family,
+        carrierProjection?.width ?? shellProjection?.width
+      );
 
       const wrapOverlayRoots = decalSurfaceObjectsRef.current.length
         ? decalSurfaceObjectsRef.current
