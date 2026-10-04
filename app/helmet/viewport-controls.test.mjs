@@ -174,6 +174,30 @@ applyCompatibleWrapUV([sphere],{
 },{forwardShift:AXIOM_WRAP_FORWARD_SHIFT});
 assert.ok(radialSamples>100,'the full shell is sampled along its arc');
 sphere.geometry.dispose();sphere.material.dispose();
+// Retargeted triangles crossing an authored UV seam must never interpolate
+// through the unrelated atlas space between the two islands.
+const panel=(x0,x1,u0,u1)=>{
+  const geometry=new THREE.BufferGeometry();
+  geometry.setAttribute('position',new THREE.Float32BufferAttribute([x0,0,0,x1,0,0,x0,1,0,x1,0,0,x1,1,0,x0,1,0],3));
+  geometry.setAttribute('uv',new THREE.Float32BufferAttribute([u0,0,u1,0,u0,1,u1,0,u1,1,u0,1],2));
+  return new THREE.Mesh(geometry);
+};
+const referencePanels=[panel(0,.5,0,.4),panel(.5,1,.6,1)];
+const seamSampler=createWrapSurfaceSampler(referencePanels);
+assert.equal(seamSampler.chartCount,2,'physical neighbors have distinct authored UV islands');
+const seamTarget=panel(0,1,0,1);
+const seamPositions=Array.from(seamTarget.geometry.attributes.position.array);
+const seamOriginalUV=Array.from(seamTarget.geometry.attributes.uv.array);
+applyCompatibleWrapUV([seamTarget],seamSampler,{forwardShift:.01});
+const seamUV=seamTarget.geometry.attributes.helmetWrapUv;
+for(let i=0;i<seamUV.count;i+=3){
+  const u=[0,1,2].map(k=>seamUV.getX(i+k));
+  assert.ok(Math.max(...u)<=.40001||Math.min(...u)>=.59999,'each rendered triangle stays in one UV island');
+}
+assert.equal(seamTarget.geometry.userData.helmetWrapSeamTriangles,2,'both crossing triangles repaired');
+assert.deepEqual(Array.from(seamTarget.geometry.attributes.position.array),seamPositions,'seam repair cannot move the shell');
+assert.deepEqual(Array.from(seamTarget.geometry.attributes.uv.array),seamOriginalUV,'seam repair preserves original atlas');
+for(const mesh of [...referencePanels,seamTarget]){mesh.geometry.dispose();mesh.material.dispose();}
 const sampler=createWrapSurfaceSampler(referenceRoots);
 const originalSpeedflexUVs=speedflexCarrier.map(mesh=>Array.from(mesh.geometry.attributes.uv.array));
 const mappingStarted=performance.now();

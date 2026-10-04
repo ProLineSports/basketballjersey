@@ -57,6 +57,29 @@ export function createWrapSurfaceSampler(roots) {
     }
   });
   if (!faces.length) throw new Error('Reference helmet has no authored wrap surface.');
+  // Identify continuous UV islands. Adjacent faces may share the same physical
+  // edge yet belong to distant atlas regions; interpolating between those UVs
+  // paints unrelated black triangles and thin cracks around vents.
+  const parents = faces.map((_, index) => index);
+  const find = index => {
+    while (parents[index] !== index) { parents[index] = parents[parents[index]]; index = parents[index]; }
+    return index;
+  };
+  const edges = new Map();
+  const vertexKey = (point, uv) => [...point.toArray(), ...uv.toArray()].map(value => Math.round(value * 1e6)).join(',');
+  faces.forEach((face, index) => {
+    const vertices = [face.triangle.a, face.triangle.b, face.triangle.c].map((point, k) => vertexKey(point, face.uv[k]));
+    for (let k = 0; k < 3; k++) {
+      const a = vertices[k], b = vertices[(k + 1) % 3], edge = a < b ? `${a}|${b}` : `${b}|${a}`;
+      if (edges.has(edge)) parents[find(index)] = find(edges.get(edge)); else edges.set(edge, index);
+    }
+  });
+  const charts = new Map();
+  faces.forEach((face, index) => {
+    face.chart = find(index);
+    if (!charts.has(face.chart)) charts.set(face.chart, []);
+    charts.get(face.chart).push(index);
+  });
   const build = indices => {
     const box = new THREE.Box3();
     indices.forEach(index => box.union(faces[index].box));
@@ -68,6 +91,7 @@ export function createWrapSurfaceSampler(roots) {
     return { box, left:build(indices.slice(0, middle)), right:build(indices.slice(middle)) };
   };
   const tree = build(faces.map((_, index) => index));
+  const chartTrees = new Map();
   const closest = new THREE.Vector3(), bestPoint = new THREE.Vector3(), barycentric = new THREE.Vector3();
   const ray = new THREE.Ray(), rayPoint = new THREE.Vector3();
   const rayCenter = new THREE.Vector3(0.5, 0.5, 0.5);
@@ -84,7 +108,7 @@ export function createWrapSurfaceSampler(roots) {
     return x * x + y * y + z * z;
   };
   return {
-    sample(point, result = new THREE.Vector2()) {
+    sample(point, result = new THREE.Vector2(), detail = null) {
       let bestDistance = Infinity, bestFace = null;
       const visit = node => {
         if (boxDistance(node.box, point) > bestDistance + 1e-12) return;
@@ -104,9 +128,10 @@ export function createWrapSurfaceSampler(roots) {
         visit(leftFirst ? node.right : node.left);
       };
       visit(tree);
+      if (detail) detail.chart = bestFace.chart;
       return interpolate(bestFace, bestPoint, result);
     },
-    sampleRadial(point, result = new THREE.Vector2()) {
+    sampleRadial(point, result = new THREE.Vector2(), detail = null) {
       ray.origin.copy(rayCenter);
       ray.direction.copy(point).sub(rayCenter).normalize();
       let bestDistance = -Infinity, bestFace = null;
@@ -124,15 +149,42 @@ export function createWrapSurfaceSampler(roots) {
         } else { visit(node.left); visit(node.right); }
       };
       visit(tree);
-      return bestFace ? interpolate(bestFace, bestPoint, result) : this.sample(point, result);
+      if (!bestFace) return this.sample(point, result, detail);
+      if (detail) detail.chart = bestFace.chart;
+      return interpolate(bestFace, bestPoint, result);
+    },
+    sampleChart(point, chart, result = new THREE.Vector2()) {
+      // Keep a seam triangle inside one atlas island. Closest-point clipping to
+      // that island's boundary avoids sampling the empty/unrelated atlas between
+      // islands, without changing any correctly mapped surrounding vertices.
+      this.sampleRadial(point, result);
+      const referencePoint = bestPoint.clone();
+      if (!chartTrees.has(chart)) chartTrees.set(chart, build(charts.get(chart).slice()));
+      let bestDistance = Infinity, bestFace = null;
+      const visit = node => {
+        if (boxDistance(node.box, referencePoint) > bestDistance + 1e-12) return;
+        if (node.indices) {
+          node.indices.forEach(index => {
+            const face = faces[index];
+            face.triangle.closestPointToPoint(referencePoint, closest);
+            const distance = closest.distanceToSquared(referencePoint);
+            if (distance < bestDistance) {
+              bestDistance = distance; bestFace = face; bestPoint.copy(closest);
+            }
+          });
+        } else { visit(node.left); visit(node.right); }
+      };
+      visit(chartTrees.get(chart));
+      return interpolate(bestFace, bestPoint, result);
     },
     triangleCount:faces.length,
+    chartCount:charts.size,
   };
 }
 
 export function applyCompatibleWrapUV(roots, sampler, { forwardShift = 0 } = {}) {
   const { meshes, normalize } = normalizedSurface(roots);
-  const point = new THREE.Vector3(), uv = new THREE.Vector2();
+  const point = new THREE.Vector3(), corner = new THREE.Vector3(), uv = new THREE.Vector2();
   const cache = new Map();
   // Convert the desired crown displacement to a rotation around the side axis.
   // Translating/clamping Z pushed samples inside the reference shell, where the
@@ -140,6 +192,13 @@ export function applyCompatibleWrapUV(roots, sampler, { forwardShift = 0 } = {})
   const angle = Math.asin(THREE.MathUtils.clamp(forwardShift * 2, -0.98, 0.98));
   const cos = Math.cos(angle), sin = Math.sin(angle);
   meshes.forEach(mesh => {
+    // Each triangle needs its own vertices where the reference atlas has a seam.
+    // Positions, smooth normals and the original UV channel are retained verbatim.
+    if (forwardShift && mesh.geometry.index) {
+      const original = mesh.geometry;
+      mesh.geometry = original.toNonIndexed();
+      mesh.geometry.userData = { ...original.userData };
+    }
     const geometry = mesh.geometry;
     // Keep the retargeted coordinates separate from the original atlas and from
     // panoramic UVs, so toggling wrap modes never overwrites either source.
@@ -147,6 +206,8 @@ export function applyCompatibleWrapUV(roots, sampler, { forwardShift = 0 } = {})
     if (!transferred || geometry.userData.helmetWrapForwardShift !== forwardShift) {
       const position = geometry.attributes.position;
       const values = new Float32Array(position.count * 2);
+      const queries = new Float32Array(position.count * 3), vertexCharts = new Int32Array(position.count);
+      const detail = { chart:-1 };
       for (let i = 0; i < position.count; i++) {
         normalize(point.fromBufferAttribute(position, i).applyMatrix4(mesh.matrixWorld));
         if (forwardShift) {
@@ -159,14 +220,35 @@ export function applyCompatibleWrapUV(roots, sampler, { forwardShift = 0 } = {})
         if (!cached) {
           // Project outward along the same shell direction, retaining front/back
           // correspondence even at strong shifts and on the crown's vent panels.
-          if (forwardShift) sampler.sampleRadial(point, uv); else sampler.sample(point, uv);
-          cached = uv.toArray(); cache.set(id, cached);
+          detail.chart = -1;
+          if (forwardShift) sampler.sampleRadial(point, uv, detail); else sampler.sample(point, uv, detail);
+          cached = { uv:uv.toArray(), chart:detail.chart }; cache.set(id, cached);
         }
-        values[i * 2] = cached[0]; values[i * 2 + 1] = cached[1];
+        values[i * 2] = cached.uv[0]; values[i * 2 + 1] = cached.uv[1];
+        vertexCharts[i] = cached.chart;
+        point.toArray(queries, i * 3);
+      }
+      let seamTriangles = 0;
+      if (forwardShift && sampler.sampleChart) {
+        for (let i = 0; i < position.count; i += 3) {
+          if (vertexCharts[i] === vertexCharts[i + 1] && vertexCharts[i] === vertexCharts[i + 2]) continue;
+          point.set(0, 0, 0);
+          for (let k = 0; k < 3; k++) point.add(corner.fromArray(queries, (i + k) * 3));
+          point.multiplyScalar(1 / 3);
+          sampler.sampleRadial(point, uv, detail);
+          const chart = detail.chart;
+          for (let k = 0; k < 3; k++) {
+            if (vertexCharts[i + k] === chart) continue;
+            sampler.sampleChart(point.fromArray(queries, (i + k) * 3), chart, uv);
+            values[(i + k) * 2] = uv.x; values[(i + k) * 2 + 1] = uv.y;
+          }
+          seamTriangles++;
+        }
       }
       transferred = new THREE.BufferAttribute(values, 2);
       geometry.setAttribute('helmetCompatibleWrapUv', transferred);
       geometry.userData.helmetWrapForwardShift = forwardShift;
+      geometry.userData.helmetWrapSeamTriangles = seamTriangles;
     }
     geometry.setAttribute('helmetWrapUv', transferred.clone());
     geometry.attributes.helmetWrapUv.needsUpdate = true;

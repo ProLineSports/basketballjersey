@@ -1304,7 +1304,6 @@ function createSideLogoTexturePack(image, options = {}) {
     textureWidth = null,
     textureHeight = null,
     arcCompensation = 0,
-    shadowProfile = 'decal',
   } = options;
 
   const size = Math.max(512, textureSize | 0);
@@ -1342,7 +1341,7 @@ function createSideLogoTexturePack(image, options = {}) {
   const stroked = strokeDecalCanvas(baseCanvas, {
     enabled:strokeEnabled, thickness:strokeThickness, color:strokeColor, opacity:strokeOpacity,
   });
-  const raised = raisedDecalCanvases(stroked.artwork, drawH, { shadowProfile, footprint:stroked.footprint });
+  const raised = raisedDecalCanvases(stroked.artwork, drawH, { footprint:stroked.footprint });
   const warpedFinalCanvas = warpCanvasArc(raised.artwork, arcCompensation);
   const warpedRimCanvas = warpCanvasArc(raised.shadow, arcCompensation);
 
@@ -7170,7 +7169,6 @@ export default function HelmetBuilder({ demoMode = false }) {
           textureWidth: Math.min(isFront ? 4096 : 6144, rendererRef.current?.capabilities?.maxTextureSize || 4096),
           textureHeight: Math.min(isFront ? 2048 : 1536, rendererRef.current?.capabilities?.maxTextureSize || 4096),
           arcCompensation: isFront ? 0 : bumperLogoRearCurve,
-          shadowProfile:'bumper',
         });
         cache = { key:cacheKey, pack:nextPack };
         bumperLogoPackCacheRef.current[cacheSlot] = cache;
@@ -7210,7 +7208,7 @@ export default function HelmetBuilder({ demoMode = false }) {
 
         const shadowUniforms = {
           center:{ value:center }, right:{ value:right }, up:{ value:up }, normal:{ value:frontNormal },
-          width:{ value:projectedWidth * 1.018 }, height:{ value:projectedHeight * 1.018 },
+          width:{ value:projectedWidth }, height:{ value:projectedHeight },
           depth:{ value:projectionDepth }, lift:{ value:lift * 0.20 },
         };
         const mainUniforms = {
@@ -7220,7 +7218,7 @@ export default function HelmetBuilder({ demoMode = false }) {
         };
 
         const shadowMat = new THREE.MeshPhysicalMaterial({
-          color:0x000000, map:pack.rimTexture, transparent:true, alphaTest:0.01, opacity:0.28,
+          color:0x000000, map:pack.rimTexture, transparent:true, alphaTest:0.01, opacity:1,
           side:THREE.DoubleSide, depthWrite:false, depthTest:true, roughness:0.95, metalness:0,
           polygonOffset:true, polygonOffsetFactor:-1, polygonOffsetUnits:-1,
         });
@@ -7277,7 +7275,7 @@ export default function HelmetBuilder({ demoMode = false }) {
         hit.object,
         projectorPosition,
         orientation,
-        new THREE.Vector3(baseWidth * 1.018, baseHeight * 1.018, projectorDepth),
+        new THREE.Vector3(baseWidth, baseHeight, projectorDepth),
       );
       const mainGeo = new DecalGeometry(
         hit.object,
@@ -7290,7 +7288,7 @@ export default function HelmetBuilder({ demoMode = false }) {
       offsetGeometryAlongNormals(mainGeo, lift * 0.85);
 
       const shadowMat = new THREE.MeshPhysicalMaterial({
-        color:0x000000, map:pack.rimTexture, transparent:true, alphaTest:0.01, opacity:0.28,
+        color:0x000000, map:pack.rimTexture, transparent:true, alphaTest:0.01, opacity:1,
         side:THREE.DoubleSide, depthWrite:false, depthTest:true, roughness:0.95, metalness:0,
         polygonOffset:true, polygonOffsetFactor:-1, polygonOffsetUnits:-1,
       });
