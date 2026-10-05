@@ -10,6 +10,7 @@ import { decalCarrierRoots, createWrapSurfaceSampler, applyCompatibleWrapUV, AXI
 import { raisedDecalCanvases, strokeDecalCanvas } from './decal-appearance';
 import { applyShellDecalOcclusion } from './decal-occlusion';
 import { projectSelectionFrame, updateSelectionOutline } from './selection-outline';
+import { getSquareExportPlan, resizeSquareExportRenderer } from './export-viewport';
 import { EXRLoader } from 'three/addons/loaders/EXRLoader.js';
 import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
@@ -155,45 +156,6 @@ const formatDebugBytes = (value) => {
 const formatDebugCount = (value) =>
   Number.isFinite(value) ? Math.round(value).toLocaleString() : '—';
 
-
-function getSafeExportPlan(renderer, finalWidth, finalHeight, requestedSupersample) {
-  const gl = renderer?.getContext?.();
-  const maxTextureSize = gl ? gl.getParameter(gl.MAX_TEXTURE_SIZE) : 4096;
-  const maxRenderbufferSize = gl ? gl.getParameter(gl.MAX_RENDERBUFFER_SIZE) : 4096;
-
-  // Browsers/GPUs may report limits above what is sensible for a single temporary
-  // export buffer. Capping the internal edge at 8192 avoids 12K+ buffers while still
-  // allowing true 2x supersampling for a 4096px export on capable hardware.
-  const safeDimension = Math.max(
-    1,
-    Math.min(
-      Number(maxTextureSize) || 4096,
-      Number(maxRenderbufferSize) || 4096,
-      8192
-    )
-  );
-
-  const finalMaxDimension = Math.max(finalWidth, finalHeight);
-  const supported = finalMaxDimension <= safeDimension;
-  const maxSupersample = supported
-    ? Math.max(1, Math.floor(safeDimension / Math.max(1, finalMaxDimension)))
-    : 0;
-
-  const actualSupersample = supported
-    ? Math.max(1, Math.min(requestedSupersample, maxSupersample))
-    : 0;
-
-  return {
-    supported,
-    maxTextureSize,
-    maxRenderbufferSize,
-    safeDimension,
-    requestedSupersample,
-    actualSupersample,
-    renderWidth: actualSupersample ? Math.max(1, Math.round(finalWidth * actualSupersample)) : 0,
-    renderHeight: actualSupersample ? Math.max(1, Math.round(finalHeight * actualSupersample)) : 0,
-  };
-}
 
 function getBaseModelStats(model) {
   if (!model) return { meshes:0, triangles:0, vertices:0 };
@@ -7874,31 +7836,15 @@ export default function HelmetBuilder({ demoMode = false }) {
       camera = cameraRef.current;
       if (!liveRenderer || !scene || !camera) throw new Error('Renderer not ready');
 
-      const liveCanvas = liveRenderer.domElement;
-      const liveWidth = liveCanvas.clientWidth || liveCanvas.width || 1;
-      const liveHeight = liveCanvas.clientHeight || liveCanvas.height || 1;
-      const aspect = liveWidth / Math.max(liveHeight, 1);
-
-      // Final PNG size follows the current viewport aspect ratio.
-      let finalWidth = exportResolution;
-      let finalHeight = exportResolution;
-      if (aspect >= 1) {
-        finalWidth = exportResolution;
-        finalHeight = Math.max(1, Math.round(exportResolution / aspect));
-      } else {
-        finalHeight = exportResolution;
-        finalWidth = Math.max(1, Math.round(exportResolution * aspect));
-      }
-
       // Preflight the GPU BEFORE spending an export credit. This prevents a user from
       // requesting a 12K+ supersampled buffer that their hardware/browser cannot safely
       // allocate. We choose the highest safe supersample automatically.
-      const exportPlan = getSafeExportPlan(
+      const exportPlan = getSquareExportPlan(
         liveRenderer,
-        finalWidth,
-        finalHeight,
+        exportResolution,
         exportSupersample
       );
+      const { finalWidth, finalHeight } = exportPlan;
 
       if (!exportPlan.supported) {
         throw new Error(
@@ -7906,6 +7852,28 @@ export default function HelmetBuilder({ demoMode = false }) {
         );
       }
 
+      // Build and encode the clean image first. A credit is consumed only AFTER
+      // the browser has proven it can successfully render/encode the export.
+      const captureStartedAt = performance.now();
+
+      previousBackground = scene.background;
+      previousClearColor = liveRenderer.getClearColor(new THREE.Color()).clone();
+      previousClearAlpha = liveRenderer.getClearAlpha();
+      previousPixelRatio = liveRenderer.getPixelRatio();
+      previousRendererSize = liveRenderer.getSize(new THREE.Vector2());
+      previousCameraAspect = camera.aspect;
+
+      if (transparentBg) {
+        scene.background = null;
+        liveRenderer.setClearColor(0x000000, 0);
+      } else {
+        scene.background = new THREE.Color(viewportBgColor);
+        liveRenderer.setClearColor(new THREE.Color(viewportBgColor), 1);
+      }
+
+      // Render through the SAME WebGLRenderer as the live viewport so PMREM/environment
+      // resources remain identical. updateStyle=false prevents a visible layout jump.
+      rendererStateChanged = true;
       const {
         actualSupersample,
         renderWidth,
@@ -7913,7 +7881,7 @@ export default function HelmetBuilder({ demoMode = false }) {
         maxTextureSize,
         maxRenderbufferSize,
         safeDimension,
-      } = exportPlan;
+      } = resizeSquareExportRenderer(liveRenderer, exportPlan);
 
       const wasReduced = actualSupersample < exportSupersample;
       if (wasReduced) {
@@ -7938,32 +7906,9 @@ export default function HelmetBuilder({ demoMode = false }) {
         exportWasReduced: wasReduced,
       });
 
-      // Build and encode the clean image first. A credit is consumed only AFTER
-      // the browser has proven it can successfully render/encode the export.
-      const captureStartedAt = performance.now();
-
-      previousBackground = scene.background;
-      previousClearColor = liveRenderer.getClearColor(new THREE.Color()).clone();
-      previousClearAlpha = liveRenderer.getClearAlpha();
-      previousPixelRatio = liveRenderer.getPixelRatio();
-      previousRendererSize = liveRenderer.getSize(new THREE.Vector2());
-      previousCameraAspect = camera.aspect;
-
-      if (transparentBg) {
-        scene.background = null;
-        liveRenderer.setClearColor(0x000000, 0);
-      } else {
-        scene.background = new THREE.Color(viewportBgColor);
-        liveRenderer.setClearColor(new THREE.Color(viewportBgColor), 1);
-      }
-
-      // Render through the SAME WebGLRenderer as the live viewport so PMREM/environment
-      // resources remain identical. updateStyle=false prevents a visible layout jump.
-      liveRenderer.setPixelRatio(1);
-      liveRenderer.setSize(renderWidth, renderHeight, false);
-      rendererStateChanged = true;
-
-      camera.aspect = renderWidth / Math.max(renderHeight, 1);
+      // The editor and PNG share the full square frustum. Keep the current
+      // position, target, zoom and roll; canvas CSS cannot change export framing.
+      camera.aspect = 1;
       camera.updateProjectionMatrix();
       camera.updateMatrixWorld(true);
 
@@ -8041,8 +7986,9 @@ export default function HelmetBuilder({ demoMode = false }) {
         keyLight.shadow.needsUpdate = true;
       }
 
-      liveRenderer.setPixelRatio(previousPixelRatio);
+      // Shrink to the live size before restoring DPR, avoiding a second giant buffer.
       liveRenderer.setSize(previousRendererSize.x, previousRendererSize.y, false);
+      liveRenderer.setPixelRatio(previousPixelRatio);
       camera.aspect = previousCameraAspect;
       camera.updateProjectionMatrix();
       camera.updateMatrixWorld(true);
@@ -8173,8 +8119,8 @@ export default function HelmetBuilder({ demoMode = false }) {
             keyLight.shadow.needsUpdate = true;
           }
 
-          liveRenderer.setPixelRatio(previousPixelRatio);
           liveRenderer.setSize(previousRendererSize.x, previousRendererSize.y, false);
+          liveRenderer.setPixelRatio(previousPixelRatio);
           camera.aspect = previousCameraAspect;
           camera.updateProjectionMatrix();
           camera.updateMatrixWorld(true);
@@ -10615,10 +10561,10 @@ export default function HelmetBuilder({ demoMode = false }) {
                       onChange={e => setExportResolution(parseInt(e.target.value))}
                       style={{ width:'100%', background:'rgba(0,0,0,0.22)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:6, padding:'8px 10px', color:'#e5e7eb', fontSize:10, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:'0.04em' }}
                     >
-                      <option value="1500">1500 px</option>
-                      <option value="2048">2048 px</option>
-                      <option value="3000">3000 px</option>
-                      <option value="4096">4096 px</option>
+                      <option value="1500">1500 × 1500 px</option>
+                      <option value="2048">2048 × 2048 px</option>
+                      <option value="3000">3000 × 3000 px</option>
+                      <option value="4096">4096 × 4096 px</option>
                     </select>
                   </div>
                   <div>
@@ -10637,7 +10583,7 @@ export default function HelmetBuilder({ demoMode = false }) {
                   </div>
                 </div>
                 <div style={{ fontSize:9, color:'#6b7280', lineHeight:1.45 }}>
-                  High-resolution supersampled exports use the same lighting/material pipeline as the live viewport. 3× Ultra is available through 2048 px; 3000 px and 4096 px top out at 2× High to keep temporary GPU buffers within the production-safe 8192 px ceiling.
+                  PNG exports include the full square viewport with your current angle and zoom. 3× Ultra is available through 2048 px; 3000 px and 4096 px support up to 2× High.
                 </div>
                 {exportNotice && (
                   <div style={{ marginTop:8, padding:'7px 8px', borderRadius:6, background:'rgba(239,255,0,0.06)', border:'1px solid rgba(239,255,0,0.18)', color:'#cdd900', fontSize:9, lineHeight:1.4 }}>
