@@ -3538,6 +3538,8 @@ export default function HelmetBuilder({ demoMode = false }) {
   const cameraRef   = useRef(null);
   const rendererRef = useRef(null);
   const controlsRef = useRef(null);
+  const pendingCameraRestoreRef = useRef(null);
+  const [cameraRestoreRevision, setCameraRestoreRevision] = useState(0);
   const materialsRef = useRef({}); // materialName → THREE.Material[] (finish/env routing)
   const partsRef     = useRef({}); // normalized GLB part key → THREE.Material[] (color routing)
   const partObjectsRef = useRef({}); // normalized GLB part key → THREE.Object3D[] (visibility routing)
@@ -4963,6 +4965,66 @@ export default function HelmetBuilder({ demoMode = false }) {
     setActiveViewPreset(presetId);
   }, []);
 
+  const applySavedCameraSettings = useCallback((cameraSettings, allowPresetFallback = true) => {
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
+    if (!camera || !controls || !cameraSettings || typeof cameraSettings !== 'object') return false;
+
+    const hasPosition = Array.isArray(cameraSettings.position) && cameraSettings.position.length === 3;
+    const hasTarget = Array.isArray(cameraSettings.target) && cameraSettings.target.length === 3;
+
+    if (hasPosition) {
+      camera.position.fromArray(cameraSettings.position.map(Number));
+      if (Array.isArray(cameraSettings.up) && cameraSettings.up.length === 3) {
+        camera.up.fromArray(cameraSettings.up.map(Number));
+      }
+      if (Number.isFinite(Number(cameraSettings.fov))) camera.fov = Number(cameraSettings.fov);
+      if (Number.isFinite(Number(cameraSettings.zoom)) && Number(cameraSettings.zoom) > 0) {
+        camera.zoom = Number(cameraSettings.zoom);
+      }
+      if (hasTarget) controls.target.fromArray(cameraSettings.target.map(Number));
+
+      if (!hasTarget && Array.isArray(cameraSettings.quaternion) && cameraSettings.quaternion.length === 4) {
+        camera.quaternion.fromArray(cameraSettings.quaternion.map(Number));
+      } else {
+        camera.lookAt(controls.target);
+      }
+
+      camera.updateProjectionMatrix();
+      camera.updateMatrixWorld(true);
+      controls.update();
+      return true;
+    }
+
+    if (allowPresetFallback && cameraSettings.activeViewPreset && cameraSettings.activeViewPreset !== 'custom') {
+      applyViewPreset(cameraSettings.activeViewPreset);
+      return true;
+    }
+
+    return false;
+  }, [applyViewPreset]);
+
+  // Reapply restored framing after the model and renderer have fully settled.
+  useEffect(() => {
+    if (!loaded || !pendingCameraRestoreRef.current) return;
+    const settings = pendingCameraRestoreRef.current;
+    let secondFrame = null;
+    const firstFrame = requestAnimationFrame(() => {
+      applySavedCameraSettings(settings);
+      secondFrame = requestAnimationFrame(() => {
+        applySavedCameraSettings(settings);
+        if (pendingCameraRestoreRef.current === settings) {
+          pendingCameraRestoreRef.current = null;
+        }
+      });
+    });
+
+    return () => {
+      cancelAnimationFrame(firstFrame);
+      if (secondFrame != null) cancelAnimationFrame(secondFrame);
+    };
+  }, [loaded, cameraRestoreRevision, applySavedCameraSettings]);
+
   const applyDemoViewPreset = useCallback((presetId) => {
     if (controlsRef.current) controlsRef.current.autoRotate = false;
     applyViewPreset(presetId);
@@ -5115,6 +5177,9 @@ export default function HelmetBuilder({ demoMode = false }) {
     controls.minDistance = 1.5;
     controls.maxDistance = 8.0;
     controlsRef.current = controls;
+
+    // Once the user manually rotates, pans, or zooms, preserve that exact composition.
+    controls.addEventListener('start', () => setActiveViewPreset('custom'));
 
     // ── PREMIUM STUDIO LIGHTING RIG ───────────────────────────────────────────
     // HDRI supplies the overall image-based lighting/reflections. These large area
@@ -8202,7 +8267,10 @@ export default function HelmetBuilder({ demoMode = false }) {
         activeViewPreset,
         position: camera ? camera.position.toArray() : null,
         up: camera ? camera.up.toArray() : null,
+        quaternion: camera ? camera.quaternion.toArray() : null,
         target: controls ? controls.target.toArray() : null,
+        fov: camera ? camera.fov : 45,
+        zoom: camera ? camera.zoom : 1,
       },
       export: {
         resolution: exportResolution,
@@ -8548,19 +8616,10 @@ export default function HelmetBuilder({ demoMode = false }) {
     setExportSupersample(exportSettings.supersample ?? 2);
 
     const cameraSettings = snapshot.camera || {};
-    const camera = cameraRef.current;
-    const controls = controlsRef.current;
-    if (camera && Array.isArray(cameraSettings.position) && cameraSettings.position.length === 3) {
-      camera.position.fromArray(cameraSettings.position.map(Number));
-      if (Array.isArray(cameraSettings.up) && cameraSettings.up.length === 3) camera.up.fromArray(cameraSettings.up.map(Number));
-      if (controls && Array.isArray(cameraSettings.target) && cameraSettings.target.length === 3) controls.target.fromArray(cameraSettings.target.map(Number));
-      camera.lookAt(controls?.target || new THREE.Vector3(0, 0.05, 0));
-      camera.updateProjectionMatrix();
-      controls?.update();
-    } else if (cameraSettings.activeViewPreset) {
-      applyViewPreset(cameraSettings.activeViewPreset);
-    }
-    setActiveViewPreset(cameraSettings.activeViewPreset || 'sideA');
+    pendingCameraRestoreRef.current = cameraSettings;
+    applySavedCameraSettings(cameraSettings);
+    setCameraRestoreRevision(value => value + 1);
+    setActiveViewPreset(cameraSettings.activeViewPreset || 'custom');
 
     setDesignAssets(assetManifest);
 
@@ -8570,7 +8629,7 @@ export default function HelmetBuilder({ demoMode = false }) {
   }, [
     loadWrapFromSource, removeWrap, loadStripeDesignFromSource, removeStripeDesign,
     removeSideLogoUpload, removeRearCustomSticker, removeBumperLogo,
-    clearSideLogoUndoHistory, applyViewPreset, loadSavedArtworkImage, loadPrivateArtworkBlob,
+    clearSideLogoUndoHistory, applySavedCameraSettings, loadSavedArtworkImage, loadPrivateArtworkBlob,
   ]);
 
   // Landing-page demo: load one sanitized public snapshot exported from the normal
