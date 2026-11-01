@@ -1,0 +1,88 @@
+name: Reconcile Trey saved designs
+
+on:
+  push:
+    branches:
+      - fix/reconcile-axiom-saved-designs-camera
+    paths:
+      - .github/workflows/reconcile-trey-saved-designs.yml
+
+permissions:
+  contents: write
+
+jobs:
+  reconcile:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out Axiom repair branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: fix/reconcile-axiom-saved-designs-camera
+
+      - name: Configure Git
+        run: |
+          git config user.name "ProLine Builder Repair"
+          git config user.email "design@prolinemockups.com"
+
+      - name: Apply saved-camera restoration commit
+        shell: bash
+        run: |
+          set +e
+          git cherry-pick 1f73863fcc056dd112bb67f6d7d1d7f301abfb59
+          status=$?
+          if [ "$status" -ne 0 ]; then
+            echo "::group::Cherry-pick conflict summary"
+            git status --short
+            git diff --name-only --diff-filter=U
+            git diff --cc -- app/helmet/page.jsx | sed -n '1,1400p'
+            echo "::endgroup::"
+            exit "$status"
+          fi
+
+      - name: Verify saved-design compatibility gate
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('app/helmet/page.jsx')
+          text = path.read_text(encoding='utf-8')
+          error = 'This saved design is not compatible with the current Helmet Builder.'
+          if error not in text:
+              raise SystemExit('Compatibility error message not found; loader structure changed unexpectedly.')
+
+          version_three_signals = [
+              r'\bversion\s*:\s*3\b',
+              r'\[\s*1\s*,\s*2\s*,\s*3\s*\]',
+              r'\bversion\s*===?\s*3\b',
+              r'\bversion\s*!==?\s*3\b',
+          ]
+          if not any(re.search(pattern, text) for pattern in version_three_signals):
+              raise SystemExit('No version-3 snapshot support signal found in Helmet Builder source.')
+
+          for required in ('axiom-a', 'axiom-b', 'HELMET_CONFIGS'):
+              if required not in text:
+                  raise SystemExit(f'Missing Axiom model support marker: {required}')
+
+          print('Axiom models and version-3 snapshot support are present.')
+          PY
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Production build
+        run: npm run build
+
+      - name: Remove one-time repair workflow and push
+        shell: bash
+        run: |
+          rm -f .github/workflows/reconcile-trey-saved-designs.yml
+          git add -A
+          git commit -m "Remove one-time Trey reconciliation workflow"
+          git push origin HEAD:fix/reconcile-axiom-saved-designs-camera
