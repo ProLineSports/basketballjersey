@@ -146,8 +146,13 @@ jobs:
       - name: Lint Helmet Builder
         run: npx eslint app/helmet
 
-      - name: Production build
+      - name: Compile production bundle in CI
+        env:
+          STRIPE_SECRET_KEY: sk_test_ci_placeholder
         run: npm run build
+
+      - name: Record production branch reconciliation
+        run: git merge -s ours origin/main -m "Reconcile production camera restore with Axiom Helmet Builder"
 
       - name: Remove one-time repair workflow and push
         shell: bash
