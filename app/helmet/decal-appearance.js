@@ -1,0 +1,74 @@
+function matchingCanvas(source) {
+  const canvas = document.createElement('canvas');
+  canvas.width = source.width; canvas.height = source.height;
+  return canvas;
+}
+
+// Border opacity controls its visible tint, not the physical film silhouette.
+// Keep that silhouette independent so a clear border still catches light and
+// casts its contact shadow from its outer edge.
+export function strokeDecalCanvas(source, { enabled = false, thickness = 0, color = '#ffffff', opacity = 1 } = {}) {
+  if (!enabled || thickness <= 0) return { artwork:source, footprint:null };
+  const footprint = matchingCanvas(source), mask = footprint.getContext('2d');
+  const steps = Math.max(12, Math.ceil(thickness * 12));
+  for (let i = 0; i < steps; i++) {
+    const angle = i / steps * Math.PI * 2;
+    mask.drawImage(source, Math.cos(angle) * thickness, Math.sin(angle) * thickness);
+  }
+  mask.drawImage(source, 0, 0);
+  mask.globalCompositeOperation = 'source-in';
+  mask.fillStyle = '#ffffff'; mask.fillRect(0, 0, footprint.width, footprint.height);
+
+  const artwork = matchingCanvas(source), art = artwork.getContext('2d');
+  if (opacity > 0) {
+    const border = matchingCanvas(source), tint = border.getContext('2d');
+    tint.drawImage(footprint, 0, 0);
+    tint.globalCompositeOperation = 'destination-out'; tint.drawImage(source, 0, 0);
+    tint.globalCompositeOperation = 'source-in';
+    tint.fillStyle = color; tint.fillRect(0, 0, border.width, border.height);
+    // Apply tint opacity once during the final draw, separate from masking.
+    art.globalAlpha = opacity; art.drawImage(border, 0, 0); art.globalAlpha = 1;
+  }
+  art.drawImage(source, 0, 0);
+  return { artwork, footprint };
+}
+
+// Artwork-space edge shading follows the film outline, including holes in letters.
+// All decal and bumper artwork uses the same fixed two-pixel contact edge.
+export const DECAL_EDGE_SETTINGS = Object.freeze({ distance:2, blur:2, shadowOpacity:0.85, highlightOpacity:0.90 });
+export function raisedDecalCanvases(source, artworkHeight, { footprint = null } = {}) {
+  const canvas = () => matchingCanvas(source);
+  const boundary = footprint || source;
+  const edge = DECAL_EDGE_SETTINGS.distance;
+  const innerEdge = (dx, dy, color, opacity) => {
+    const result = canvas(), ctx = result.getContext('2d');
+    ctx.drawImage(boundary, 0, 0);
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.drawImage(boundary, dx, dy);
+    ctx.globalCompositeOperation = 'source-in';
+    ctx.globalAlpha = opacity; ctx.fillStyle = color;
+    ctx.fillRect(0, 0, result.width, result.height);
+    return result;
+  };
+  const artwork = canvas(), artCtx = artwork.getContext('2d');
+  artCtx.drawImage(source, 0, 0);
+  // Apply opacity once, after masking, to avoid squaring alpha in source-in.
+  artCtx.globalAlpha = DECAL_EDGE_SETTINGS.highlightOpacity;
+  artCtx.drawImage(innerEdge(-edge, edge, '#ffffff', 1), 0, 0);
+  artCtx.globalAlpha = 1;
+  // Inner-edge compositing adds opacity at antialiased boundaries; restore the
+  // film silhouette. A transparent stroke still retains its thin edge reflection.
+  artCtx.globalCompositeOperation = 'destination-in'; artCtx.drawImage(boundary, 0, 0);
+  const shadow = canvas(), shadowCtx = shadow.getContext('2d');
+  const distance = DECAL_EDGE_SETTINGS.distance;
+  shadowCtx.filter = `blur(${DECAL_EDGE_SETTINGS.blur}px)`;
+  shadowCtx.drawImage(boundary, -distance, distance);
+  shadowCtx.filter = 'none'; shadowCtx.globalCompositeOperation = 'source-in';
+  shadowCtx.globalAlpha = 1; shadowCtx.fillStyle = '#000000';
+  shadowCtx.fillRect(0, 0, shadow.width, shadow.height);
+  shadowCtx.globalAlpha = 1; shadowCtx.globalCompositeOperation = 'destination-out';
+  shadowCtx.drawImage(boundary, 0, 0);
+  const contactShadow = canvas(), contactCtx = contactShadow.getContext('2d');
+  contactCtx.globalAlpha = DECAL_EDGE_SETTINGS.shadowOpacity; contactCtx.drawImage(shadow, 0, 0);
+  return { artwork, shadow:contactShadow };
+}
